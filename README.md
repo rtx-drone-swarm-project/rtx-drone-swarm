@@ -1,4 +1,4 @@
-# RTX – AI-Based Drone Swarm Command and Control
+# RTX – AI-Based Drone Swarm in Search and Rescue
 
 ## Team
 - Louie Gutierrez
