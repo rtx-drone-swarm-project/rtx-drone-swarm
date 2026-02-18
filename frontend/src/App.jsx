@@ -50,9 +50,10 @@ function formatElapsed(startedAt) {
 }
 
 export default function App() {
+  const apiPort = import.meta.env.VITE_API_PORT || "8000";
   const apiBase = useMemo(
-    () => `${window.location.protocol}//${window.location.hostname}:8000`,
-    []
+    () => `${window.location.protocol}//${window.location.hostname}:${apiPort}`,
+    [apiPort]
   );
 
   const [alerts, setAlerts] = useState(["System ready."]);
@@ -88,7 +89,7 @@ export default function App() {
 
   useEffect(() => {
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${scheme}://${window.location.hostname}:8000/ws`);
+    const ws = new WebSocket(`${scheme}://${window.location.hostname}:${apiPort}/ws`);
 
     ws.onopen = () => pushAlert("WebSocket connected.");
     ws.onerror = () => pushAlert("WebSocket error.");
@@ -116,7 +117,7 @@ export default function App() {
     };
 
     return () => ws.close();
-  }, []);
+  }, [apiPort]);
 
   async function startMission() {
     if (!selectedBounds) {

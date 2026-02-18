@@ -7,10 +7,14 @@ Usage:
   python scripts/swarm_command.py disarm
   python scripts/swarm_command.py takeoff 5
   python scripts/swarm_command.py loiter   # same as hover
+  python scripts/swarm_command.py hover --host <remote_ip>
+  python scripts/swarm_command.py arm --host <remote_ip> --port 14550 --count 15
 
 Requires: pymavlink. Connects to UDP 14550..14564 (MAVProxy outputs to these ports).
+For remote connections, use --host to specify the cloud SITL server IP.
 """
 
+import argparse
 import sys
 import time
 from pathlib import Path
@@ -20,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import ardupilotmega as mav
 
-HOST = "127.0.0.1"
 BASE_PORT = 14550
 COUNT = 15
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs" / "swarm"
@@ -38,11 +41,21 @@ def _log(msg: str) -> None:
             f.write(line)
 
 
-def connect_all(count: int = COUNT) -> list:
+def connect_all(host: str = "127.0.0.1", base_port: int = BASE_PORT, count: int = COUNT) -> list:
+    """
+    Connect to all SITL drones.
+    Args:
+        host: Hostname or IP of the SITL server (default: localhost)
+        base_port: Base UDP port (default: 14550)
+        count: Number of drones (default: 15)
+    """
     conns = []
     for i in range(count):
-        port = BASE_PORT + i
-        addr = f"udpin:0.0.0.0:{port}"
+        port = base_port + i
+        if host in ("127.0.0.1", "localhost"):
+            addr = f"udpin:0.0.0.0:{port}"
+        else:
+            addr = f"udp:{host}:{port}"
         try:
             m = mavutil.mavlink_connection(addr, input=False)
             m.wait_heartbeat(timeout=3)
@@ -60,15 +73,23 @@ def send_command(conn, cmd_id: int, p1: float = 0, p2: float = 0, p3: float = 0,
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
-    cmd = sys.argv[1].lower()
-    arg = float(sys.argv[2]) if len(sys.argv) > 2 else 0
+    parser = argparse.ArgumentParser(
+        description="Send commands to SITL drone swarm via MAVLink",
+        epilog="Example: python scripts/swarm_command.py arm --host 192.168.1.100",
+    )
+    parser.add_argument("command", help="arm, disarm, hover, loiter, takeoff, rtl, land")
+    parser.add_argument("arg", nargs="?", type=float, default=0, help="Optional arg (e.g. altitude for takeoff)")
+    parser.add_argument("--host", default="127.0.0.1", help="SITL server IP or hostname")
+    parser.add_argument("--port", type=int, default=BASE_PORT, help=f"Base UDP port (default: {BASE_PORT})")
+    parser.add_argument("--count", type=int, default=COUNT, help=f"Number of drones (default: {COUNT})")
+    args = parser.parse_args()
 
-    conns = connect_all()
+    cmd = args.command.lower()
+    arg = args.arg
+
+    conns = connect_all(host=args.host, base_port=args.port, count=args.count)
     if not conns:
-        _log("No drones connected. Start SITL swarm first.")
+        _log(f"No drones connected to {args.host}:{args.port}..{args.port + args.count - 1}. Start SITL swarm first.")
         sys.exit(1)
 
     _log(f"Global command: {cmd} (to {len(conns)} drones)")

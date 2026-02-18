@@ -2,12 +2,14 @@ services:
   backend:
     build: ./backend
     ports:
-      - "8000:8000"
+      - "8000:8000"   # Change to "8001:8000" if 8000 is in use
     restart: unless-stopped
   frontend:
     build: ./frontend
     ports:
-      - "5173:5173"
+      - "5173:5173"   # Change to "5174:5173" if 5173 is in use
+    environment:
+      - VITE_API_PORT=8000   # Match backend host port (e.g. 8001 if backend uses 8001)
     depends_on:
       - backend
     restart: unless-stopped
