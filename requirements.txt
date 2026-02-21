@@ -1,0 +1,2 @@
+# Scripts (e.g. swarm_command.py). Backend has its own in backend/requirements.txt.
+pymavlink==2.4.49
