@@ -28,6 +28,10 @@ PORT_STEP = 10  # sim_vehicle.py --count uses 14550, 14560, 14570, ... (not 1455
 COUNT = 15
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs" / "swarm"
 CLOUD_LOG = Path(__file__).resolve().parent.parent / "logs" / "cloud"
+STATUS_SAMPLE_SECONDS = 2.5
+COMMAND_RETRIES = 2
+COMMAND_RETRY_DELAY_SECONDS = 0.2
+VERIFY_TIMEOUT_SECONDS = 4.0
 
 # ArduCopter custom_mode -> name (subset)
 COPTER_MODE_NAMES = {
@@ -72,7 +76,8 @@ def connect_all(host: str = "127.0.0.1", base_port: int = BASE_PORT, port_step: 
         else:
             addr = f"udp:{host}:{port}"
         try:
-            m = mavutil.mavlink_connection(addr, input=False)
+            # Keep defaults so this connection can both receive telemetry and send commands.
+            m = mavutil.mavlink_connection(addr, source_system=255)
             m.wait_heartbeat(timeout=5)
             conns.append((i, m))
         except Exception as e:
@@ -80,11 +85,49 @@ def connect_all(host: str = "127.0.0.1", base_port: int = BASE_PORT, port_step: 
     return conns
 
 
-def send_command(conn, cmd_id: int, p1: float = 0, p2: float = 0, p3: float = 0, p4: float = 0, p5: float = 0, p6: float = 0, p7: float = 0):
+def send_command(
+    conn,
+    cmd_id: int,
+    target_system: int,
+    target_component: int = 1,
+    p1: float = 0,
+    p2: float = 0,
+    p3: float = 0,
+    p4: float = 0,
+    p5: float = 0,
+    p6: float = 0,
+    p7: float = 0,
+):
     conn.mav.command_long_send(
-        conn.target_system, conn.target_component,
+        target_system,
+        target_component,
         cmd_id, 0, p1, p2, p3, p4, p5, p6, p7
     )
+
+
+def collect_heartbeat_states(conns: list, count: int, timeout: float = STATUS_SAMPLE_SECONDS) -> dict:
+    """
+    Aggregate latest HEARTBEAT by sysid across all links.
+    Returns {sysid: {"armed": bool, "mode_name": str}} for sysid in 1..count when seen.
+    """
+    states = {}
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        got_any = False
+        for _, conn in conns:
+            msg = conn.recv_match(type="HEARTBEAT", blocking=False)
+            while msg is not None:
+                got_any = True
+                sysid = int(msg.get_srcSystem())
+                if 1 <= sysid <= count:
+                    states[sysid] = {
+                        "armed": bool(msg.base_mode & mav.MAV_MODE_FLAG_SAFETY_ARMED),
+                        "mode_name": COPTER_MODE_NAMES.get(msg.custom_mode, f"({msg.custom_mode})"),
+                    }
+                msg = conn.recv_match(type="HEARTBEAT", blocking=False)
+        if not got_any:
+            time.sleep(0.05)
+    return states
 
 
 def run_status(host: str, base_port: int, port_step: int, count: int) -> None:
@@ -94,27 +137,36 @@ def run_status(host: str, base_port: int, port_step: int, count: int) -> None:
         last_port = base_port + (count - 1) * port_step
         print(f"No drones at {host}:{base_port}..{last_port} (step {port_step}). Start SITL swarm first.")
         return
+    states = collect_heartbeat_states(conns, count=count, timeout=STATUS_SAMPLE_SECONDS)
     print(f"{'#':<4} {'sysid':<6} {'armed':<6} {'mode':<12}")
     print("-" * 32)
-    for i, conn in conns:
-        # Next HEARTBEAT is ~1 Hz; wait up to 4 s (first was consumed in wait_heartbeat)
-        msg = conn.recv_match(type="HEARTBEAT", blocking=True, timeout=4)
-        if msg is None:
-            print(f"{i:<4} {conn.target_system:<6} {'?':<6} {'(no heartbeat)':<12}")
+    for sysid in range(1, count + 1):
+        state = states.get(sysid)
+        if state is None:
+            print(f"{sysid:<4} {sysid:<6} {'?':<6} {'(no heartbeat)':<12}")
             continue
-        armed = "yes" if (msg.base_mode & mav.MAV_MODE_FLAG_SAFETY_ARMED) else "no"
-        mode_name = COPTER_MODE_NAMES.get(msg.custom_mode, f"({msg.custom_mode})")
-        print(f"{i:<4} {conn.target_system:<6} {armed:<6} {mode_name:<12}")
-    print(f"\nTotal: {len(conns)} drones.")
+        armed = "yes" if state["armed"] else "no"
+        print(f"{sysid:<4} {sysid:<6} {armed:<6} {state['mode_name']:<12}")
+    if len(states) < count:
+        missing = [s for s in range(1, count + 1) if s not in states]
+        print(f"\nWarning: saw {len(states)}/{count} unique sysids. Missing: {missing}")
+    print(f"\nTotal links: {len(conns)}. Drones with heartbeat: {len(states)}/{count}.")
 
 
-def wait_command_ack(conn, cmd_id: int, timeout: float = 2.0) -> bool:
-    """Wait for COMMAND_ACK for the given command. Returns True if ACK result is success."""
+def wait_command_ack(conns: list, target_system: int, cmd_id: int, timeout: float = 2.0) -> bool:
+    """Wait for COMMAND_ACK from target_system for cmd_id. Returns True on ACCEPTED."""
     t0 = time.monotonic()
     while (time.monotonic() - t0) < timeout:
-        msg = conn.recv_match(type="COMMAND_ACK", blocking=True, timeout=0.5)
-        if msg is not None and msg.command == cmd_id:
-            return msg.result == mav.MAV_RESULT_ACCEPTED
+        got_any = False
+        for _, conn in conns:
+            msg = conn.recv_match(type="COMMAND_ACK", blocking=False)
+            while msg is not None:
+                got_any = True
+                if int(msg.get_srcSystem()) == target_system and msg.command == cmd_id:
+                    return msg.result == mav.MAV_RESULT_ACCEPTED
+                msg = conn.recv_match(type="COMMAND_ACK", blocking=False)
+        if not got_any:
+            time.sleep(0.05)
     return False
 
 
@@ -130,6 +182,8 @@ def main() -> None:
     parser.add_argument("--port-step", type=int, default=PORT_STEP, dest="port_step", help=f"Port step for multi-vehicle (default: {PORT_STEP}; use 10 for sim_vehicle.py --count)")
     parser.add_argument("--count", type=int, default=COUNT, help=f"Number of drones (default: {COUNT})")
     parser.add_argument("--wait-ack", action="store_true", help="After sending command, wait for COMMAND_ACK from each drone")
+    parser.add_argument("--retries", type=int, default=COMMAND_RETRIES, help=f"Resend passes for reliability (default: {COMMAND_RETRIES})")
+    parser.add_argument("--no-verify", action="store_true", help="Skip post-command verification from HEARTBEAT state")
     args = parser.parse_args()
 
     cmd = args.command.lower()
@@ -147,37 +201,79 @@ def main() -> None:
 
     _log(f"Global command: {cmd} (to {len(conns)} drones)")
 
-    cmd_id = None
-    for i, conn in conns:
-        try:
-            if cmd in ("arm", "arm_throttle"):
-                cmd_id = mav.MAV_CMD_COMPONENT_ARM_DISARM
-                send_command(conn, cmd_id, 1, 21196)
-            elif cmd == "disarm":
-                cmd_id = mav.MAV_CMD_COMPONENT_ARM_DISARM
-                send_command(conn, cmd_id, 0, 0)
-            elif cmd in ("hover", "loiter"):
-                cmd_id = mav.MAV_CMD_DO_SET_MODE
-                send_command(conn, cmd_id, 1, 5, 0, 0, 0, 0, 0)
-            elif cmd == "takeoff":
-                cmd_id = mav.MAV_CMD_NAV_TAKEOFF
-                send_command(conn, cmd_id, 0, 0, 0, 0, 0, 0, arg or 5)
-            elif cmd == "rtl":
-                cmd_id = mav.MAV_CMD_DO_SET_MODE
-                send_command(conn, cmd_id, 1, 6, 0, 0, 0, 0, 0)
-            elif cmd == "land":
-                cmd_id = mav.MAV_CMD_DO_SET_MODE
-                send_command(conn, cmd_id, 1, 9, 0, 0, 0, 0, 0)
-            else:
-                _log(f"Unknown command: {cmd}")
-                sys.exit(1)
-            if args.wait_ack and cmd_id is not None:
-                ok = wait_command_ack(conn, cmd_id)
-                print(f"  drone {i} (sysid {conn.target_system}): {'ACK OK' if ok else 'ACK timeout/fail'}")
-        except Exception as e:
-            _log(f"drone {i}: {e}")
+    if cmd not in ("arm", "arm_throttle", "disarm", "hover", "loiter", "takeoff", "rtl", "land"):
+        _log(f"Unknown command: {cmd}")
+        sys.exit(1)
 
-    _log("Command sent to all drones.")
+    retries = max(1, args.retries)
+    sent_targets = set()
+    ack_results = {}
+    for attempt in range(retries):
+        for target_system in range(1, args.count + 1):
+            conn = conns[(target_system - 1) % len(conns)][1]
+            try:
+                if cmd in ("arm", "arm_throttle"):
+                    send_command(conn, mav.MAV_CMD_COMPONENT_ARM_DISARM, target_system, 1, 1, 21196)
+                elif cmd == "disarm":
+                    send_command(conn, mav.MAV_CMD_COMPONENT_ARM_DISARM, target_system, 1, 0, 0)
+                elif cmd in ("hover", "loiter"):
+                    # LOITER mode = 3 in ArduCopter.
+                    send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, 1, 1, 3, 0, 0, 0, 0, 0)
+                elif cmd == "takeoff":
+                    # Auto-arm + GUIDED before takeoff for better reliability in SITL.
+                    send_command(conn, mav.MAV_CMD_COMPONENT_ARM_DISARM, target_system, 1, 1, 21196)
+                    send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, 1, 1, 5, 0, 0, 0, 0, 0)
+                    send_command(conn, mav.MAV_CMD_NAV_TAKEOFF, target_system, 1, 0, 0, 0, 0, 0, 0, arg or 5)
+                elif cmd == "rtl":
+                    send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, 1, 1, 6, 0, 0, 0, 0, 0)
+                elif cmd == "land":
+                    send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, 1, 1, 9, 0, 0, 0, 0, 0)
+                sent_targets.add(target_system)
+            except Exception as e:
+                _log(f"drone {target_system}: {e}")
+        if attempt < retries - 1:
+            time.sleep(COMMAND_RETRY_DELAY_SECONDS)
+
+    if args.wait_ack:
+        ack_cmd = mav.MAV_CMD_NAV_TAKEOFF if cmd == "takeoff" else mav.MAV_CMD_COMPONENT_ARM_DISARM
+        if cmd in ("hover", "loiter", "rtl", "land"):
+            ack_cmd = mav.MAV_CMD_DO_SET_MODE
+        for target_system in range(1, args.count + 1):
+            ok = wait_command_ack(conns, target_system=target_system, cmd_id=ack_cmd)
+            ack_results[target_system] = ok
+            print(f"  sysid {target_system}: {'ACK OK' if ok else 'ACK timeout/fail'}")
+
+    missing_targets = [s for s in range(1, args.count + 1) if s not in sent_targets]
+    if missing_targets:
+        _log(f"Command send incomplete; missing target sysids: {missing_targets}")
+    else:
+        _log(f"Command sent to {len(sent_targets)} target sysids (retries={retries}).")
+
+    if not args.no_verify:
+        states = collect_heartbeat_states(conns, count=args.count, timeout=VERIFY_TIMEOUT_SECONDS)
+        failed = []
+        for sysid in range(1, args.count + 1):
+            state = states.get(sysid)
+            if state is None:
+                failed.append(sysid)
+                continue
+            if cmd in ("arm", "arm_throttle") and not state["armed"]:
+                failed.append(sysid)
+            elif cmd == "disarm" and state["armed"]:
+                failed.append(sysid)
+            elif cmd in ("hover", "loiter") and state["mode_name"] != "LOITER":
+                failed.append(sysid)
+            elif cmd == "takeoff" and (not state["armed"] or state["mode_name"] != "GUIDED"):
+                failed.append(sysid)
+            elif cmd == "rtl" and state["mode_name"] != "RTL":
+                failed.append(sysid)
+            elif cmd == "land" and state["mode_name"] != "LAND":
+                failed.append(sysid)
+
+        if failed:
+            _log(f"Post-check failed for sysids: {failed}")
+        else:
+            _log("Post-check passed for all target sysids.")
 
 
 if __name__ == "__main__":
