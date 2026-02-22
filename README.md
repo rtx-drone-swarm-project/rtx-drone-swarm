@@ -16,6 +16,100 @@ Sponsor Liaisons: Simon Wong, Alex Joseph
 Faculty Advisor: Prof. Gago-Masague
 
 
+# ArduPilot SITL macOS Setup
+
+- **Official docs:** [Building setup (MacOSX)](https://ardupilot.org/dev/docs/building-setup-mac.html) and [SITL setup landing page](https://ardupilot.org/dev/docs/SITL-setup-landingpage.html).
+- **To run this project’s swarm:** do the setup below, then clone this repo and follow **Quickstart** from the repo root (use `./scripts/start_sitl_swarm.sh 15`). Also install MAVProxy and script deps (see below).
+
+## Prerequisites
+
+### 1. Xcode Command Line Tools
+
+```bash
+xcode-select --install
+```
+
+### 2. Homebrew
+
+Install [Homebrew](https://brew.sh/) if needed:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+### 3. Clone ArduPilot
+
+```bash
+cd ~
+git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git
+cd ardupilot
+```
+
+### 4. Install ArduPilot dependencies (recommended)
+
+From the `ardupilot` directory:
+
+```bash
+sh ./Tools/environment_install/install-prereqs-mac.sh
+```
+
+Then reload your shell (or run `source ~/.zshrc` or `source ~/.bash_profile`).
+
+**Manual alternative** (if the script fails): install build tools and Python deps:
+
+```bash
+brew update
+brew install genromfs gcc-arm-none-eabi gawk
+# Python deps (use pip3 if you use Python 3 by default)
+pip3 install pyserial future empy
+```
+
+### 5. Build ArduPilot SITL
+
+From the `ardupilot` directory, configure and build (see [BUILD.md](https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md) in that repo):
+
+```bash
+./waf configure --board sitl
+./waf copter
+```
+
+### 6. MAVProxy and project Python deps
+
+MAVProxy is required for the swarm script. On macOS you can use `readline` from Homebrew:
+
+```bash
+brew install readline
+pip3 install MAVProxy future pyserial empy
+```
+
+If you prefer the same deps as Linux: `pip3 install MAVProxy future gnureadline` (may need `brew install readline` first).
+
+From **this project’s repo root**, install script/backend deps:
+
+```bash
+pip3 install -r requirements.txt
+pip3 install -r backend/requirements.txt
+```
+
+## Testing SITL (single copter)
+
+```bash
+cd ~/ardupilot/ArduCopter
+../Tools/autotest/sim_vehicle.py -v ArduCopter -f quad --map --console
+```
+
+In the MAVProxy console:
+
+```bash
+mode guided
+arm throttle
+takeoff 40
+```
+
+To land: `mode rtl` or `mode land`.
+
+---
+
 # ArduPilot SITL Windows Setup
 - Website Instructions - https://ardupilot.org/dev/docs/sitl-on-windows-wsl.html  
 - **To run this project’s swarm:** do the setup below in WSL, then clone this repo and follow **Quickstart** from the repo root (use `./scripts/start_sitl_swarm.sh 15` in WSL). Also install MAVProxy: `pip install MAVProxy future gnureadline`.
@@ -85,7 +179,7 @@ mode rtl
 
 ## Quickstart (See something running)
 
-**Prerequisites for the swarm:** ArduPilot must be built and on your machine (see **ArduPilot SITL Windows Setup** above for WSL, or [ArduPilot dev docs](https://ardupilot.org/dev/index.html) for macOS/Linux). You also need **MAVProxy** and its deps (`pip install MAVProxy future gnureadline`). Install script deps from the repo root: `pip install -r requirements.txt`. All commands below are from the **repo root**.
+**Prerequisites for the swarm:** ArduPilot must be built and on your machine (see **ArduPilot SITL macOS Setup** or **ArduPilot SITL Windows Setup** above, or [ArduPilot dev docs](https://ardupilot.org/dev/index.html) for Linux). You also need **MAVProxy** and its deps (`pip install MAVProxy future gnureadline` on Linux/WSL; on macOS see the macOS section). Install script deps from the repo root: `pip install -r requirements.txt`. All commands below are from the **repo root**.
 
 ### 1) Run a SITL swarm (n drones)
 In a terminal, start the swarm and leave it running:
