@@ -200,6 +200,7 @@ See `scripts/swarm_command.py` for more commands (disarm, rtl, etc.).
 **Stop the swarm:** In the terminal where the swarm is running, press **Ctrl+C**. To kill from elsewhere: `pkill -f arducopter; pkill -f mavproxy`.
 
 ### 3) (Optional) Run the web app
+- Please ensure that [Docker Desktop](https://www.docker.com/products/docker-desktop/) is downloaded and running in order to start the web app side.
 ```bash
 docker compose up --build
 ```
