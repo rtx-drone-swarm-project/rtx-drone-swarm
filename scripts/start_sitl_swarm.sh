@@ -32,10 +32,23 @@ echo ""
 cd "$ARDUPILOT_PATH"
 # Use swarm mode: --count, --auto-sysid, --location, --auto-offset-line so they don't overlap
 # Omit --map --console for headless (no GUI). MAVProxy runs for MAVLink on UDP 14550, 14551, ...
+
+# Base port and port step
+BASE_PORT=14550
+PORT_STEP=10
+
+# Construct --out parameters for each drone
+OUT_ARGS=""
+for ((i=0;i<COUNT;i++)); do
+  PORT=$((BASE_PORT + i*PORT_STEP))
+  OUT_ARGS+=" --out 127.0.0.1:$PORT"
+done
+
+# Start SITL with separate UDP outputs for each drone
 ./Tools/autotest/sim_vehicle.py -v ArduCopter -f quad \
   --count "$COUNT" \
   --auto-sysid \
   --location CMAC \
   --auto-offset-line 90,10 \
-  -w \
+  -w $OUT_ARGS \
   2>&1 | tee "$SWARM_LOG"
