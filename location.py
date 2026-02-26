@@ -10,15 +10,6 @@ def get_drones_locations():
 
     for conn in conns:
         # Request GPS position
-        conn.mav.command_long_send(
-            conn.target_system,
-            conn.target_component,
-            mavutil.mavlink.MAV_CMD_REQUEST_MESSAGE,
-            0,
-            mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
-            0, 0, 0, 0, 0, 0
-        )
-
         send_command(conn, mavutil.mavlink.MAV_CMD_REQUEST_MESSAGE, p1=mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT)
 
         msg = conn.recv_match(type='GLOBAL_POSITION_INT', blocking=True)
