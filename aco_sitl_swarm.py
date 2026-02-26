@@ -197,7 +197,7 @@ if __name__ == "__main__":
             "--home",     home_position(i, NUM_DRONES, ORIGIN_LAT, ORIGIN_LON),
             "--out",      f"127.0.0.1:{port}",
             "--out",      f"127.0.0.1:{port + VIZ_OFFSET}",  # visualizer stream
-            "--map"
+            "--no-gui"
         ]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         sitl_procs.append(proc)
@@ -217,15 +217,24 @@ if __name__ == "__main__":
         masters.append(master)
         print(f"  Port {port} bound")
 
-    print("\nWaiting for heartbeats...")
+    print("\nWaiting for heartbeats (this can take 30-60s per drone while SITL boots)...")
     for i, master in enumerate(masters):
-        # Keep waiting until sysid is non-zero — sysid=0 means SITL still booting
-        while True:
-            master.wait_heartbeat(timeout=30)
+        deadline = time.time() + 120  # 2 min max per drone
+        got_hb = False
+        while time.time() < deadline:
+            hb = master.recv_match(type="HEARTBEAT", blocking=True, timeout=5)
+            if hb is None:
+                print(f"  Drone {i+1}: still waiting...")
+                continue
             if master.target_system != 0:
+                got_hb = True
                 break
-            time.sleep(0.5)
-        print(f"  Drone {i+1} heartbeat received (sysid={master.target_system})")
+            print(f"  Drone {i+1}: sysid=0, SITL still booting...")
+            time.sleep(1)
+        if got_hb:
+            print(f"  Drone {i+1} heartbeat received (sysid={master.target_system})")
+        else:
+            print(f"  Drone {i+1}: WARNING — no heartbeat after 2 min, continuing anyway")
 
     print("All drones initialized.\n")
 
