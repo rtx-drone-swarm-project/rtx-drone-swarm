@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CircleMarker, MapContainer, Marker, Rectangle, TileLayer, useMapEvents } from "react-leaflet";
 
-const DEFAULT_CENTER = [-37.5, 143.2];
+const DEFAULT_CENTER = [33.5, -117.2];
 const DEFAULT_ZOOM = 12;
 const HALF_SIDE_KM = 5; // 10km x 10km = 100 km^2
 
@@ -80,6 +80,26 @@ export default function App() {
     return `${Math.round(values.reduce((a, b) => a + b, 0) / values.length)}%`;
   }, [telemetry]);
 
+  const validDrones = useMemo(
+    () =>
+      telemetry
+        .map((d) => {
+          const latNum = Number(d?.lat);
+          const lonNum = Number(d?.lon);
+          if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) return null;
+
+          const drone = { id: d?.id, lat: latNum, lon: lonNum };
+          const altNum = Number(d?.alt);
+          const headingNum = Number(d?.heading);
+          if (Number.isFinite(altNum)) drone.alt = altNum;
+          if (Number.isFinite(headingNum)) drone.heading = headingNum;
+          return drone;
+        })
+        .filter(Boolean),
+    [telemetry]
+  );
+  const validDroneCount = validDrones.length;
+
   useEffect(() => {
     const interval = setInterval(() => {
       setElapsed(formatElapsed(missionStartedAt));
@@ -89,7 +109,12 @@ export default function App() {
 
   useEffect(() => {
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${scheme}://${window.location.hostname}:${apiPort}/ws`);
+    // In dev, use same-origin so Vite proxies /ws to backend (fixes Docker + avoids CORS)
+    const wsHost =
+      import.meta.env.DEV && typeof window !== "undefined"
+        ? window.location.host
+        : `${window.location.hostname}:${apiPort}`;
+    const ws = new WebSocket(`${scheme}://${wsHost}/ws`);
 
     ws.onopen = () => pushAlert("WebSocket connected.");
     ws.onerror = () => pushAlert("WebSocket error.");
@@ -124,6 +149,9 @@ export default function App() {
       pushAlert("Click the map first to place a marker and auto-select 100km².");
       return;
     }
+    if (validDroneCount < 15) {
+      pushAlert(`Warning: only ${validDroneCount} valid drones available; mission start continuing.`);
+    }
     try {
       const createRes = await fetch(`${apiBase}/missions`, {
         method: "POST",
@@ -131,7 +159,8 @@ export default function App() {
         body: JSON.stringify({
           name: `SAR-${new Date().toISOString()}`,
           bounds: selectedBounds,
-          drone_count: 15
+          drones: validDrones,
+          hikers: [] // For simplicity, not allowing manual hiker input in UI; backend can simulate hikers as needed
         })
       });
       if (!createRes.ok) throw new Error(await createRes.text());
@@ -199,6 +228,7 @@ export default function App() {
           <h3>Swarm Status</h3>
           <div>Time Elapsed: {elapsed}</div>
           <div>Active Drones: {telemetry.length}</div>
+          <div>Valid Drones: {validDroneCount}</div>
           <div>Search Status: {searchStatus}</div>
           <div>Battery: {averageBattery}</div>
           <div>Latency: live</div>
@@ -218,7 +248,18 @@ export default function App() {
 
         <section className="panel actions">
           <h3>Actions</h3>
-          <button onClick={startMission}>Search Area</button>
+          <button
+            onClick={startMission}
+            disabled={!selectedBounds}
+            title={!selectedBounds ? "Click the map to select a search area first." : ""}
+          >
+            Search Area
+          </button>
+          {validDroneCount < 15 && (
+            <div style={{ color: "#b35c00", fontSize: "0.9rem" }}>
+              Warning: only {validDroneCount} valid drones in telemetry (15 recommended).
+            </div>
+          )}
           <button className="danger" onClick={stopMission}>Stop Mission</button>
         </section>
 
