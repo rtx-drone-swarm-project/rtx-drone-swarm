@@ -159,7 +159,8 @@ export default function App() {
         body: JSON.stringify({
           name: `SAR-${new Date().toISOString()}`,
           bounds: selectedBounds,
-          drones: validDrones
+          drones: validDrones,
+          hikers: [] // For simplicity, not allowing manual hiker input in UI; backend can simulate hikers as needed
         })
       });
       if (!createRes.ok) throw new Error(await createRes.text());
