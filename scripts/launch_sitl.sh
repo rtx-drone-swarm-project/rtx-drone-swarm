@@ -41,5 +41,5 @@ cd "$ARDUPILOT_PATH"
   --auto-sysid \
   --location CMAC \
   --auto-offset-line 90,10 \
-   --mavproxy-args="--cmd=\"module load swarm\"" \
+  --mavproxy-args="--cmd=\"module load swarm\"" \
   2>&1 | tee "$SWARM_LOG"
