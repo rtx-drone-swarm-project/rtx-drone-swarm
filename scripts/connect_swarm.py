@@ -16,6 +16,16 @@ class Drone:
         self.index = index
         self.comp = conn.target_component
 
+        self.last_hb = None
+        self.last_hud = None
+        self.last_gps = None
+
+    def send_command(self, command, params=None, wait_ack=True, timeout=3):
+        if params is None:
+            params = [0] * 7
+
+        self.conn.mav.command_long_send(self.sysid, self.comp, command, 0, *(params[:7]))
+
     def set_mode(self, mode_name):
         mode_map = self.conn.mode_mapping()
         if mode_name not in mode_map:
@@ -33,22 +43,69 @@ class Drone:
     def takeoff(self, altitude):
         self.conn.mav.command_long_send(self.sysid, self.comp,TAKEOFF_CMD,0, 0, 0, 0, 0, 0, 0, altitude)
 
-    def wait_ack(self, command, timeout=3):
+    def wait_ack(self, command, timeout=5):
         start = time.time()
         while time.time() - start < timeout:
-            msg = self.conn.recv_match(
-                type="COMMAND_ACK",
-                blocking=True,
-                timeout=timeout
-            )
-            if msg and msg.command == command:
+            remaining = timeout - (time.time() - start)
+            msg = self.conn.recv_match(type="COMMAND_ACK", blocking=True, timeout=remaining)
+            if msg and msg.command == command and msg.get_srcSystem() == self.sysid:
                 return msg.result == mavutil.mavlink.MAV_RESULT_ACCEPTED
+            time.sleep(0.01)
         return False
 
+    def request_data_streams(self, rate=10):
+        self.conn.mav.request_data_stream_send(
+            self.sysid,
+            self.comp,
+            mavutil.mavlink.MAV_DATA_STREAM_ALL,
+            rate,
+            1
+        )
+
+    def update(self):
+        while True:
+            msg = self.conn.recv_match(blocking=False)
+            if msg is None:
+                break
+
+            t = msg.get_type()
+            if t == "HEARTBEAT":
+                self.last_hb = msg
+            elif t == "VFR_HUD":
+                self.last_hud = msg
+            elif t == "GLOBAL_POSITION_INT":
+                self.last_gps = msg
+
+    def get_state(self):
+        self.update()
+
+        hb = self.last_hb
+        hud = self.last_hud
+        gps = self.last_gps
+
+        armed = hb and (hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+        mode = hb.custom_mode if hb else None
+
+        return {
+            "index": self.index,
+            "sysid": self.sysid,
+            "armed": bool(armed) if hb else None,
+            "mode": mode,
+            "throttle": hud.throttle if hud else None,
+            "altitude": hud.alt if hud else None,
+            "groundspeed": hud.groundspeed if hud else None,
+            "lat": gps.lat / 1e7 if gps else None,
+            "lon": gps.lon / 1e7 if gps else None,
+            "rel_alt": gps.relative_alt / 1000 if gps else None
+        }
+    
 
 class Swarm:
     def __init__(self):
         self.drones = []
+
+    def get_states(self):
+        return [d.get_state() for d in self.drones]
 
     def connect(self, count, start_port=5762):
         for i in range(count):
@@ -57,14 +114,11 @@ class Swarm:
             conn = mavutil.mavlink_connection(f"tcp:127.0.0.1:{port}")
             hb = conn.wait_heartbeat()
 
-            drone = Drone(
-                conn=conn,
-                sysid=hb.get_srcSystem(),
-                index=i
-            )
+            drone = Drone(conn=conn, sysid=hb.get_srcSystem(), index=i + 1)
+            drone.request_data_streams()
 
             self.drones.append(drone)
-            print(f"  Drone {i} connected (sysid={drone.sysid})")
+            print(f"  Drone {i+1} connected (sysid={drone.sysid})")
 
         print(f"\nConnected {len(self.drones)} drones\n")
 
@@ -77,8 +131,6 @@ class Swarm:
     def arm_all(self):
         for d in self.drones:
             d.arm()
-
-        for d in self.drones:
             if not d.wait_ack(ARM_CMD):
                 print(f"WARNING: Drone {d.index} failed to arm")
 
@@ -87,8 +139,6 @@ class Swarm:
     def takeoff_all(self, altitude):
         for d in self.drones:
             d.takeoff(altitude)
-
-        for d in self.drones:
             if not d.wait_ack(TAKEOFF_CMD):
                 print(f"WARNING: Drone {d.index} failed to takeoff")
 
@@ -102,11 +152,15 @@ if __name__ == "__main__":
     swarm.connect(count=15)
 
     swarm.set_mode_all("GUIDED")
-    time.sleep(2)
-
-    swarm.arm_all()
     time.sleep(3)
 
+    swarm.arm_all()
+    time.sleep(5)
+
     swarm.takeoff_all(40)
+
+    time.sleep(10)
+    for state in swarm.get_states():
+        print(state)
 
     print("\nSwarm takeoff sequence complete\n")
