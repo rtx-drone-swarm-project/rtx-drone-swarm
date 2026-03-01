@@ -95,14 +95,84 @@ async def simulation_loop(mission_id: str):
     import random
     
     while mission["status"] == "running":
-        # 1. Jitter drone positions slightly to simulate activity
+        bounds = mission["bounds"]
+        SPEED = 0.001
+        DETECTION_RADIUS = 0.005
+        TARGET_STOP_RADIUS = 0.0001
+        
+        def bounce(entity, vx, vy):
+            if entity["lat"] < bounds["min_lat"]:
+                entity["lat"] = bounds["min_lat"]
+                entity["vx"] = abs(vx)
+            elif entity["lat"] > bounds["max_lat"]:
+                entity["lat"] = bounds["max_lat"]
+                entity["vx"] = -abs(vx)
+            if entity["lon"] < bounds["min_lon"]:
+                entity["lon"] = bounds["min_lon"]
+                entity["vy"] = abs(vy)
+            elif entity["lon"] > bounds["max_lon"]:
+                entity["lon"] = bounds["max_lon"]
+                entity["vy"] = -abs(vy)
+        
+        # 1. Drone and Target logic
         for drone in mission["drones"]:
-            drone["lat"] += random.uniform(-JITTER_DEG, JITTER_DEG)
-            drone["lon"] += random.uniform(-JITTER_DEG, JITTER_DEG)
+            target_id = drone.get("assigned_target_id")
+            if target_id and "targets" in mission:
+                # Move towards target
+                target = next((t for t in mission["targets"] if t["id"] == target_id), None)
+                if target:
+                    d_lat = target["lat"] - drone["lat"]
+                    d_lon = target["lon"] - drone["lon"]
+                    dist = math.hypot(d_lat, d_lon)
+                    if dist > TARGET_STOP_RADIUS:
+                        drone["lat"] += (d_lat / dist) * SPEED
+                        drone["lon"] += (d_lon / dist) * SPEED
+                        # Jitter
+                        drone["lat"] += random.uniform(-JITTER_DEG/2, JITTER_DEG/2)
+                        drone["lon"] += random.uniform(-JITTER_DEG/2, JITTER_DEG/2)
+                    else:
+                        target["status"] = "found"
+                        # they stay here
+                else:
+                    drone["assigned_target_id"] = None
+            else:
+                if "vx" not in drone:
+                    angle = random.uniform(0, 2 * math.pi)
+                    drone["vx"] = SPEED * math.cos(angle)
+                    drone["vy"] = SPEED * math.sin(angle)
+                drone["lat"] += drone["vx"]
+                drone["lon"] += drone["vy"]
+                bounce(drone, drone["vx"], drone["vy"])
+                
+        if "targets" in mission:
+            for target in mission["targets"]:
+                if target.get("status", "wandering") == "wandering":
+                    if "vx" not in target:
+                        angle = random.uniform(0, 2 * math.pi)
+                        target["vx"] = (SPEED/2) * math.cos(angle)
+                        target["vy"] = (SPEED/2) * math.sin(angle)
+                    target["lat"] += target["vx"]
+                    target["lon"] += target["vy"]
+                    bounce(target, target["vx"], target["vy"])
+                    
+                    nearest_drone = None
+                    min_dist = float('inf')
+                    for drone in mission["drones"]:
+                        dist = math.hypot(drone["lat"] - target["lat"], drone["lon"] - target["lon"])
+                        if dist < min_dist:
+                            min_dist = dist
+                            nearest_drone = drone
+                            
+                    if min_dist < DETECTION_RADIUS and nearest_drone and not nearest_drone.get("assigned_target_id"):
+                        target["status"] = "detected"
+                        target["assigned_drone_id"] = nearest_drone["id"]
+                        nearest_drone["assigned_target_id"] = target["id"]
 
-        # 2. Update Progress (mocked simple progression 1% per tick)
+        # 2. Update Progress
         if mission["progress"] < 100.0:
-            mission["progress"] = min(100.0, mission["progress"] + 1.0)
+            mission["progress"] += 0.75
+        if mission["progress"] >= 100.0:
+            mission["progress"] = 100.0
 
         # 3. Broadcast Telemetry and Progress
         await manager.broadcast({
@@ -114,6 +184,16 @@ async def simulation_loop(mission_id: str):
             "type": "mission_progress",
             "progress": mission["progress"]
         })
+        
+        # Also broadcast targets to update their positions
+        if "targets" in mission:
+            await manager.broadcast({
+                "type": "mission_status",
+                "mission_id": mission_id,
+                "status": "running",
+                "progress": mission["progress"],
+                "targets": mission["targets"]
+            })
 
         # 4. Wait for next tick
         await asyncio.sleep(1.0)
@@ -141,11 +221,11 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
     import random
     
     bounds = mission["bounds"]
-    num_targets = min(len(mission["drones"]), 15)
+    num_targets = random.randint(2, 3) # Randomly choose 2 or 3 targets as requested
     targets = []
     
     for i in range(num_targets):
-        assigned_drone_id = mission["drones"][i]["id"]
+        # We don't assign to a specific drone anymore since there are fewer targets than drones
         t_lat = random.uniform(bounds["min_lat"], bounds["max_lat"])
         t_lon = random.uniform(bounds["min_lon"], bounds["max_lon"])
         
@@ -153,7 +233,8 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
             "id": f"tgt-{uuid.uuid4().hex[:8]}",
             "lat": t_lat,
             "lon": t_lon,
-            "assigned_drone_id": assigned_drone_id
+            "status": "wandering",
+            "assigned_drone_id": None
         })
         
     mission["targets"] = targets
@@ -187,6 +268,7 @@ async def stop_mission(mission_id: str):
         
     # Standard dictates transitioning: running -> stopped
     mission["status"] = "stopped"
+    mission["progress"] = 0.0
     
     # Broadcast stopped status
     await manager.broadcast({
