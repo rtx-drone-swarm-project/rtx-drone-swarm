@@ -149,9 +149,22 @@ export default function App() {
       pushAlert("Click the map first to place a marker and auto-select 100km².");
       return;
     }
+
+    let missionDrones = validDrones;
     if (validDroneCount < 15) {
-      pushAlert(`Warning: only ${validDroneCount} valid drones available; mission start continuing.`);
+      pushAlert(`Warning: only ${validDroneCount} valid drones from telemetry. Generating mock drones...`);
+      // Generate mock drones if we don't have real telemetry data yet
+      missionDrones = Array.from({ length: 15 }).map((_, i) => ({
+        id: `mock-drone-${i}`,
+        lat: selectedBounds.min_lat + Math.random() * (selectedBounds.max_lat - selectedBounds.min_lat),
+        lon: selectedBounds.min_lon + Math.random() * (selectedBounds.max_lon - selectedBounds.min_lon),
+        alt: 100,
+        heading: Math.random() * 360,
+        target_lat: selectedBounds.min_lat + Math.random() * (selectedBounds.max_lat - selectedBounds.min_lat),
+        target_lon: selectedBounds.min_lon + Math.random() * (selectedBounds.max_lon - selectedBounds.min_lon)
+      }));
     }
+
     try {
       const createRes = await fetch(`${apiBase}/missions`, {
         method: "POST",
@@ -159,8 +172,15 @@ export default function App() {
         body: JSON.stringify({
           name: `SAR-${new Date().toISOString()}`,
           bounds: selectedBounds,
-          drones: validDrones,
-          hikers: [] // For simplicity, not allowing manual hiker input in UI; backend can simulate hikers as needed
+          drones: missionDrones,
+          hikers: [
+            {
+              id: "hiker-1",
+              lat: selectedBounds.min_lat + Math.random() * (selectedBounds.max_lat - selectedBounds.min_lat),
+              lon: selectedBounds.min_lon + Math.random() * (selectedBounds.max_lon - selectedBounds.min_lon),
+              found: false
+            }
+          ] // Spawn a mock hiker to be found
         })
       });
       if (!createRes.ok) throw new Error(await createRes.text());

@@ -13,6 +13,10 @@ export default defineConfig({
         ws: true
       },
       "/health": "http://localhost:8000"
+    },
+    '/ws': {
+      target: 'ws://localhost:8000',
+      ws: true,
     }
   }
 });
