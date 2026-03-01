@@ -137,12 +137,34 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
         if start_data.algorithm is not None:
             mission["algorithm"] = start_data.algorithm
             
+    # TODO: algorithm marker selection, for now it's randomly generated
+    import random
+    
+    bounds = mission["bounds"]
+    num_targets = min(len(mission["drones"]), 15)
+    targets = []
+    
+    for i in range(num_targets):
+        assigned_drone_id = mission["drones"][i]["id"]
+        t_lat = random.uniform(bounds["min_lat"], bounds["max_lat"])
+        t_lon = random.uniform(bounds["min_lon"], bounds["max_lon"])
+        
+        targets.append({
+            "id": f"tgt-{uuid.uuid4().hex[:8]}",
+            "lat": t_lat,
+            "lon": t_lon,
+            "assigned_drone_id": assigned_drone_id
+        })
+        
+    mission["targets"] = targets
+            
     # Broadcast status change
     await manager.broadcast({
         "type": "mission_status",
         "mission_id": mission_id,
         "status": "running",
-        "progress": mission["progress"]
+        "progress": mission["progress"],
+        "targets": targets
     })
     
     # Spawn the background simulation loop
