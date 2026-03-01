@@ -25,42 +25,45 @@ class Drone:
             params = [0] * 7
 
         self.conn.mav.command_long_send(self.sysid, self.comp, command, 0, *(params[:7]))
+        self.wait_ack(command)
 
     def set_mode(self, mode_name):
         mode_map = self.conn.mode_mapping()
         if mode_name not in mode_map:
             raise ValueError(f"Mode {mode_name} not supported")
 
-        self.conn.mav.set_mode_send(
-            self.sysid,
-            mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
-            mode_map[mode_name]
-        )
+        self.conn.mav.set_mode_send(self.sysid, mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, mode_map[mode_name])
 
-    def arm(self):
+    def arm(self, timeout = 5):
         self.conn.mav.command_long_send(self.sysid, self.comp, ARM_CMD, 0, 1, 0, 0, 0, 0, 0, 0)
+        self.wait_ack(ARM_CMD)
 
-    def takeoff(self, altitude):
+        start = time.time()
+        while time.time() - start < timeout:
+            self.update()
+            if self.last_hb and (self.last_hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED):
+                print(f"Drone {self.sysid} armed")
+                return True
+            time.sleep(0.1)
+        raise TimeoutError(f"Drone {self.sysid} failed to arm in {timeout}s")
+
+    def takeoff(self, altitude, timeout = 5):
         self.conn.mav.command_long_send(self.sysid, self.comp,TAKEOFF_CMD,0, 0, 0, 0, 0, 0, 0, altitude)
+        self.wait_ack(TAKEOFF_CMD)
 
     def wait_ack(self, command, timeout=5):
         start = time.time()
         while time.time() - start < timeout:
-            remaining = timeout - (time.time() - start)
-            msg = self.conn.recv_match(type="COMMAND_ACK", blocking=True, timeout=remaining)
+            msg = self.conn.recv_match(type="COMMAND_ACK", blocking=False)
             if msg and msg.command == command and msg.get_srcSystem() == self.sysid:
-                return msg.result == mavutil.mavlink.MAV_RESULT_ACCEPTED
-            time.sleep(0.01)
-        return False
+                return msg.result
+            print(msg)
+            time.sleep(0.05)
+        
+        raise TimeoutError(f"Drone {self.sysid}: No ACK for {command}")
 
     def request_data_streams(self, rate=10):
-        self.conn.mav.request_data_stream_send(
-            self.sysid,
-            self.comp,
-            mavutil.mavlink.MAV_DATA_STREAM_ALL,
-            rate,
-            1
-        )
+        self.conn.mav.request_data_stream_send(self.sysid, self.comp, mavutil.mavlink.MAV_DATA_STREAM_ALL, rate, 1)
 
     def update(self):
         while True:
@@ -131,16 +134,12 @@ class Swarm:
     def arm_all(self):
         for d in self.drones:
             d.arm()
-            if not d.wait_ack(ARM_CMD):
-                print(f"WARNING: Drone {d.index} failed to arm")
 
         print("Arm sequence complete")
 
     def takeoff_all(self, altitude):
         for d in self.drones:
             d.takeoff(altitude)
-            if not d.wait_ack(TAKEOFF_CMD):
-                print(f"WARNING: Drone {d.index} failed to takeoff")
 
         print(f"Takeoff to {altitude}m complete")
 
@@ -155,11 +154,10 @@ if __name__ == "__main__":
     time.sleep(3)
 
     swarm.arm_all()
-    time.sleep(5)
 
     swarm.takeoff_all(40)
 
-    time.sleep(10)
+    time.sleep(100)
     for state in swarm.get_states():
         print(state)
 
