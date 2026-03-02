@@ -38,14 +38,14 @@ class Drone:
         self.conn.mav.command_long_send(self.sysid, self.comp, ARM_CMD, 0, 1, 0, 0, 0, 0, 0, 0)
         self.wait_ack(ARM_CMD)
 
-        start = time.time()
+        '''start = time.time()
         while time.time() - start < timeout:
             self.update()
             if self.last_hb and (self.last_hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED):
                 print(f"Drone {self.sysid} armed")
                 return True
             time.sleep(0.1)
-        raise TimeoutError(f"Drone {self.sysid} failed to arm in {timeout}s")
+        raise TimeoutError(f"Drone {self.sysid} failed to arm in {timeout}s")'''
 
     def takeoff(self, altitude, timeout = 5):
         self.conn.mav.command_long_send(self.sysid, self.comp,TAKEOFF_CMD,0, 0, 0, 0, 0, 0, 0, altitude)
@@ -85,6 +85,9 @@ class Drone:
         hb = self.last_hb
         hud = self.last_hud
         gps = self.last_gps
+
+        if not hb:
+            print(hb)
 
         armed = hb and (hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
         mode = hb.custom_mode if hb else None
@@ -157,8 +160,17 @@ if __name__ == "__main__":
 
     swarm.takeoff_all(40)
 
-    time.sleep(100)
-    for state in swarm.get_states():
-        print(state)
+    time.sleep(30)
+    #for state in swarm.get_states():
+        #print(state)
+
+    try:
+        while True:
+            states = swarm.get_states()
+            for s in states:
+                print(f"ID: {s['sysid']} | Mode: {s['mode']} | Armed: {s['armed']} | Alt: {s['rel_alt']:.2f}m")
+            print("-" * 30)
+            time.sleep(1)
+    except KeyboardInterrupt: print("Stopping telemetry...")
 
     print("\nSwarm takeoff sequence complete\n")
