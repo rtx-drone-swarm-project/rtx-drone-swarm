@@ -478,6 +478,14 @@ body,
   transition: transform 0.15s;
 }
 
+.drone-icon-inner.drone-icon-finder {
+  background: #f97316 !important;
+}
+
+.drone-icon-inner.drone-icon-confirmer {
+  background: #0ea5e9 !important;
+}
+
 .drone-icon-inner:hover {
   transform: scale(1.18);
 }
@@ -494,6 +502,41 @@ body,
   background: #ef4444;
   border: 3px solid #fff;
   box-shadow: 0 2px 6px rgb(0 0 0 / 0.35);
+}
+
+.target-triangle-marker {
+  background: none !important;
+  border: none !important;
+}
+
+.target-triangle-outer {
+  position: relative;
+  width: 28px;
+  height: 24px;
+}
+
+.target-triangle-outer::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  border-bottom: 24px solid #fff;
+  filter: drop-shadow(0 1px 3px rgb(0 0 0 / 0.35));
+}
+
+.target-triangle-inner {
+  position: absolute;
+  left: 4px;
+  top: 3px;
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-bottom: 18px solid #ef4444;
 }
 
 @media (max-width: 1100px) {

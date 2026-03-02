@@ -26,6 +26,7 @@ type TelemetryDrone = {
   battery_remaining?: number | null;
   target_lat?: number;
   target_lon?: number;
+  role?: string | null;
 };
 
 type Target = {
@@ -54,6 +55,7 @@ type ValidDrone = {
   alt?: number;
   heading?: number;
   battery_remaining?: number | null;
+  role?: string | null;
 };
 
 type WsMessage =
@@ -65,9 +67,9 @@ type WsMessage =
 
 const DEFAULT_CENTER: [number, number] = [33.5, -117.2];
 const DEFAULT_ZOOM = 13;
-const HALF_SIDE_KM = 5; // 10km x 10km = 100 km^2
+const HALF_SIDE_KM = 5; // 10km x 10km = 100 km^2 (use 0.5 for 1km^2 demo)
 
-function makeTargetIcon() {
+function makeTargetCircleIcon() {
   return L.divIcon({
     className: "target-label-marker",
     html: `<div class="target-icon-inner"></div>`,
@@ -76,10 +78,26 @@ function makeTargetIcon() {
   });
 }
 
-function makeDroneIcon(label: string) {
+function makeTargetTriangleIcon() {
+  return L.divIcon({
+    className: "target-triangle-marker",
+    html: `
+      <div style="position:relative;width:32px;height:28px;">
+        <div style="position:absolute;left:0;top:0;width:0;height:0;border-left:16px solid transparent;border-right:16px solid transparent;border-bottom:28px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.35);"></div>
+        <div style="position:absolute;left:5px;top:4px;width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:20px solid #ef4444;"></div>
+      </div>
+    `,
+    iconSize: [32, 28],
+    iconAnchor: [16, 28]
+  });
+}
+
+function makeDroneIcon(label: string, role?: string | null) {
+  const roleClass =
+    role === "finder" ? "drone-icon-finder" : role === "confirmer" ? "drone-icon-confirmer" : "";
   return L.divIcon({
     className: "drone-label-marker",
-    html: `<div class="drone-icon-inner">${label}</div>`,
+    html: `<div class="drone-icon-inner ${roleClass}">${label}</div>`,
     iconSize: [34, 34],
     iconAnchor: [17, 17]
   });
@@ -271,7 +289,8 @@ export default function App() {
             id: d?.id ?? "unknown",
             lat: latNum,
             lon: lonNum,
-            battery_remaining: d.battery_remaining
+            battery_remaining: d.battery_remaining,
+            role: typeof d?.role === "string" ? d.role : null
           };
           const altNum = Number(d?.alt);
           const headingNum = Number(d?.heading);
@@ -437,7 +456,7 @@ export default function App() {
     <div className="control-page">
       <header className="topbar">
         <h1>Drone Swarm Control Panel</h1>
-        <div className="progress-label">Mission Progress: {Math.min(100, progress).toFixed(1)}%</div>
+        <div className="progress-label">Search Progress: {Math.min(100, progress).toFixed(1)}%</div>
         <div className="progress-bar">
           <div className="progress-fill" style={{ width: `${Math.min(100, progress)}%` }} />
         </div>
@@ -460,7 +479,7 @@ export default function App() {
                 setLon(clon.toFixed(6));
                 setMapCenter([clat, clon]);
                 setIsValidCoord(true);
-                pushAlert("Marker placed; 100km^2 area selected.");
+                pushAlert("Marker placed; 100km² search area selected.");
               }}
             />
             {rectBounds && (
@@ -473,9 +492,9 @@ export default function App() {
               const label = `D${typeof d.id === "number" ? d.id : idx + 1}`;
               return (
                 <Marker
-                  key={String(d.id)}
+                  key={`${String(d.id)}-${d.role ?? "normal"}`}
                   position={[d.lat, d.lon]}
-                  icon={makeDroneIcon(label)}
+                  icon={makeDroneIcon(label, d.role)}
                   eventHandlers={{
                     click: () =>
                       setSelectedDrone({
@@ -484,25 +503,30 @@ export default function App() {
                       })
                   }}
                 >
-                  <Tooltip>{`Drone ${d.id}`}</Tooltip>
+                  <Tooltip>{`Drone ${d.id}${d.role ? ` (${d.role})` : ""}`}</Tooltip>
                 </Marker>
               );
             })}
-            {targets.map((t) => (
-              <Marker
-                key={String(t.id)}
-                position={[t.lat, t.lon]}
-                icon={makeTargetIcon()}
-              >
-                <Tooltip>
-                  {t.status === "found"
-                    ? `Found Hiker ${t.id}`
-                    : t.status === "wandering"
-                    ? `Wandering Hiker ${t.id}`
-                    : `Target ${t.id}`}
-                </Tooltip>
-              </Marker>
-            ))}
+            {targets.map((t) => {
+              const isFoundOrConfirming = t.status === "found" || t.status === "confirming";
+              return (
+                <Marker
+                  key={`${t.id}-${t.status ?? "wandering"}`}
+                  position={[t.lat, t.lon]}
+                  icon={isFoundOrConfirming ? makeTargetTriangleIcon() : makeTargetCircleIcon()}
+                >
+                  <Tooltip>
+                    {t.status === "found"
+                      ? `Found Hiker ${t.id}`
+                      : t.status === "confirming"
+                      ? `Confirming Hiker ${t.id}`
+                      : t.status === "wandering"
+                      ? `Wandering Hiker ${t.id}`
+                      : `Target ${t.id}`}
+                  </Tooltip>
+                </Marker>
+              );
+            })}
           </MapContainer>
         </div>
 
