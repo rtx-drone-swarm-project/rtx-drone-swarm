@@ -97,8 +97,8 @@ async def simulation_loop(mission_id: str):
     while mission["status"] == "running":
         bounds = mission["bounds"]
         SPEED = 0.001
-        DETECTION_RADIUS = 0.005
-        TARGET_STOP_RADIUS = 0.0001
+        DETECTION_RADIUS = 0.012
+        TARGET_STOP_RADIUS = 0.0005
         
         def bounce(entity, vx, vy):
             if entity["lat"] < bounds["min_lat"]:
@@ -113,14 +113,46 @@ async def simulation_loop(mission_id: str):
             elif entity["lon"] > bounds["max_lon"]:
                 entity["lon"] = bounds["max_lon"]
                 entity["vy"] = -abs(vy)
+
+        def find_target(target_id):
+            return next((t for t in mission.get("targets", []) if t["id"] == target_id), None)
+
+        def find_drone(drone_id):
+            return next((d for d in mission["drones"] if d["id"] == drone_id), None)
+
+        def assign_confirmation_drone(target, finder_drone):
+            finder_pos_lat = finder_drone["lat"]
+            finder_pos_lon = finder_drone["lon"]
+            candidates = [
+                d
+                for d in mission["drones"]
+                if d["id"] != finder_drone["id"] and not d.get("assigned_target_id")
+            ]
+            if not candidates:
+                return None
+            confirmer = min(
+                candidates,
+                key=lambda d: math.hypot(d["lat"] - finder_pos_lat, d["lon"] - finder_pos_lon),
+            )
+            confirmer["assigned_target_id"] = target["id"]
+            confirmer["role"] = "confirmer"
+            target["confirming_drone_id"] = confirmer["id"]
+            target["status"] = "confirming"
+            return confirmer
         
         # 1. Drone and Target logic
         for drone in mission["drones"]:
             target_id = drone.get("assigned_target_id")
             if target_id and "targets" in mission:
-                # Move towards target
-                target = next((t for t in mission["targets"] if t["id"] == target_id), None)
+                target = find_target(target_id)
                 if target:
+                    if drone["id"] == target.get("finder_drone_id") and target.get("status") == "confirming":
+                        # Finder holds position at the target while confirmation drone arrives.
+                        drone["lat"] = target["lat"]
+                        drone["lon"] = target["lon"]
+                        drone["role"] = "finder"
+                        continue
+
                     d_lat = target["lat"] - drone["lat"]
                     d_lon = target["lon"] - drone["lon"]
                     dist = math.hypot(d_lat, d_lon)
@@ -131,11 +163,37 @@ async def simulation_loop(mission_id: str):
                         drone["lat"] += random.uniform(-JITTER_DEG/2, JITTER_DEG/2)
                         drone["lon"] += random.uniform(-JITTER_DEG/2, JITTER_DEG/2)
                     else:
-                        target["status"] = "found"
-                        # they stay here
+                        if target.get("status") in ["detected", "wandering"]:
+                            # First drone arrived and found target; now request confirmation from nearest free drone.
+                            target["status"] = "confirming"
+                            target["finder_drone_id"] = drone["id"]
+                            drone["role"] = "finder"
+                            drone["lat"] = target["lat"]
+                            drone["lon"] = target["lon"]
+                            assign_confirmation_drone(target, drone)
+                            if not target.get("confirming_drone_id"):
+                                target["status"] = "found"
+                                drone["assigned_target_id"] = None
+                                drone["role"] = None
+                        elif target.get("status") == "confirming":
+                            if drone["id"] == target.get("confirming_drone_id"):
+                                # Confirmation drone has arrived.
+                                target["status"] = "found"
+                                finder = find_drone(target.get("finder_drone_id"))
+                                if finder:
+                                    finder["assigned_target_id"] = None
+                                    finder["role"] = None
+                                drone["assigned_target_id"] = None
+                                drone["role"] = None
+                            elif drone["id"] == target.get("finder_drone_id"):
+                                drone["lat"] = target["lat"]
+                                drone["lon"] = target["lon"]
                 else:
                     drone["assigned_target_id"] = None
+                    drone["role"] = None
             else:
+                if drone.get("role") not in ["finder", "confirmer"]:
+                    drone["role"] = None
                 if "vx" not in drone:
                     angle = random.uniform(0, 2 * math.pi)
                     drone["vx"] = SPEED * math.cos(angle)
@@ -167,6 +225,7 @@ async def simulation_loop(mission_id: str):
                         target["status"] = "detected"
                         target["assigned_drone_id"] = nearest_drone["id"]
                         nearest_drone["assigned_target_id"] = target["id"]
+                        nearest_drone["role"] = None
 
         # 2. Update Progress
         if mission["progress"] < 100.0:
