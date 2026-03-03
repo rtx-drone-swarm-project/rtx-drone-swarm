@@ -16,6 +16,9 @@ class Drone:
         self.index = index
         self.comp = conn.target_component
 
+        self.target_alt = None
+        self.target_location = {"lat": None, "lon": None, "alt": None}
+
         self.last_hb = None
         self.last_hud = None
         self.last_gps = None
@@ -46,6 +49,8 @@ class Drone:
 
 
     def goto(self, lat, lon, alt):
+        self.target_location = {"lat": lat, "lon": lon, "alt": alt}
+        self.target_alt = alt
         self.conn.mav.set_position_target_global_int_send(
             0,       # time_boot_ms (not used)
             self.sysid, self.comp,
@@ -58,6 +63,11 @@ class Drone:
             0, 0, 0,        # Acceleration (ignored)
             0, 0            # Yaw/Yaw rate (ignored)
         )
+
+    def is_reached_location(self, margin=1.5):
+        if self.target_location["lat"] is None: return True
+        dist = self.get_distance_to_target(self.target_location["lat"], self.target_location["lon"])
+        return dist < margin
 
     def set_mode(self, mode_name):
         mode_map = self.conn.mode_mapping()
@@ -80,8 +90,13 @@ class Drone:
         raise TimeoutError(f"Drone {self.sysid} failed to arm in {timeout}s")'''
 
     def takeoff(self, altitude, timeout = 5):
+        self.target_alt = altitude
         self.conn.mav.command_long_send(self.sysid, self.comp,TAKEOFF_CMD,0, 0, 0, 0, 0, 0, 0, altitude)
         self.wait_ack(TAKEOFF_CMD)
+
+    def is_reached_altitude(self, margin=0.2):
+        if self.target_alt is None: return True
+        return abs(self.state["rel_alt"] - self.target_alt) < margin
 
     def wait_ack(self, command, timeout=5):
         start = time.time()
