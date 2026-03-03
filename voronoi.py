@@ -1,6 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 
 def compare_centroids(old_centroids, new_centroids, epsilon=0.1):
     """
