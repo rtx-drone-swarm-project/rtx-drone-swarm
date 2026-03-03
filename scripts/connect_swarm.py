@@ -20,12 +20,31 @@ class Drone:
         self.last_hud = None
         self.last_gps = None
 
+        self.last_status = None
+
+    
+
     def send_command(self, command, params=None, wait_ack=True, timeout=3):
         if params is None:
             params = [0] * 7
 
         self.conn.mav.command_long_send(self.sysid, self.comp, command, 0, *(params[:7]))
         self.wait_ack(command)
+
+
+    def goto(self, lat, lon, alt):
+        self.conn.mav.set_position_target_global_int_send(
+            0,       # time_boot_ms (not used)
+            self.sysid, self.comp,
+            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT, # Use relative altitude
+            0b110111111000, # Type mask: ignore velocity/accel, use only pos
+            int(lat * 1e7), # Latitude (int)
+            int(lon * 1e7), # Longitude (int)
+            alt,            # Altitude
+            0, 0, 0,        # Velocity (ignored)
+            0, 0, 0,        # Acceleration (ignored)
+            0, 0            # Yaw/Yaw rate (ignored)
+        )
 
     def set_mode(self, mode_name):
         mode_map = self.conn.mode_mapping()
@@ -74,11 +93,27 @@ class Drone:
             t = msg.get_type()
             if t == "HEARTBEAT":
                 self.last_hb = msg
+            elif t == "SYS_STATUS":
+                self.last_status = msg
             elif t == "VFR_HUD":
                 self.last_hud = msg
             elif t == "GLOBAL_POSITION_INT":
                 self.last_gps = msg
 
+    def is_prearm_passed(self):
+        """Returns True if the drone has passed all internal ArduPilot pre-arm checks."""
+        self.update()
+        
+        if self.last_status is None:
+            return False
+
+        # The pre-arm bit is the 22nd bit (0x400000)
+        # We check if this bit is set in the sensors_health field
+        prearm_bit = mavutil.mavlink.MAV_SYS_STATUS_PREARM_CHECK
+        
+        # If the bit is 1, pre-arm checks are passing
+        return bool(self.last_status.onboard_control_sensors_health & prearm_bit)
+    
     def get_state(self):
         self.update()
 
@@ -146,12 +181,34 @@ class Swarm:
 
         print(f"Takeoff to {altitude}m complete")
 
+    def wait_for_all_prearm(self, timeout=60):
+        print("Checking swarm health...")
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            # Check every drone
+            statuses = [d.is_prearm_passed() for d in self.drones]
+            ready_count = sum(statuses)
+            
+            print(f"Drones ready: {ready_count}/{len(self.drones)}", end='\r')
+            
+            if ready_count == len(self.drones):
+                print(f"\nAll {len(self.drones)} drones are READY.")
+                return True
+                
+            time.sleep(1)
+            
+        raise TimeoutError("Pre-arm checks timed out. Check GPS/EKF status.")
+
 
 if __name__ == "__main__":
 
     swarm = Swarm()
 
     swarm.connect(count=15)
+
+    #swarm.wait_for_all_prearm(timeout=120)
+    #time.sleep(10)
 
     swarm.set_mode_all("GUIDED")
     time.sleep(3)
@@ -163,6 +220,19 @@ if __name__ == "__main__":
     time.sleep(30)
     #for state in swarm.get_states():
         #print(state)
+
+    print("\n--- Starting GOTO Test ---")
+    test_lat = -35.362000 
+    test_lon = 149.164000
+    
+    # It's better to use a Swarm method to avoid collisions
+    # This example sends them to a line formation starting at the test coordinate
+    for i, drone in enumerate(swarm.drones):
+        # Offset each drone by ~2 meters (0.00002 degrees) so they don't crash
+        offset = i * 0.00002
+        drone.goto(test_lat, test_lon + offset, 40)
+    
+    print("Move commands sent. Monitoring movement...")
 
     try:
         while True:
