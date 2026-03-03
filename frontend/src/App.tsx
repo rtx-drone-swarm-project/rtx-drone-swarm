@@ -36,6 +36,13 @@ type Target = {
   status?: string;
 };
 
+type FoundHiker = {
+  id: string | number;
+  lat: number;
+  lon: number;
+  foundAt?: number;
+};
+
 type MissionState = {
   id: string | number;
   status?: string;
@@ -62,7 +69,7 @@ type WsMessage =
   | { type: "telemetry"; drones?: TelemetryDrone[] }
   | { type: "mission_status"; status?: string; progress?: number; targets?: Target[]; mission_id?: string | number }
   | { type: "mission_progress"; progress?: number }
-  | { type: "target_found"; drone_id?: string | number; lat?: number; lon?: number }
+  | { type: "target_found"; target_id?: string | number; drone_id?: string | number; lat?: number; lon?: number; found_at?: number }
   | { type?: string; [key: string]: unknown };
 
 const DEFAULT_CENTER: [number, number] = [33.5, -117.2];
@@ -137,12 +144,34 @@ function parseCoordinate(value: string, min: number, max: number): number | null
   return n;
 }
 
-function formatElapsed(startedAt: number | null): string {
-  if (!startedAt) return "00:00";
-  const sec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+function formatElapsed(seconds: number): string {
+  const sec = Math.max(0, Math.floor(seconds));
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
   const ss = String(sec % 60).padStart(2, "0");
   return `${mm}:${ss}`;
+}
+
+function formatSeconds(seconds: number | undefined): string {
+  if (typeof seconds !== "number" || seconds < 0) return "--:--";
+  const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
+  const ss = String(seconds % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+function normalizeMissionStatus(status: string): "idle" | "running" | "stopped" | "complete" {
+  const s = status.trim().toLowerCase();
+  if (s === "in_progress") return "running";
+  if (s === "completed") return "complete";
+  if (s === "running" || s === "stopped" || s === "complete") return s;
+  return "idle";
+}
+
+function statusLabel(status: string): string {
+  const normalized = normalizeMissionStatus(status);
+  if (normalized === "running") return "Mission in progress";
+  if (normalized === "stopped") return "Mission stopped";
+  if (normalized === "complete") return "Mission completed";
+  return "Idle";
 }
 
 function CollapsibleSection({
@@ -168,6 +197,19 @@ function CollapsibleSection({
       </button>
       {open && <div className="section-body">{children}</div>}
     </section>
+  );
+}
+
+function SearchingLabel({ text }: { text: string }) {
+  return (
+    <span className="searching-label">
+      {text}
+      <span className="searching-dots" aria-hidden="true">
+        <span>.</span>
+        <span>.</span>
+        <span>.</span>
+      </span>
+    </span>
   );
 }
 
@@ -216,6 +258,57 @@ function DroneModal({ drone, onClose }: { drone: SelectedDrone; onClose: () => v
   );
 }
 
+function HikerSummaryModal({
+  isOpen,
+  onClose,
+  targets
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  targets: Target[];
+}) {
+  if (!isOpen || !targets.length) return null;
+
+  return (
+    <div className="modal-overlay" role="presentation" onClick={onClose}>
+      <div
+        className="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Hiker summary"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header">
+          <h2>Mission Complete - Hikers Found</h2>
+          <button type="button" className="icon-close" onClick={onClose} aria-label="Close dialog">
+            &#x2715;
+          </button>
+        </div>
+        <div className="hiker-summary-body">
+          <p className="hiker-summary-intro">
+            All hikers in the selected search area have been found. Final coordinates:
+          </p>
+          <ul className="hiker-summary-list">
+            {targets.map((t, idx) => (
+              <li key={`${t.id}-${idx}`} className="hiker-summary-item">
+                <div className="hiker-summary-label">Hiker {idx + 1}</div>
+                <div className="hiker-summary-coords">
+                  {t.lat.toFixed(6)}, {t.lon.toFixed(6)}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="hiker-summary-footer">
+          <button type="button" className="action-btn start" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MapClickSelector({
   onSelect,
   enabled
@@ -251,19 +344,22 @@ export default function App() {
   const [alerts, setAlerts] = useState<string[]>(["System ready."]);
   const [telemetry, setTelemetry] = useState<TelemetryDrone[]>([]);
   const [mission, setMission] = useState<MissionState>(null);
-  const [missionStartedAt, setMissionStartedAt] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [searchStatus, setSearchStatus] = useState("idle");
   const [progress, setProgress] = useState(0);
   const [targets, setTargets] = useState<Target[]>([]);
+  const [foundHikers, setFoundHikers] = useState<FoundHiker[]>([]);
+  const [missionLocked, setMissionLocked] = useState(false);
   const [lat, setLat] = useState(DEFAULT_CENTER[0].toFixed(6));
   const [lon, setLon] = useState(DEFAULT_CENTER[1].toFixed(6));
   const [isValidCoord, setIsValidCoord] = useState(true);
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(DEFAULT_CENTER);
-  const [selectedCenter, setSelectedCenter] = useState<[number, number] | null>(null);
   const [selectedBounds, setSelectedBounds] = useState<Bounds | null>(null);
-  const [elapsed, setElapsed] = useState("00:00");
   const [wsConnected, setWsConnected] = useState(false);
   const [selectedDrone, setSelectedDrone] = useState<SelectedDrone>(null);
+  const [hikerSummaryOpen, setHikerSummaryOpen] = useState(false);
+  const [completedTargets, setCompletedTargets] = useState<Target[]>([]);
+  const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
 
   function pushAlert(message: string) {
     setAlerts((prev) => [message, ...prev].slice(0, 10));
@@ -304,11 +400,12 @@ export default function App() {
   const validDroneCount = validDrones.length;
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setElapsed(formatElapsed(missionStartedAt));
+    if (normalizeMissionStatus(searchStatus) !== "running") return;
+    const interval = window.setInterval(() => {
+      setElapsedSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(interval);
-  }, [missionStartedAt]);
+  }, [searchStatus]);
 
   useEffect(() => {
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
@@ -334,16 +431,36 @@ export default function App() {
         if (payload.type === "telemetry") {
           setTelemetry(Array.isArray(payload.drones) ? payload.drones : []);
         } else if (payload.type === "mission_status") {
-          setSearchStatus(typeof payload.status === "string" ? payload.status : "idle");
-          if (typeof payload.progress === "number") setProgress(payload.progress);
+          const statusText = normalizeMissionStatus(typeof payload.status === "string" ? payload.status : "idle");
+          setSearchStatus(statusText);
+          if (typeof payload.progress === "number") setProgress(statusText === "complete" ? 100 : payload.progress);
           if (Array.isArray(payload.targets)) setTargets(payload.targets);
-          pushAlert(`Mission ${payload.mission_id}: ${payload.status}`);
+          if (statusText === "complete") {
+            setElapsedSeconds(0);
+            setMissionLocked(true);
+            pushAlert("Mission completed.");
+          } else {
+            pushAlert(`Mission ${payload.mission_id}: ${statusLabel(statusText)}.`);
+          }
         } else if (payload.type === "mission_progress") {
           if (typeof payload.progress === "number") setProgress(payload.progress);
         } else if (payload.type === "target_found") {
-          const latText = typeof payload.lat === "number" ? payload.lat.toFixed(5) : payload.lat;
-          const lonText = typeof payload.lon === "number" ? payload.lon.toFixed(5) : payload.lon;
-          pushAlert(`Target found by drone ${payload.drone_id} at ${latText}, ${lonText}`);
+          const foundId = payload.target_id ?? `target-${Date.now()}`;
+          const foundLat = Number(payload.lat);
+          const foundLon = Number(payload.lon);
+          const foundAt = typeof payload.found_at === "number" ? payload.found_at : undefined;
+          const canStore = Number.isFinite(foundLat) && Number.isFinite(foundLon);
+
+          if (canStore) {
+            setFoundHikers((prev) => {
+              if (prev.some((h) => String(h.id) === String(foundId))) return prev;
+              return [...prev, { id: foundId, lat: foundLat, lon: foundLon, foundAt }];
+            });
+          }
+
+          const latText = Number.isFinite(foundLat) ? foundLat.toFixed(6) : "unknown";
+          const lonText = Number.isFinite(foundLon) ? foundLon.toFixed(6) : "unknown";
+          pushAlert(`Hiker ${String(foundId)} located at ${latText}, ${lonText}.`);
         }
       } catch {
         pushAlert("Failed to parse websocket payload.");
@@ -354,6 +471,10 @@ export default function App() {
   }, [apiPort]);
 
   async function startMission() {
+    if (missionLocked) {
+      pushAlert("Mission is locked after completion. Reset mission to start another.");
+      return;
+    }
     if (!selectedBounds) {
       pushAlert("Click the map first to place a marker and auto-select 100km^2.");
       return;
@@ -399,11 +520,16 @@ export default function App() {
       if (!startRes.ok) throw new Error(await startRes.text());
       const started = (await startRes.json()) as MissionState;
       setMission(started);
-      setSearchStatus(started?.status ?? "idle");
+      setSearchStatus(normalizeMissionStatus(started?.status ?? "idle"));
       setProgress(started?.progress ?? 0);
       if (Array.isArray(started?.targets)) setTargets(started.targets);
-      setMissionStartedAt(Date.now());
+      setElapsedSeconds(0);
+      setMissionLocked(false);
+      setFoundHikers([]);
       pushAlert(`Mission started (${started?.id}).`);
+      setHikerSummaryOpen(false);
+      setCompletedTargets([]);
+      setSummaryMissionId(null);
     } catch (err) {
       pushAlert(`Start failed: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -419,13 +545,57 @@ export default function App() {
       if (!res.ok) throw new Error(await res.text());
       const stopped = (await res.json()) as MissionState;
       setMission(stopped);
-      setSearchStatus(stopped?.status ?? "idle");
+      setSearchStatus(normalizeMissionStatus(stopped?.status ?? "idle"));
       setProgress(0);
       pushAlert(`Mission stopped (${stopped?.id}).`);
     } catch (err) {
       pushAlert(`Stop failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  function resetMissionLock() {
+    setMissionLocked(false);
+    setMission(null);
+    setSearchStatus("idle");
+    setProgress(0);
+    setTargets([]);
+    setFoundHikers([]);
+    setElapsedSeconds(0);
+    setHikerSummaryOpen(false);
+    setCompletedTargets([]);
+    setSummaryMissionId(null);
+    pushAlert("Mission reset. Ready for a new mission.");
+  }
+
+  useEffect(() => {
+    if (!mission || !targets.length) return;
+
+    const allFound = targets.every((t) => t.status === "found");
+    if (!allFound) return;
+
+    if (summaryMissionId === mission.id) return;
+
+    setProgress(100);
+    setSearchStatus("complete");
+    setMissionLocked(true);
+    setElapsedSeconds(0);
+    setCompletedTargets(targets);
+    setSummaryMissionId(mission.id);
+    setHikerSummaryOpen(true);
+    pushAlert("All hikers found in current search area.");
+    pushAlert("Mission complete. You can review coordinates in the summary modal.");
+  }, [mission, targets, summaryMissionId]);
+
+  useEffect(() => {
+    if (!targets.length) return;
+    setFoundHikers((prev) => {
+      const existing = new Set(prev.map((h) => String(h.id)));
+      const discovered = targets
+        .filter((t) => t.status === "found" && !existing.has(String(t.id)))
+        .map((t) => ({ id: t.id, lat: t.lat, lon: t.lon }));
+      return discovered.length ? [...prev, ...discovered] : prev;
+    });
+  }, [targets]);
 
   function applyNavigation(nextLat: string, nextLon: string) {
     const latValue = parseCoordinate(nextLat, -90, 90);
@@ -448,7 +618,9 @@ export default function App() {
     applyNavigation(lat, nextLon);
   }
 
-  const missionActive = searchStatus === "running";
+  const normalizedSearchStatus = normalizeMissionStatus(searchStatus);
+  const missionActive = normalizedSearchStatus === "running";
+  const missionComplete = normalizedSearchStatus === "complete";
   const lostHikerCount = targets.filter((t) => t.status !== "found").length;
   const rectBounds = selectedBounds ? boundsToLeaflet(selectedBounds) : null;
 
@@ -473,7 +645,6 @@ export default function App() {
             <MapClickSelector
               enabled={!missionActive}
               onSelect={(clat, clon) => {
-                setSelectedCenter([clat, clon]);
                 setSelectedBounds(fixedAreaBounds(clat, clon));
                 setLat(clat.toFixed(6));
                 setLon(clon.toFixed(6));
@@ -533,7 +704,33 @@ export default function App() {
         <aside className="left-rail">
           <CollapsibleSection title="Alerts">
             <div className="stack-list">
-              {selectedBounds && (
+              {missionComplete ? (
+                <div className="alert-chip complete">
+                  <span className="alert-icon">&#x2705;</span>
+                  <div>
+                    <div className="alert-title">Mission completed</div>
+                    <div className="alert-sub">All hikers found. Search at 100%.</div>
+                  </div>
+                </div>
+              ) : normalizedSearchStatus === "stopped" ? (
+                <div className="alert-chip stopped">
+                  <span className="alert-icon">&#x1F6D1;</span>
+                  <div>
+                    <div className="alert-title">Mission stopped</div>
+                    <div className="alert-sub">Search halted by operator.</div>
+                  </div>
+                </div>
+              ) : missionActive ? (
+                <div className="alert-chip info">
+                  <span className="alert-icon search-pulse-icon">&#x1F50D;</span>
+                  <div>
+                    <div className="alert-title">Mission in progress</div>
+                    <div className="alert-sub">
+                      <SearchingLabel text="Searching selected area" />
+                    </div>
+                  </div>
+                </div>
+              ) : selectedBounds ? (
                 <div className="alert-chip warning">
                   <span className="alert-icon">&#x26A0;</span>
                   <div>
@@ -541,7 +738,7 @@ export default function App() {
                     <div className="alert-sub">100km&#xB2; search area selected</div>
                   </div>
                 </div>
-              )}
+              ) : null}
               <div className={`alert-chip ${wsConnected ? "ok" : "error"}`}>
                 <span className="alert-icon">{wsConnected ? "\u{1F7E2}" : "\u{1F534}"}</span>
                 <span>WebSocket {wsConnected ? "connected" : "disconnected"}</span>
@@ -559,19 +756,51 @@ export default function App() {
           <CollapsibleSection title="Swarm Status">
             <div className="kv-grid">
               <span>Time Elapsed</span>
-              <strong>{elapsed}</strong>
+              <strong>{formatElapsed(elapsedSeconds)}</strong>
               <span>Active Drones</span>
               <strong>{telemetry.length}</strong>
               <span>Valid Drones</span>
               <strong>{validDroneCount}</strong>
               <span>Search Status</span>
-              <strong>{searchStatus}</strong>
+              <strong>{missionActive ? <SearchingLabel text="Searching" /> : statusLabel(searchStatus)}</strong>
               <span>Battery</span>
               <strong>{averageBattery}</strong>
               <span>Latency</span>
               <strong className="success">live</strong>
               <span>Hikers Lost</span>
               <strong>{lostHikerCount}</strong>
+            </div>
+          </CollapsibleSection>
+
+          <CollapsibleSection title="Legend" defaultOpen={true}>
+            <div className="legend-item">
+              <span className="legend-dot drone" />
+              Drone (patrol)
+            </div>
+            <div className="legend-item">
+              <span className="legend-dot finder" />
+              Drone (finder)
+            </div>
+            <div className="legend-item">
+              <span className="legend-dot confirmer" />
+              Drone (confirm)
+            </div>
+            <div className="legend-item">
+              <span className="legend-dot target" />
+              Target / Hiker
+            </div>
+            <div className="legend-item">
+              <span className="legend-triangle" />
+              Target found
+            </div>
+            <div className="legend-help">
+              <strong>How to use</strong>
+              <ul>
+                <li>Click map to select area</li>
+                <li>Pan map by dragging</li>
+                <li>Zoom with mouse wheel</li>
+                <li>Click drones for details</li>
+              </ul>
             </div>
           </CollapsibleSection>
         </aside>
@@ -590,41 +819,53 @@ export default function App() {
           </CollapsibleSection>
 
           <CollapsibleSection title="Actions">
-            <button className="action-btn start" onClick={startMission} disabled={!selectedBounds || missionActive}>
-              Start Mission
+            <button
+              className="action-btn start"
+              onClick={startMission}
+              disabled={!selectedBounds || missionActive || missionLocked}
+            >
+              {missionLocked ? "Mission Complete" : "Start Mission"}
             </button>
             {!selectedBounds && <div className="hint-text">Click the map to select a 100km^2 area.</div>}
+            {missionLocked && (
+              <div className="hint-text success-text">Mission locked after completion. Reset to run another.</div>
+            )}
             {validDroneCount < 15 && (
               <div className="hint-text warning-text">Warning: only {validDroneCount} valid drones (15 recommended).</div>
             )}
             <button className="action-btn stop" onClick={stopMission} disabled={!mission?.id || !missionActive}>
               Stop Mission
             </button>
+            <button className="action-btn reset" onClick={resetMissionLock} disabled={missionActive}>
+              Reset Mission
+            </button>
           </CollapsibleSection>
 
-          <CollapsibleSection title="Legend" defaultOpen={true}>
-            <div className="legend-item">
-              <span className="legend-dot drone" />
-              Drone
-            </div>
-            <div className="legend-item">
-              <span className="legend-dot target" />
-              Target / Hiker
-            </div>
-            <div className="legend-help">
-              <strong>How to use</strong>
-              <ul>
-                <li>Click map to select area</li>
-                <li>Pan map by dragging</li>
-                <li>Zoom with mouse wheel</li>
-                <li>Click drones for details</li>
-              </ul>
-            </div>
-          </CollapsibleSection>
+          {foundHikers.length > 0 && (
+            <CollapsibleSection title={`Found Hikers (${foundHikers.length})`} defaultOpen={true}>
+              <div className="found-hiker-list">
+                {foundHikers.map((hiker) => (
+                  <div key={String(hiker.id)} className="found-hiker-item">
+                    <div className="found-hiker-title">Hiker {String(hiker.id)}</div>
+                    <div className="found-hiker-coords">
+                      Lat: {hiker.lat.toFixed(6)} | Lng: {hiker.lon.toFixed(6)}
+                    </div>
+                    <div className="found-hiker-time">Found at {formatSeconds(hiker.foundAt)}</div>
+                  </div>
+                ))}
+              </div>
+            </CollapsibleSection>
+          )}
+
         </aside>
       </main>
 
       <DroneModal drone={selectedDrone} onClose={() => setSelectedDrone(null)} />
+      <HikerSummaryModal
+        isOpen={hikerSummaryOpen}
+        onClose={() => setHikerSummaryOpen(false)}
+        targets={completedTargets}
+      />
     </div>
   );
 }

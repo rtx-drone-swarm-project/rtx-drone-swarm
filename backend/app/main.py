@@ -70,6 +70,7 @@ def create_mission(mission_data: MissionCreate):
         "name": mission_data.name,
         "status": "idle",
         "progress": 0.0,
+        "elapsed_seconds": 0,
         "bounds": mission_data.bounds.model_dump(),
         "drones": [d.model_dump() for d in mission_data.drones],
         "hikers": [m.model_dump() for m in mission_data.hikers] if mission_data.hikers else []
@@ -92,9 +93,26 @@ async def simulation_loop(mission_id: str):
         return
         
     mission = missions_db[mission_id]
+    mission.setdefault("_found_target_ids", [])
+    mission.setdefault("elapsed_seconds", 0)
     import random
+
+    async def emit_target_found(target: dict, drone_id: Optional[str] = None):
+        found_ids = mission.setdefault("_found_target_ids", [])
+        if target["id"] in found_ids:
+            return
+        found_ids.append(target["id"])
+        await manager.broadcast({
+            "type": "target_found",
+            "target_id": target["id"],
+            "drone_id": drone_id,
+            "lat": target["lat"],
+            "lon": target["lon"],
+            "found_at": mission.get("elapsed_seconds", 0),
+        })
     
     while mission["status"] == "running":
+        mission["elapsed_seconds"] = mission.get("elapsed_seconds", 0) + 1
         bounds = mission["bounds"]
         SPEED = 0.001
         DETECTION_RADIUS = 0.012
@@ -175,6 +193,7 @@ async def simulation_loop(mission_id: str):
                                 target["status"] = "found"
                                 drone["assigned_target_id"] = None
                                 drone["role"] = None
+                                await emit_target_found(target, drone["id"])
                         elif target.get("status") == "confirming":
                             if drone["id"] == target.get("confirming_drone_id"):
                                 # Confirmation drone has arrived.
@@ -185,6 +204,7 @@ async def simulation_loop(mission_id: str):
                                     finder["role"] = None
                                 drone["assigned_target_id"] = None
                                 drone["role"] = None
+                                await emit_target_found(target, drone["id"])
                             elif drone["id"] == target.get("finder_drone_id"):
                                 drone["lat"] = target["lat"]
                                 drone["lon"] = target["lon"]
@@ -227,11 +247,41 @@ async def simulation_loop(mission_id: str):
                         nearest_drone["assigned_target_id"] = target["id"]
                         nearest_drone["role"] = None
 
-        # 2. Update Progress
-        if mission["progress"] < 100.0:
+        # Check if all targets have been found
+        all_targets_found = False
+        if "targets" in mission and mission["targets"]:
+            all_targets_found = all(t.get("status") == "found" for t in mission["targets"])
+            if all_targets_found:
+                mission["status"] = "complete"
+                mission["progress"] = 100.0
+
+        # 2. Update Progress (only while running)
+        if mission.get("status") == "running" and mission["progress"] < 100.0:
             mission["progress"] += 0.75
         if mission["progress"] >= 100.0:
             mission["progress"] = 100.0
+            if mission.get("status") == "running":
+                if "targets" in mission:
+                    for target in mission["targets"]:
+                        if target.get("status") == "found":
+                            continue
+                        target["status"] = "found"
+                        assigned_drone_id = (
+                            target.get("confirming_drone_id")
+                            or target.get("finder_drone_id")
+                            or target.get("assigned_drone_id")
+                        )
+                        for drone_id_key in ("confirming_drone_id", "finder_drone_id", "assigned_drone_id"):
+                            drone_id = target.get(drone_id_key)
+                            if not drone_id:
+                                continue
+                            drone = find_drone(drone_id)
+                            if drone:
+                                drone["assigned_target_id"] = None
+                                drone["role"] = None
+                        await emit_target_found(target, assigned_drone_id)
+                mission["status"] = "complete"
+                all_targets_found = True
 
         # 3. Broadcast Telemetry and Progress
         await manager.broadcast({
@@ -249,10 +299,13 @@ async def simulation_loop(mission_id: str):
             await manager.broadcast({
                 "type": "mission_status",
                 "mission_id": mission_id,
-                "status": "running",
+                "status": mission.get("status", "running"),
                 "progress": mission["progress"],
                 "targets": mission["targets"]
             })
+
+        if all_targets_found:
+            break
 
         # 4. Wait for next tick
         await asyncio.sleep(1.0)
@@ -269,6 +322,8 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
         raise HTTPException(status_code=400, detail="Only 'idle' missions can be started")
         
     mission["status"] = "running"
+    mission["elapsed_seconds"] = 0
+    mission["_found_target_ids"] = []
     
     if start_data:
         if start_data.drones is not None:

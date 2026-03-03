@@ -167,6 +167,22 @@ body,
   margin-top: 1px;
 }
 
+.search-pulse-icon {
+  animation: searchPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes searchPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+
 .alert-title {
   font-weight: 600;
 }
@@ -181,6 +197,24 @@ body,
   color: #fef08a;
   border-color: rgb(234 179 8 / 0.45);
   background: rgb(113 63 18 / 0.35);
+}
+
+.alert-chip.info {
+  color: #93c5fd;
+  border-color: rgb(59 130 246 / 0.45);
+  background: rgb(30 58 138 / 0.35);
+}
+
+.alert-chip.stopped {
+  color: #fca5a5;
+  border-color: rgb(239 68 68 / 0.45);
+  background: rgb(127 29 29 / 0.35);
+}
+
+.alert-chip.complete {
+  color: #86efac;
+  border-color: rgb(34 197 94 / 0.45);
+  background: rgb(20 83 45 / 0.35);
 }
 
 .alert-chip.ok {
@@ -216,6 +250,42 @@ body,
 
 .kv-grid > strong {
   color: #f1f5f9;
+}
+
+.searching-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  white-space: nowrap;
+}
+
+.searching-dots {
+  display: inline-flex;
+  min-width: 0.9em;
+}
+
+.searching-dots span {
+  opacity: 0.2;
+  animation: searchingDot 1.2s infinite;
+}
+
+.searching-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.searching-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes searchingDot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+  }
+  40% {
+    opacity: 1;
+  }
 }
 
 .success {
@@ -285,6 +355,17 @@ body,
   cursor: not-allowed;
 }
 
+.action-btn.reset {
+  background: rgb(71 85 105 / 0.95);
+  color: #f8fafc;
+}
+
+.action-btn.reset:disabled {
+  background: rgb(51 65 85 / 0.5);
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
 .hint-text {
   color: #94a3b8;
   font-size: 12px;
@@ -293,6 +374,10 @@ body,
 
 .warning-text {
   color: #fbbf24;
+}
+
+.success-text {
+  color: #4ade80;
 }
 
 .legend-item {
@@ -317,6 +402,23 @@ body,
   background: #ef4444;
 }
 
+.legend-dot.finder {
+  background: #f97316;
+}
+
+.legend-dot.confirmer {
+  background: #0ea5e9;
+}
+
+.legend-triangle {
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 14px solid #ef4444;
+  filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);
+}
+
 .legend-help {
   margin-top: 10px;
   border: 1px solid rgb(148 163 184 / 0.26);
@@ -334,6 +436,38 @@ body,
   margin: 0;
   padding-left: 16px;
   color: #cbd5e1;
+}
+
+.found-hiker-list {
+  display: grid;
+  gap: 8px;
+}
+
+.found-hiker-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgb(52 211 153 / 0.4);
+  background: rgb(6 78 59 / 0.35);
+}
+
+.found-hiker-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6ee7b7;
+}
+
+.found-hiker-coords {
+  margin-top: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  font-size: 11px;
+  color: #d1fae5;
+}
+
+.found-hiker-time {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #a7f3d0;
 }
 
 .modal-overlay {
@@ -420,6 +554,52 @@ body,
   display: block;
   color: #94a3b8;
   margin-bottom: 4px;
+}
+
+.hiker-summary-body {
+  margin-top: 4px;
+}
+
+.hiker-summary-intro {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.hiker-summary-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+}
+
+.hiker-summary-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgb(51 65 85 / 0.9);
+  background: rgb(15 23 42 / 0.9);
+}
+
+.hiker-summary-label {
+  font-size: 13px;
+  color: #e5e7eb;
+}
+
+.hiker-summary-coords {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.hiker-summary-footer {
+  margin-top: 12px;
 }
 
 .leaflet-container {
