@@ -39,12 +39,14 @@ class DroneAgent:
         grid: InMemoryPheromoneGrid,
         altitude: float = 10.0,
         loop_hz: float  = 0.5,
+        expected_sysid: int = None,
     ):
         self.drone_id       = drone_id
         self.connection_str = connection
         self.grid           = grid
         self.altitude       = altitude
         self.loop_interval  = 1.0 / loop_hz
+        self.expected_sysid = expected_sysid if expected_sysid is not None else drone_id + 1
         self.start_lat      = None
         self.start_lon      = None
 
@@ -56,42 +58,30 @@ class DroneAgent:
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
-    def connect(self, timeout: float = 60.0):
-        log.info(f"[Drone {self.drone_id}] Connecting → {self.connection_str}")
+    def _wait_for_gps_lock(self, timeout=120):
+        log.info(f"[Drone {self.drone_id}] Waiting for GPS lock...")
+        start = time.time()
+        while time.time() - start < timeout:
+            msg = self.master.recv_match(type="GPS_RAW_INT", blocking=True, timeout=2)
+            if msg and msg.get_srcSystem() == self.expected_sysid:
+                # fix_type: 0=no fix, 1=no fix, 2=2D, 3=3D
+                if msg.fix_type >= 3:
+                    log.info(f"[Drone {self.drone_id}] GPS lock OK (fix={msg.fix_type}, sats={msg.satellites_visible})")
+                    return True
+        return False
 
-        is_udp = self.connection_str.startswith("udp")
-
-        self.master = mavutil.mavlink_connection(
-            self.connection_str,
-            source_system = self.drone_id + 100,  # 100-114, avoids MAVProxy (255)
-            # udpin is passive — MAVProxy pushes to us, no autoreconnect needed
-            autoreconnect = not is_udp,
-        )
-
-        # Wait specifically for a vehicle heartbeat (not MAVProxy's GCS heartbeat)
-        # MAVProxy heartbeat has type MAV_TYPE_GCS (6), vehicle is MAV_TYPE_QUADROTOR (2)
+    def connect(self, timeout=60.0):
+        self.master = mavutil.mavlink_connection(self.connection_str,
+            source_system=self.drone_id + 100, autoreconnect=False)
         deadline = time.time() + timeout
         while time.time() < deadline:
-            msg = self.master.recv_match(type='HEARTBEAT', blocking=True, timeout=2)
-            if msg:
+            msg = self.master.recv_match(type="HEARTBEAT", blocking=True, timeout=2)
+            if msg and msg.get_srcSystem() == self.expected_sysid:
                 self.master.target_system    = msg.get_srcSystem()
                 self.master.target_component = msg.get_srcComponent()
                 break
         else:
-            raise TimeoutError(f"[Drone {self.drone_id}] No vehicle heartbeat within {timeout}s")
-
-        # Request position data at 5Hz
-        self.master.mav.request_data_stream_send(
-            self.master.target_system,
-            self.master.target_component,
-            mavutil.mavlink.MAV_DATA_STREAM_POSITION,
-            5, 1
-        )
-
-        log.info(
-            f"[Drone {self.drone_id}] Heartbeat OK "
-            f"(sysid={self.master.target_system})"
-        )
+            raise TimeoutError(f"No heartbeat from sysid={self.expected_sysid}")
 
     def start(self):
         self._running = True
@@ -116,7 +106,13 @@ class DroneAgent:
                 log.error(f"[Drone {self.drone_id}] No position estimate — aborting")
                 return
 
-            self._wait_for_ekf()
+            if not self._wait_for_ekf():
+                log.error(f"[Drone {self.drone_id}] EKF not ready — aborting")
+                return
+
+            if not self._wait_for_gps_lock():
+                log.error(f"[Drone {self.drone_id}] No GPS lock — aborting")
+                return
 
             # Arm, but only continue if it worked
             if not self._arm():
@@ -189,21 +185,27 @@ class DroneAgent:
         return False
 
     def _arm(self):
-        log.info(f"[Drone {self.drone_id}] Arming…")
+        log.info(f"[Drone {self.drone_id}] Arming...")
         self.master.arducopter_arm()
-
-        start = time.time()
-        while not self.master.motors_armed():
-            if time.time() - start > 30:
-                log.error(f"[Drone {self.drone_id}] Arming timed out — check pre-arm failures above")
-                return False
-            msg = self.master.recv_match(type="STATUSTEXT", blocking=False)
-            if msg:
+        start        = time.time()
+        last_arm_cmd = time.time()          # ← was missing, caused UnboundLocalError
+        while time.time() - start < 60:
+            if time.time() - last_arm_cmd > 5:
+                self.master.arducopter_arm()
+                last_arm_cmd = time.time()
+            msg = self.master.recv_match(blocking=True, timeout=2)
+            if msg is None:
+                continue
+            if msg.get_type() == "HEARTBEAT" and msg.get_srcSystem() == self.expected_sysid:
+                if (msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED) != 0:
+                    log.info(f"[Drone {self.drone_id}] Armed ✓")
+                    return True
+            elif msg.get_type() == "STATUSTEXT" and msg.get_srcSystem() == self.expected_sysid:
                 log.info(f"[Drone {self.drone_id}] VEHICLE: {msg.text.strip()}")
-            time.sleep(0.5)
-
-        log.info(f"[Drone {self.drone_id}] Armed ✓")
-        return True
+                if "PreArm" in msg.text or "prearm" in msg.text.lower():
+                    log.warning(f"[Drone {self.drone_id}] Pre-arm block: {msg.text.strip()}")
+        log.error(f"[Drone {self.drone_id}] Arming timed out")
+        return False
 
     def _takeoff(self, alt: float):
         log.info(f"[Drone {self.drone_id}] Taking off to {alt}m…")
