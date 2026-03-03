@@ -7,6 +7,7 @@
 set -e
 COUNT="${1:-15}"
 ARDUPILOT_PATH="${ARDUPILOT_PATH:-$HOME/drone_project/ardupilot}"
+PARAM_FILE="${2:-$PWD/sitl_params.param}"
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 LOG_BASE="$(cd "$(dirname "$0")/.." && pwd)/logs"
 mkdir -p "$LOG_BASE/sitl" "$LOG_BASE/swarm" "$LOG_BASE/cloud"
@@ -33,16 +34,7 @@ cd "$ARDUPILOT_PATH"
 # Use swarm mode: --count, --auto-sysid, --location, --auto-offset-line so they don't overlap
 # Omit --map --console for headless (no GUI). MAVProxy runs for MAVLink on UDP 14550, 14551, ...
 
-# Base port and port step
-BASE_PORT=14550
-PORT_STEP=10
 
-# Construct --out parameters for each drone
-OUT_ARGS=""
-for ((i=0;i<COUNT;i++)); do
-  PORT=$((BASE_PORT + i*PORT_STEP))
-  OUT_ARGS+=" --out 127.0.0.1:$PORT"
-done
 
 # Start SITL with separate UDP outputs for each drone
 ./Tools/autotest/sim_vehicle.py -v ArduCopter -f quad \
@@ -50,6 +42,7 @@ done
   --auto-sysid \
   --location CMAC \
   --auto-offset-line 90,10 \
+  --map \
+  --add-param-file "$PARAM_FILE" \
   --mavproxy-args="--cmd=\"module load swarm\"" \
-  -w $OUT_ARGS \
   2>&1 | tee "$SWARM_LOG"
