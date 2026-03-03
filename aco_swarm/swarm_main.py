@@ -38,6 +38,7 @@ from typing import List
 
 from stigmergy_engine import InMemoryPheromoneGrid, GridConfig
 from drone_agent import DroneAgent
+from visualiser import SwarmVisualiser
 
 logging.basicConfig(
     level=logging.INFO,
@@ -151,7 +152,7 @@ def connect_all(drone_list: List[DroneAgent]) -> List[DroneAgent]:
 # ── CLI ──────────────────────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser(description="Stigmergy swarm — macOS SITL")
-    p.add_argument("--drones",       type=int,   default=15)
+    p.add_argument("--drones",       type=int,   default=5)
     p.add_argument("--duration",     type=float, default=0,
                    help="Seconds to run, 0 = forever (default: forever)")
     p.add_argument("--altitude",     type=float, default=10.0)
@@ -237,6 +238,8 @@ def main():
     for agent in agents:
         agent.start()
         time.sleep(0.8)
+    #vis = SwarmVisualiser(grid, agents)
+    #vis._run()
 
     # 6. Shutdown
     def _cleanup():
@@ -244,6 +247,7 @@ def main():
         for a in agents:
             a.stop()
         grid.stop_evaporation()
+        #vis.stop()
         log.info("Done.")
 
     def _signal_handler(sig, frame):
