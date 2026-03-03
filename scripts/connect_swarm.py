@@ -19,8 +19,21 @@ class Drone:
         self.last_hb = None
         self.last_hud = None
         self.last_gps = None
-
         self.last_status = None
+        self.last_ekf = None
+
+        self.state = {
+            "index": self.index,
+            "sysid": self.sysid,
+            "armed": False,
+            "mode": "UNKNOWN",
+            "throttle": 0,
+            "altitude": 0.0,
+            "groundspeed": 0.0,
+            "lat": 0.0,
+            "lon": 0.0,
+            "rel_alt": 0.0
+        }
 
     
 
@@ -93,13 +106,44 @@ class Drone:
             t = msg.get_type()
             if t == "HEARTBEAT":
                 self.last_hb = msg
-            elif t == "SYS_STATUS":
-                self.last_status = msg
+                self.state["armed"] = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+                self.state["mode"] = msg.custom_mode if msg else None
             elif t == "VFR_HUD":
                 self.last_hud = msg
+                self.state["throttle"] = msg.throttle
+                self.state["altitude"] = msg.alt
+                self.state["groundspeed"] = msg.groundspeed
+                
             elif t == "GLOBAL_POSITION_INT":
                 self.last_gps = msg
+                self.state["lat"] = msg.lat / 1e7
+                self.state["lon"] = msg.lon / 1e7
+                self.state["rel_alt"] = msg.relative_alt / 1000.0
 
+            elif t == "SYS_STATUS":
+                self.last_status = msg
+
+            elif t == "EKF_STATUS_REPORT":
+                self.last_ekf = msg
+
+    def is_ekf_gps_ready(self):
+        self.update()
+        if not self.last_ekf:
+            return False
+
+        flags = self.last_ekf.flags
+        
+        # 8 = GPS Horizontal Position Absolute
+        # 1 = Horizontal Velocity
+        # We check if these two are set.
+        has_gps_pos = bool(flags & 8)
+        has_velocity = bool(flags & 1)
+        
+        # Your variances are great (0.009 and 0.003), so we check against 0.1
+        is_healthy = self.last_ekf.velocity_variance < 0.1 and self.last_ekf.pos_horiz_variance < 0.1
+    
+        return has_gps_pos and has_velocity and is_healthy
+    
     def is_prearm_passed(self):
         """Returns True if the drone has passed all internal ArduPilot pre-arm checks."""
         self.update()
@@ -116,29 +160,7 @@ class Drone:
     
     def get_state(self):
         self.update()
-
-        hb = self.last_hb
-        hud = self.last_hud
-        gps = self.last_gps
-
-        if not hb:
-            print(hb)
-
-        armed = hb and (hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
-        mode = hb.custom_mode if hb else None
-
-        return {
-            "index": self.index,
-            "sysid": self.sysid,
-            "armed": bool(armed) if hb else None,
-            "mode": mode,
-            "throttle": hud.throttle if hud else None,
-            "altitude": hud.alt if hud else None,
-            "groundspeed": hud.groundspeed if hud else None,
-            "lat": gps.lat / 1e7 if gps else None,
-            "lon": gps.lon / 1e7 if gps else None,
-            "rel_alt": gps.relative_alt / 1000 if gps else None
-        }
+        return self.state
     
 
 class Swarm:
@@ -199,6 +221,19 @@ class Swarm:
             time.sleep(1)
             
         raise TimeoutError("Pre-arm checks timed out. Check GPS/EKF status.")
+    
+    def wait_for_ekf_alignment(self, timeout=120):
+        print("Waiting for EKF3 Origin and GPS Fusion...")
+        start = time.time()
+        while time.time() - start < timeout:
+            ready_count = sum([d.is_ekf_gps_ready() for d in self.drones])
+            print(f"EKF Ready: {ready_count}/{len(self.drones)}", end='\r')
+            
+            if ready_count == len(self.drones):
+                print(f"\nAll {len(self.drones)} drones: Origin set and GPS active.")
+                return True
+            time.sleep(1)
+        raise TimeoutError("EKF alignment timed out.")
 
 
 if __name__ == "__main__":
@@ -207,8 +242,8 @@ if __name__ == "__main__":
 
     swarm.connect(count=15)
 
-    #swarm.wait_for_all_prearm(timeout=120)
-    #time.sleep(10)
+    swarm.wait_for_all_prearm(timeout=120)
+    swarm.wait_for_ekf_alignment(timeout=120)
 
     swarm.set_mode_all("GUIDED")
     time.sleep(3)
