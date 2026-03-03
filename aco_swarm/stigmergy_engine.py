@@ -10,8 +10,9 @@ no other file needs to change.
 import numpy as np
 import threading
 import time
+import random
 from dataclasses import dataclass
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 
 
 @dataclass
@@ -20,8 +21,8 @@ class GridConfig:
     lat_max: float
     lon_min: float
     lon_max: float
-    rows: int           = 50
-    cols: int           = 50
+    rows: int               = 50
+    cols: int               = 50
     evaporation_rate: float = 0.97   # multiplied every tick
     deposit_strength: float = 1.0
     tick_interval: float    = 1.0    # seconds
@@ -38,9 +39,9 @@ class InMemoryPheromoneGrid:
     """
 
     def __init__(self, config: GridConfig):
-        self.config  = config
-        self.grid    = np.zeros((config.rows, config.cols), dtype=np.float32)
-        self._lock   = threading.Lock()
+        self.config   = config
+        self.grid     = np.zeros((config.rows, config.cols), dtype=np.float32)
+        self._lock    = threading.Lock()
         self._running = False
 
     # ── Coordinate helpers ──────────────────────────────────────────
@@ -72,24 +73,34 @@ class InMemoryPheromoneGrid:
 
     def get_gradient(self, lat: float, lon: float, radius: int = 2) -> Tuple[float, float]:
         """
-        Return the neighbour cell with the LOWEST pheromone (least visited).
-        Flip to argmax for exploitation / trail-following behaviour.
+        Return the least-visited neighbour cell within `radius` steps.
+
+        Tie-breaking: when multiple cells share the minimum pheromone value
+        (common at startup when the grid is all zeros), pick randomly among
+        them rather than defaulting to the current cell — this ensures drones
+        move immediately instead of sending a goto to their own position.
         """
-        row, col  = self.world_to_grid(lat, lon)
-        cfg       = self.config
-        best_val  = float('inf')
-        best_cell = (row, col)
+        row, col = self.world_to_grid(lat, lon)
+        cfg      = self.config
 
         with self._lock:
+            best_val:   float          = float('inf')
+            candidates: List[Tuple[int,int]] = []
+
             for dr in range(-radius, radius + 1):
                 for dc in range(-radius, radius + 1):
                     if dr == 0 and dc == 0:
                         continue
                     r = max(0, min(cfg.rows - 1, row + dr))
                     c = max(0, min(cfg.cols - 1, col + dc))
-                    if self.grid[r, c] < best_val:
-                        best_val  = self.grid[r, c]
-                        best_cell = (r, c)
+                    v = float(self.grid[r, c])
+                    if v < best_val:
+                        best_val   = v
+                        candidates = [(r, c)]
+                    elif v == best_val:
+                        candidates.append((r, c))
+
+            best_cell = random.choice(candidates) if candidates else (row, col)
 
         return self.grid_to_world(*best_cell)
 
