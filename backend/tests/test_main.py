@@ -1,5 +1,7 @@
+import asyncio
 from fastapi.testclient import TestClient
 from app import app
+from app.main import missions_db, simulation_loop, manager
 
 client = TestClient(app)
 
@@ -106,3 +108,103 @@ def test_stop_mission():
     second_stop_response = client.post(f"/missions/{mission_id}/stop")
     assert second_stop_response.status_code == 400
     assert second_stop_response.json() == {"detail": "Mission is already stopped or complete"}
+
+
+def test_simulation_emits_target_found_and_completes_mission():
+    mission_id = "sim-target-found"
+    missions_db[mission_id] = {
+        "id": mission_id,
+        "name": "Simulation Event Test",
+        "status": "running",
+        "progress": 0.0,
+        "elapsed_seconds": 0,
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 35.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {
+                "id": "drone1",
+                "lat": 34.5,
+                "lon": -117.5,
+                "assigned_target_id": "tgt-1",
+            }
+        ],
+        "targets": [
+            {
+                "id": "tgt-1",
+                "lat": 34.5,
+                "lon": -117.5,
+                "status": "detected",
+                "assigned_drone_id": "drone1",
+            }
+        ],
+        "hikers": [],
+    }
+
+    captured = []
+
+    async def fake_broadcast(message):
+        captured.append(message)
+
+    original_broadcast = manager.broadcast
+    manager.broadcast = fake_broadcast
+    try:
+        asyncio.run(simulation_loop(mission_id))
+        mission = missions_db[mission_id]
+        assert mission["status"] == "complete"
+        assert mission["progress"] == 100.0
+    finally:
+        manager.broadcast = original_broadcast
+        missions_db.pop(mission_id, None)
+
+    target_found_messages = [m for m in captured if m.get("type") == "target_found"]
+    assert len(target_found_messages) == 1
+    target_found = target_found_messages[0]
+    assert target_found["target_id"] == "tgt-1"
+    assert target_found["drone_id"] == "drone1"
+    assert target_found["lat"] == 34.5
+    assert target_found["lon"] == -117.5
+    assert isinstance(target_found["found_at"], int)
+
+
+def test_simulation_completes_when_progress_reaches_100():
+    mission_id = "sim-progress-complete"
+    missions_db[mission_id] = {
+        "id": mission_id,
+        "name": "Progress Completion Test",
+        "status": "running",
+        "progress": 99.7,
+        "elapsed_seconds": 0,
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 35.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {
+                "id": "drone1",
+                "lat": 34.5,
+                "lon": -117.5,
+            }
+        ],
+        "targets": [],
+        "hikers": [],
+    }
+
+    async def no_op_broadcast(_message):
+        return None
+
+    original_broadcast = manager.broadcast
+    manager.broadcast = no_op_broadcast
+    try:
+        asyncio.run(simulation_loop(mission_id))
+        mission = missions_db[mission_id]
+        assert mission["status"] == "complete"
+        assert mission["progress"] == 100.0
+    finally:
+        manager.broadcast = original_broadcast
+        missions_db.pop(mission_id, None)
