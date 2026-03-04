@@ -1,345 +1,36 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import {
-  MapContainer,
-  Marker,
-  Rectangle,
-  TileLayer,
-  Tooltip,
-  useMap,
-  useMapEvents
-} from "react-leaflet";
-import L from "leaflet";
-
-type Bounds = {
-  min_lat: number;
-  max_lat: number;
-  min_lon: number;
-  max_lon: number;
-};
-
-type TelemetryDrone = {
-  id: string | number;
-  lat?: number | string | null;
-  lon?: number | string | null;
-  alt?: number | string | null;
-  heading?: number | string | null;
-  battery_remaining?: number | null;
-  target_lat?: number;
-  target_lon?: number;
-  role?: string | null;
-};
-
-type Target = {
-  id: string | number;
-  lat: number;
-  lon: number;
-  status?: string;
-};
-
-type FoundHiker = {
-  id: string | number;
-  lat: number;
-  lon: number;
-  foundAt?: number;
-};
-
-type MissionState = {
-  id: string | number;
-  status?: string;
-  progress?: number;
-  targets?: Target[];
-} | null;
-
-type SelectedDrone = {
-  id: string | number;
-  battery: string;
-} | null;
-
-type ValidDrone = {
-  id: string | number;
-  lat: number;
-  lon: number;
-  alt?: number;
-  heading?: number;
-  battery_remaining?: number | null;
-  role?: string | null;
-};
-
-type WsMessage =
-  | { type: "telemetry"; drones?: TelemetryDrone[] }
-  | { type: "mission_status"; status?: string; progress?: number; targets?: Target[]; mission_id?: string | number }
-  | { type: "mission_progress"; progress?: number }
-  | { type: "target_found"; target_id?: string | number; drone_id?: string | number; lat?: number; lon?: number; found_at?: number }
-  | { type?: string; [key: string]: unknown };
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { getApiBase, getApiPort } from "./api/runtime";
+import TopBar from "./components/layout/TopBar";
+import MapPanel from "./components/map/MapPanel";
+import DroneModal from "./components/modals/DroneModal";
+import HikerSummaryModal from "./components/modals/HikerSummaryModal";
+import AlertsPanel from "./components/panels/AlertsPanel";
+import ActionsPanel from "./components/panels/ActionsPanel";
+import FoundHikersPanel from "./components/panels/FoundHikersPanel";
+import LegendPanel from "./components/panels/LegendPanel";
+import NavigationPanel from "./components/panels/NavigationPanel";
+import SwarmStatusPanel from "./components/panels/SwarmStatusPanel";
+import useMissionActions from "./hooks/useMissionActions";
+import useMissionSocket from "./hooks/useMissionSocket";
+import type {
+  Bounds,
+  FoundHiker,
+  MissionState,
+  SelectedDrone,
+  Target,
+  TelemetryDrone,
+  ValidDrone
+} from "./types/mission";
+import type { MissionProgressMessage, MissionStatusMessage, TargetFoundMessage, TelemetryMessage } from "./types/ws";
+import { normalizeMissionStatus, statusLabel } from "./utils/format";
+import { parseCoordinate } from "./utils/validate";
 
 const DEFAULT_CENTER: [number, number] = [33.5, -117.2];
 const DEFAULT_ZOOM = 13;
-const HALF_SIDE_KM = 5; // 10km x 10km = 100 km^2 (use 0.5 for 1km^2 demo)
-
-function makeTargetCircleIcon() {
-  return L.divIcon({
-    className: "target-label-marker",
-    html: `<div class="target-icon-inner"></div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11]
-  });
-}
-
-function makeTargetTriangleIcon() {
-  return L.divIcon({
-    className: "target-triangle-marker",
-    html: `
-      <div style="position:relative;width:32px;height:28px;">
-        <div style="position:absolute;left:0;top:0;width:0;height:0;border-left:16px solid transparent;border-right:16px solid transparent;border-bottom:28px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.35);"></div>
-        <div style="position:absolute;left:5px;top:4px;width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:20px solid #ef4444;"></div>
-      </div>
-    `,
-    iconSize: [32, 28],
-    iconAnchor: [16, 28]
-  });
-}
-
-function makeDroneIcon(label: string, role?: string | null) {
-  const roleClass =
-    role === "finder" ? "drone-icon-finder" : role === "confirmer" ? "drone-icon-confirmer" : "";
-  return L.divIcon({
-    className: "drone-label-marker",
-    html: `<div class="drone-icon-inner ${roleClass}">${label}</div>`,
-    iconSize: [34, 34],
-    iconAnchor: [17, 17]
-  });
-}
-
-function kmToLatDelta(km: number): number {
-  return km / 110.574;
-}
-
-function kmToLonDelta(km: number, latDeg: number): number {
-  const cosLat = Math.max(0.2, Math.cos((latDeg * Math.PI) / 180));
-  return km / (111.320 * cosLat);
-}
-
-function fixedAreaBounds(centerLat: number, centerLon: number): Bounds {
-  const latDelta = kmToLatDelta(HALF_SIDE_KM);
-  const lonDelta = kmToLonDelta(HALF_SIDE_KM, centerLat);
-  return {
-    min_lat: centerLat - latDelta,
-    max_lat: centerLat + latDelta,
-    min_lon: centerLon - lonDelta,
-    max_lon: centerLon + lonDelta
-  };
-}
-
-function boundsToLeaflet(bounds: Bounds): [[number, number], [number, number]] {
-  return [
-    [bounds.min_lat, bounds.min_lon],
-    [bounds.max_lat, bounds.max_lon]
-  ];
-}
-
-function parseCoordinate(value: string, min: number, max: number): number | null {
-  const n = Number.parseFloat(value);
-  if (!Number.isFinite(n)) return null;
-  if (n < min || n > max) return null;
-  return n;
-}
-
-function formatElapsed(seconds: number): string {
-  const sec = Math.max(0, Math.floor(seconds));
-  const mm = String(Math.floor(sec / 60)).padStart(2, "0");
-  const ss = String(sec % 60).padStart(2, "0");
-  return `${mm}:${ss}`;
-}
-
-function formatSeconds(seconds: number | undefined): string {
-  if (typeof seconds !== "number" || seconds < 0) return "--:--";
-  const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
-  const ss = String(seconds % 60).padStart(2, "0");
-  return `${mm}:${ss}`;
-}
-
-function normalizeMissionStatus(status: string): "idle" | "running" | "stopped" | "complete" {
-  const s = status.trim().toLowerCase();
-  if (s === "in_progress") return "running";
-  if (s === "completed") return "complete";
-  if (s === "running" || s === "stopped" || s === "complete") return s;
-  return "idle";
-}
-
-function statusLabel(status: string): string {
-  const normalized = normalizeMissionStatus(status);
-  if (normalized === "running") return "Mission in progress";
-  if (normalized === "stopped") return "Mission stopped";
-  if (normalized === "complete") return "Mission completed";
-  return "Idle";
-}
-
-function CollapsibleSection({
-  title,
-  children,
-  defaultOpen = true
-}: {
-  title: string;
-  children: ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <section className="section-card">
-      <button
-        type="button"
-        className="section-toggle"
-        onClick={() => setOpen((prev) => !prev)}
-        aria-expanded={open}
-      >
-        <span>{title}</span>
-        <span className="section-chevron">{open ? "▴" : "▾"}</span>
-      </button>
-      {open && <div className="section-body">{children}</div>}
-    </section>
-  );
-}
-
-function SearchingLabel({ text }: { text: string }) {
-  return (
-    <span className="searching-label">
-      {text}
-      <span className="searching-dots" aria-hidden="true">
-        <span>.</span>
-        <span>.</span>
-        <span>.</span>
-      </span>
-    </span>
-  );
-}
-
-function DroneModal({ drone, onClose }: { drone: SelectedDrone; onClose: () => void }) {
-  if (!drone) return null;
-  return (
-    <div className="modal-overlay" role="presentation" onClick={onClose}>
-      <div
-        className="modal-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Drone ${drone.id} details`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <h2>Drone {drone.id} - Live Feed</h2>
-          <button type="button" className="icon-close" onClick={onClose} aria-label="Close dialog">
-            &#x2715;
-          </button>
-        </div>
-        <div className="modal-video-placeholder">
-          <span className="camera-emoji">&#x1F4F9;</span>
-          <div>Drone Camera Feed</div>
-          <small>Live view from Drone {drone.id}</small>
-        </div>
-        <div className="modal-grid">
-          <div>
-            <label>Altitude</label>
-            <strong>{Math.floor(Math.random() * 500 + 100)}m</strong>
-          </div>
-          <div>
-            <label>Speed</label>
-            <strong>{Math.floor(Math.random() * 50 + 20)} km/h</strong>
-          </div>
-          <div>
-            <label>Battery</label>
-            <strong>{drone.battery}</strong>
-          </div>
-          <div>
-            <label>Status</label>
-            <strong className="success">Active</strong>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function HikerSummaryModal({
-  isOpen,
-  onClose,
-  targets
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  targets: Target[];
-}) {
-  if (!isOpen || !targets.length) return null;
-
-  return (
-    <div className="modal-overlay" role="presentation" onClick={onClose}>
-      <div
-        className="modal-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Hiker summary"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <h2>Mission Complete - Hikers Found</h2>
-          <button type="button" className="icon-close" onClick={onClose} aria-label="Close dialog">
-            &#x2715;
-          </button>
-        </div>
-        <div className="hiker-summary-body">
-          <p className="hiker-summary-intro">
-            All hikers in the selected search area have been found. Final coordinates:
-          </p>
-          <ul className="hiker-summary-list">
-            {targets.map((t, idx) => (
-              <li key={`${t.id}-${idx}`} className="hiker-summary-item">
-                <div className="hiker-summary-label">Hiker {idx + 1}</div>
-                <div className="hiker-summary-coords">
-                  {t.lat.toFixed(6)}, {t.lon.toFixed(6)}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="hiker-summary-footer">
-          <button type="button" className="action-btn start" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MapClickSelector({
-  onSelect,
-  enabled
-}: {
-  onSelect: (lat: number, lon: number) => void;
-  enabled: boolean;
-}) {
-  useMapEvents({
-    click: (e) => {
-      if (!enabled) return;
-      onSelect(e.latlng.lat, e.latlng.lng);
-    }
-  });
-  return null;
-}
-
-function MapRecenter({ center }: { center: [number, number] | null }) {
-  const map = useMap();
-  useEffect(() => {
-    if (!center) return;
-    map.flyTo(center, map.getZoom(), { duration: 0.7 });
-  }, [center, map]);
-  return null;
-}
 
 export default function App() {
-  const apiPort = (import.meta.env.VITE_API_PORT as string | undefined) || "8000";
-  const apiBase = useMemo(
-    () => `${window.location.protocol}//${window.location.hostname}:${apiPort}`,
-    [apiPort]
-  );
+  const apiPort = getApiPort();
+  const apiBase = useMemo(() => getApiBase(apiPort), [apiPort]);
 
   const [alerts, setAlerts] = useState<string[]>(["System ready."]);
   const [telemetry, setTelemetry] = useState<TelemetryDrone[]>([]);
@@ -361,14 +52,14 @@ export default function App() {
   const [completedTargets, setCompletedTargets] = useState<Target[]>([]);
   const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
 
-  function pushAlert(message: string) {
+  const pushAlert = useCallback((message: string) => {
     setAlerts((prev) => [message, ...prev].slice(0, 10));
-  }
+  }, []);
 
   const averageBattery = useMemo(() => {
     const values = telemetry
-      .map((d) => d.battery_remaining)
-      .filter((x): x is number => typeof x === "number" && x >= 0);
+      .map((drone) => drone.battery_remaining)
+      .filter((value): value is number => typeof value === "number" && value >= 0);
     if (!values.length) return "--";
     return `${Math.round(values.reduce((a, b) => a + b, 0) / values.length)}%`;
   }, [telemetry]);
@@ -376,27 +67,30 @@ export default function App() {
   const validDrones = useMemo<ValidDrone[]>(
     () =>
       telemetry
-        .map((d) => {
-          const latNum = Number(d?.lat);
-          const lonNum = Number(d?.lon);
+        .map((drone) => {
+          const latNum = Number(drone.lat);
+          const lonNum = Number(drone.lon);
           if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) return null;
 
-          const drone: ValidDrone = {
-            id: d?.id ?? "unknown",
+          const normalizedDrone: ValidDrone = {
+            id: drone.id ?? "unknown",
             lat: latNum,
             lon: lonNum,
-            battery_remaining: d.battery_remaining,
-            role: typeof d?.role === "string" ? d.role : null
+            battery_remaining: drone.battery_remaining,
+            role: typeof drone.role === "string" ? drone.role : null
           };
-          const altNum = Number(d?.alt);
-          const headingNum = Number(d?.heading);
-          if (Number.isFinite(altNum)) drone.alt = altNum;
-          if (Number.isFinite(headingNum)) drone.heading = headingNum;
-          return drone;
+
+          const altNum = Number(drone.alt);
+          const headingNum = Number(drone.heading);
+          if (Number.isFinite(altNum)) normalizedDrone.alt = altNum;
+          if (Number.isFinite(headingNum)) normalizedDrone.heading = headingNum;
+
+          return normalizedDrone;
         })
-        .filter((d): d is ValidDrone => d !== null),
+        .filter((drone): drone is ValidDrone => drone !== null),
     [telemetry]
   );
+
   const validDroneCount = validDrones.length;
 
   useEffect(() => {
@@ -407,170 +101,89 @@ export default function App() {
     return () => clearInterval(interval);
   }, [searchStatus]);
 
-  useEffect(() => {
-    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-    const wsHost =
-      import.meta.env.DEV && typeof window !== "undefined"
-        ? window.location.host
-        : `${window.location.hostname}:${apiPort}`;
-    const ws = new WebSocket(`${scheme}://${wsHost}/ws`);
+  const onTelemetry = useCallback((message: TelemetryMessage) => {
+    setTelemetry(Array.isArray(message.drones) ? message.drones : []);
+  }, []);
 
-    ws.onopen = () => {
-      setWsConnected(true);
-      pushAlert("WebSocket connected.");
-    };
-    ws.onerror = () => pushAlert("WebSocket error.");
-    ws.onclose = () => {
-      setWsConnected(false);
-      pushAlert("WebSocket disconnected.");
-    };
+  const onMissionStatus = useCallback(
+    (message: MissionStatusMessage) => {
+      const statusText = normalizeMissionStatus(typeof message.status === "string" ? message.status : "idle");
+      setSearchStatus(statusText);
+      if (typeof message.progress === "number") setProgress(statusText === "complete" ? 100 : message.progress);
+      if (Array.isArray(message.targets)) setTargets(message.targets);
 
-    ws.onmessage = (evt) => {
-      try {
-        const payload = JSON.parse(evt.data) as WsMessage;
-        if (payload.type === "telemetry") {
-          setTelemetry(Array.isArray(payload.drones) ? payload.drones : []);
-        } else if (payload.type === "mission_status") {
-          const statusText = normalizeMissionStatus(typeof payload.status === "string" ? payload.status : "idle");
-          setSearchStatus(statusText);
-          if (typeof payload.progress === "number") setProgress(statusText === "complete" ? 100 : payload.progress);
-          if (Array.isArray(payload.targets)) setTargets(payload.targets);
-          if (statusText === "complete") {
-            setElapsedSeconds(0);
-            setMissionLocked(true);
-            pushAlert("Mission completed.");
-          } else {
-            pushAlert(`Mission ${payload.mission_id}: ${statusLabel(statusText)}.`);
-          }
-        } else if (payload.type === "mission_progress") {
-          if (typeof payload.progress === "number") setProgress(payload.progress);
-        } else if (payload.type === "target_found") {
-          const foundId = payload.target_id ?? `target-${Date.now()}`;
-          const foundLat = Number(payload.lat);
-          const foundLon = Number(payload.lon);
-          const foundAt = typeof payload.found_at === "number" ? payload.found_at : undefined;
-          const canStore = Number.isFinite(foundLat) && Number.isFinite(foundLon);
-
-          if (canStore) {
-            setFoundHikers((prev) => {
-              if (prev.some((h) => String(h.id) === String(foundId))) return prev;
-              return [...prev, { id: foundId, lat: foundLat, lon: foundLon, foundAt }];
-            });
-          }
-
-          const latText = Number.isFinite(foundLat) ? foundLat.toFixed(6) : "unknown";
-          const lonText = Number.isFinite(foundLon) ? foundLon.toFixed(6) : "unknown";
-          pushAlert(`Hiker ${String(foundId)} located at ${latText}, ${lonText}.`);
-        }
-      } catch {
-        pushAlert("Failed to parse websocket payload.");
+      if (statusText === "complete") {
+        setElapsedSeconds(0);
+        setMissionLocked(true);
+        pushAlert("Mission completed.");
+      } else {
+        pushAlert(`Mission ${message.mission_id}: ${statusLabel(statusText)}.`);
       }
-    };
+    },
+    [pushAlert]
+  );
 
-    return () => ws.close();
-  }, [apiPort]);
+  const onMissionProgress = useCallback((message: MissionProgressMessage) => {
+    if (typeof message.progress === "number") setProgress(message.progress);
+  }, []);
 
-  async function startMission() {
-    if (missionLocked) {
-      pushAlert("Mission is locked after completion. Reset mission to start another.");
-      return;
-    }
-    if (!selectedBounds) {
-      pushAlert("Click the map first to place a marker and auto-select 100km^2.");
-      return;
-    }
+  const onTargetFound = useCallback(
+    (message: TargetFoundMessage) => {
+      const rawId = message.target_id ?? `target-${Date.now()}`;
+      const foundId = typeof rawId === "number" || typeof rawId === "string" ? rawId : String(rawId);
+      const foundLat = Number(message.lat);
+      const foundLon = Number(message.lon);
+      const foundAt = typeof message.found_at === "number" ? message.found_at : undefined;
+      const canStore = Number.isFinite(foundLat) && Number.isFinite(foundLon);
 
-    let missionDrones: Array<Record<string, unknown>> = validDrones.map((d) => ({ ...d }));
-    if (validDroneCount < 15) {
-      pushAlert(`Warning: only ${validDroneCount} valid drones from telemetry. Generating mock drones...`);
-      missionDrones = Array.from({ length: 15 }).map((_, i) => ({
-        id: `mock-drone-${i}`,
-        lat: selectedBounds.min_lat + Math.random() * (selectedBounds.max_lat - selectedBounds.min_lat),
-        lon: selectedBounds.min_lon + Math.random() * (selectedBounds.max_lon - selectedBounds.min_lon),
-        alt: 100,
-        heading: Math.random() * 360,
-        target_lat: selectedBounds.min_lat + Math.random() * (selectedBounds.max_lat - selectedBounds.min_lat),
-        target_lon: selectedBounds.min_lon + Math.random() * (selectedBounds.max_lon - selectedBounds.min_lon)
-      }));
-    }
+      if (canStore) {
+        setFoundHikers((prev) => {
+          if (prev.some((hiker) => String(hiker.id) === String(foundId))) return prev;
+          return [...prev, { id: foundId, lat: foundLat, lon: foundLon, foundAt }];
+        });
+      }
 
-    try {
-      const createRes = await fetch(`${apiBase}/missions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: `SAR-${new Date().toISOString()}`,
-          bounds: selectedBounds,
-          drones: missionDrones,
-          hikers: [
-            {
-              id: "hiker-1",
-              lat: selectedBounds.min_lat + Math.random() * (selectedBounds.max_lat - selectedBounds.min_lat),
-              lon: selectedBounds.min_lon + Math.random() * (selectedBounds.max_lon - selectedBounds.min_lon),
-              found: false
-            }
-          ]
-        })
-      });
-      if (!createRes.ok) throw new Error(await createRes.text());
-      const created = (await createRes.json()) as { id: string | number };
-      setMission(created);
+      const latText = Number.isFinite(foundLat) ? foundLat.toFixed(6) : "unknown";
+      const lonText = Number.isFinite(foundLon) ? foundLon.toFixed(6) : "unknown";
+      pushAlert(`Hiker ${String(foundId)} located at ${latText}, ${lonText}.`);
+    },
+    [pushAlert]
+  );
 
-      const startRes = await fetch(`${apiBase}/missions/${created.id}/start`, { method: "POST" });
-      if (!startRes.ok) throw new Error(await startRes.text());
-      const started = (await startRes.json()) as MissionState;
-      setMission(started);
-      setSearchStatus(normalizeMissionStatus(started?.status ?? "idle"));
-      setProgress(started?.progress ?? 0);
-      if (Array.isArray(started?.targets)) setTargets(started.targets);
-      setElapsedSeconds(0);
-      setMissionLocked(false);
-      setFoundHikers([]);
-      pushAlert(`Mission started (${started?.id}).`);
-      setHikerSummaryOpen(false);
-      setCompletedTargets([]);
-      setSummaryMissionId(null);
-    } catch (err) {
-      pushAlert(`Start failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
+  useMissionSocket({
+    apiPort,
+    onConnectedChange: setWsConnected,
+    onAlert: pushAlert,
+    onTelemetry,
+    onMissionStatus,
+    onMissionProgress,
+    onTargetFound
+  });
 
-  async function stopMission() {
-    if (!mission?.id) {
-      pushAlert("No active mission to stop.");
-      return;
-    }
-    try {
-      const res = await fetch(`${apiBase}/missions/${mission.id}/stop`, { method: "POST" });
-      if (!res.ok) throw new Error(await res.text());
-      const stopped = (await res.json()) as MissionState;
-      setMission(stopped);
-      setSearchStatus(normalizeMissionStatus(stopped?.status ?? "idle"));
-      setProgress(0);
-      pushAlert(`Mission stopped (${stopped?.id}).`);
-    } catch (err) {
-      pushAlert(`Stop failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  function resetMissionLock() {
-    setMissionLocked(false);
-    setMission(null);
-    setSearchStatus("idle");
-    setProgress(0);
-    setTargets([]);
-    setFoundHikers([]);
-    setElapsedSeconds(0);
-    setHikerSummaryOpen(false);
-    setCompletedTargets([]);
-    setSummaryMissionId(null);
-    pushAlert("Mission reset. Ready for a new mission.");
-  }
+  const { startMission, stopMission, resetMissionLock } = useMissionActions({
+    apiBase,
+    missionLocked,
+    selectedBounds,
+    validDrones,
+    validDroneCount,
+    mission,
+    setMission,
+    setSearchStatus,
+    setProgress,
+    setTargets,
+    setElapsedSeconds,
+    setMissionLocked,
+    setFoundHikers,
+    setHikerSummaryOpen,
+    setCompletedTargets,
+    setSummaryMissionId,
+    pushAlert
+  });
 
   useEffect(() => {
     if (!mission || !targets.length) return;
 
-    const allFound = targets.every((t) => t.status === "found");
+    const allFound = targets.every((target) => target.status === "found");
     if (!allFound) return;
 
     if (summaryMissionId === mission.id) return;
@@ -584,20 +197,20 @@ export default function App() {
     setHikerSummaryOpen(true);
     pushAlert("All hikers found in current search area.");
     pushAlert("Mission complete. You can review coordinates in the summary modal.");
-  }, [mission, targets, summaryMissionId]);
+  }, [mission, pushAlert, summaryMissionId, targets]);
 
   useEffect(() => {
     if (!targets.length) return;
     setFoundHikers((prev) => {
-      const existing = new Set(prev.map((h) => String(h.id)));
+      const existing = new Set(prev.map((hiker) => String(hiker.id)));
       const discovered = targets
-        .filter((t) => t.status === "found" && !existing.has(String(t.id)))
-        .map((t) => ({ id: t.id, lat: t.lat, lon: t.lon }));
+        .filter((target) => target.status === "found" && !existing.has(String(target.id)))
+        .map((target) => ({ id: target.id, lat: target.lat, lon: target.lon }));
       return discovered.length ? [...prev, ...discovered] : prev;
     });
   }, [targets]);
 
-  function applyNavigation(nextLat: string, nextLon: string) {
+  const applyNavigation = useCallback((nextLat: string, nextLon: string) => {
     const latValue = parseCoordinate(nextLat, -90, 90);
     const lonValue = parseCoordinate(nextLon, -180, 180);
     if (latValue == null || lonValue == null) {
@@ -606,257 +219,97 @@ export default function App() {
     }
     setIsValidCoord(true);
     setMapCenter([latValue, lonValue]);
-  }
+  }, []);
 
-  function onLatitudeChange(nextLat: string) {
-    setLat(nextLat);
-    applyNavigation(nextLat, lon);
-  }
+  const onLatitudeChange = useCallback(
+    (nextLat: string) => {
+      setLat(nextLat);
+      applyNavigation(nextLat, lon);
+    },
+    [applyNavigation, lon]
+  );
 
-  function onLongitudeChange(nextLon: string) {
-    setLon(nextLon);
-    applyNavigation(lat, nextLon);
-  }
+  const onLongitudeChange = useCallback(
+    (nextLon: string) => {
+      setLon(nextLon);
+      applyNavigation(lat, nextLon);
+    },
+    [applyNavigation, lat]
+  );
+
+  const onSelectArea = useCallback(
+    (selectedLat: number, selectedLon: number, bounds: Bounds) => {
+      setSelectedBounds(bounds);
+      setLat(selectedLat.toFixed(6));
+      setLon(selectedLon.toFixed(6));
+      setMapCenter([selectedLat, selectedLon]);
+      setIsValidCoord(true);
+      pushAlert("Marker placed; 100km² search area selected.");
+    },
+    [pushAlert]
+  );
 
   const normalizedSearchStatus = normalizeMissionStatus(searchStatus);
   const missionActive = normalizedSearchStatus === "running";
   const missionComplete = normalizedSearchStatus === "complete";
-  const lostHikerCount = targets.filter((t) => t.status !== "found").length;
-  const rectBounds = selectedBounds ? boundsToLeaflet(selectedBounds) : null;
+  const lostHikerCount = targets.filter((target) => target.status !== "found").length;
 
   return (
     <div className="control-page">
-      <header className="topbar">
-        <h1>Drone Swarm Control Panel</h1>
-        <div className="progress-label">Search Progress: {Math.min(100, progress).toFixed(1)}%</div>
-        <div className="progress-bar">
-          <div className="progress-fill" style={{ width: `${Math.min(100, progress)}%` }} />
-        </div>
-      </header>
+      <TopBar progress={progress} />
 
       <main className="control-layout">
-        <div className="map-wrap">
-          <MapContainer center={DEFAULT_CENTER} zoom={DEFAULT_ZOOM} zoomControl className="leaflet-map">
-            <MapRecenter center={mapCenter} />
-            <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution="&copy; OpenStreetMap contributors"
-            />
-            <MapClickSelector
-              enabled={!missionActive}
-              onSelect={(clat, clon) => {
-                setSelectedBounds(fixedAreaBounds(clat, clon));
-                setLat(clat.toFixed(6));
-                setLon(clon.toFixed(6));
-                setMapCenter([clat, clon]);
-                setIsValidCoord(true);
-                pushAlert("Marker placed; 100km² search area selected.");
-              }}
-            />
-            {rectBounds && (
-              <Rectangle
-                bounds={rectBounds}
-                pathOptions={{ color: "#3b82f6", fillOpacity: 0.08, dashArray: "8 8", weight: 2 }}
-              />
-            )}
-            {validDrones.map((d, idx) => {
-              const label = `D${typeof d.id === "number" ? d.id : idx + 1}`;
-              return (
-                <Marker
-                  key={`${String(d.id)}-${d.role ?? "normal"}`}
-                  position={[d.lat, d.lon]}
-                  icon={makeDroneIcon(label, d.role)}
-                  eventHandlers={{
-                    click: () =>
-                      setSelectedDrone({
-                        id: d.id,
-                        battery: typeof d.battery_remaining === "number" ? `${Math.round(d.battery_remaining)}%` : "--"
-                      })
-                  }}
-                >
-                  <Tooltip>{`Drone ${d.id}${d.role ? ` (${d.role})` : ""}`}</Tooltip>
-                </Marker>
-              );
-            })}
-            {targets.map((t) => {
-              const isFoundOrConfirming = t.status === "found" || t.status === "confirming";
-              return (
-                <Marker
-                  key={`${t.id}-${t.status ?? "wandering"}`}
-                  position={[t.lat, t.lon]}
-                  icon={isFoundOrConfirming ? makeTargetTriangleIcon() : makeTargetCircleIcon()}
-                >
-                  <Tooltip>
-                    {t.status === "found"
-                      ? `Found Hiker ${t.id}`
-                      : t.status === "confirming"
-                      ? `Confirming Hiker ${t.id}`
-                      : t.status === "wandering"
-                      ? `Wandering Hiker ${t.id}`
-                      : `Target ${t.id}`}
-                  </Tooltip>
-                </Marker>
-              );
-            })}
-          </MapContainer>
-        </div>
+        <MapPanel
+          defaultCenter={DEFAULT_CENTER}
+          defaultZoom={DEFAULT_ZOOM}
+          mapCenter={mapCenter}
+          selectedBounds={selectedBounds}
+          missionActive={missionActive}
+          validDrones={validDrones}
+          targets={targets}
+          setSelectedDrone={setSelectedDrone}
+          onSelectArea={onSelectArea}
+        />
 
         <aside className="left-rail">
-          <CollapsibleSection title="Alerts">
-            <div className="stack-list">
-              {missionComplete ? (
-                <div className="alert-chip complete">
-                  <span className="alert-icon">&#x2705;</span>
-                  <div>
-                    <div className="alert-title">Mission completed</div>
-                    <div className="alert-sub">All hikers found. Search at 100%.</div>
-                  </div>
-                </div>
-              ) : normalizedSearchStatus === "stopped" ? (
-                <div className="alert-chip stopped">
-                  <span className="alert-icon">&#x1F6D1;</span>
-                  <div>
-                    <div className="alert-title">Mission stopped</div>
-                    <div className="alert-sub">Search halted by operator.</div>
-                  </div>
-                </div>
-              ) : missionActive ? (
-                <div className="alert-chip info">
-                  <span className="alert-icon search-pulse-icon">&#x1F50D;</span>
-                  <div>
-                    <div className="alert-title">Mission in progress</div>
-                    <div className="alert-sub">
-                      <SearchingLabel text="Searching selected area" />
-                    </div>
-                  </div>
-                </div>
-              ) : selectedBounds ? (
-                <div className="alert-chip warning">
-                  <span className="alert-icon">&#x26A0;</span>
-                  <div>
-                    <div className="alert-title">Marker placed</div>
-                    <div className="alert-sub">100km&#xB2; search area selected</div>
-                  </div>
-                </div>
-              ) : null}
-              <div className={`alert-chip ${wsConnected ? "ok" : "error"}`}>
-                <span className="alert-icon">{wsConnected ? "\u{1F7E2}" : "\u{1F534}"}</span>
-                <span>WebSocket {wsConnected ? "connected" : "disconnected"}</span>
-              </div>
-              <div className="alert-log-scroll">
-                {alerts.map((a, i) => (
-                  <div key={`${a}-${i}`} className="alert-log">
-                    {a}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </CollapsibleSection>
-
-          <CollapsibleSection title="Swarm Status">
-            <div className="kv-grid">
-              <span>Time Elapsed</span>
-              <strong>{formatElapsed(elapsedSeconds)}</strong>
-              <span>Active Drones</span>
-              <strong>{telemetry.length}</strong>
-              <span>Valid Drones</span>
-              <strong>{validDroneCount}</strong>
-              <span>Search Status</span>
-              <strong>{missionActive ? <SearchingLabel text="Searching" /> : statusLabel(searchStatus)}</strong>
-              <span>Battery</span>
-              <strong>{averageBattery}</strong>
-              <span>Latency</span>
-              <strong className="success">live</strong>
-              <span>Hikers Lost</span>
-              <strong>{lostHikerCount}</strong>
-            </div>
-          </CollapsibleSection>
-
-          <CollapsibleSection title="Legend" defaultOpen={true}>
-            <div className="legend-item">
-              <span className="legend-dot drone" />
-              Drone (patrol)
-            </div>
-            <div className="legend-item">
-              <span className="legend-dot finder" />
-              Drone (finder)
-            </div>
-            <div className="legend-item">
-              <span className="legend-dot confirmer" />
-              Drone (confirm)
-            </div>
-            <div className="legend-item">
-              <span className="legend-dot target" />
-              Target / Hiker
-            </div>
-            <div className="legend-item">
-              <span className="legend-triangle" />
-              Target found
-            </div>
-            <div className="legend-help">
-              <strong>How to use</strong>
-              <ul>
-                <li>Click map to select area</li>
-                <li>Pan map by dragging</li>
-                <li>Zoom with mouse wheel</li>
-                <li>Click drones for details</li>
-              </ul>
-            </div>
-          </CollapsibleSection>
+          <AlertsPanel
+            missionComplete={missionComplete}
+            normalizedSearchStatus={normalizedSearchStatus}
+            selectedBounds={selectedBounds}
+            wsConnected={wsConnected}
+            alerts={alerts}
+          />
+          <SwarmStatusPanel
+            elapsedSeconds={elapsedSeconds}
+            telemetryCount={telemetry.length}
+            validDroneCount={validDroneCount}
+            missionActive={missionActive}
+            searchStatus={searchStatus}
+            averageBattery={averageBattery}
+            lostHikerCount={lostHikerCount}
+          />
+          <LegendPanel />
         </aside>
 
         <aside className="right-rail">
-          <CollapsibleSection title="Navigation">
-            <label className="field">
-              Latitude
-              <input type="text" value={lat} onChange={(e) => onLatitudeChange(e.target.value)} className={isValidCoord ? "" : "invalid"} />
-            </label>
-            <label className="field">
-              Longitude
-              <input type="text" value={lon} onChange={(e) => onLongitudeChange(e.target.value)} className={isValidCoord ? "" : "invalid"} />
-            </label>
-            {!isValidCoord && <div className="error-text">Lat: -90..90, Lng: -180..180</div>}
-          </CollapsibleSection>
-
-          <CollapsibleSection title="Actions">
-            <button
-              className="action-btn start"
-              onClick={startMission}
-              disabled={!selectedBounds || missionActive || missionLocked}
-            >
-              {missionLocked ? "Mission Complete" : "Start Mission"}
-            </button>
-            {!selectedBounds && <div className="hint-text">Click the map to select a 100km^2 area.</div>}
-            {missionLocked && (
-              <div className="hint-text success-text">Mission locked after completion. Reset to run another.</div>
-            )}
-            {validDroneCount < 15 && (
-              <div className="hint-text warning-text">Warning: only {validDroneCount} valid drones (15 recommended).</div>
-            )}
-            <button className="action-btn stop" onClick={stopMission} disabled={!mission?.id || !missionActive}>
-              Stop Mission
-            </button>
-            <button className="action-btn reset" onClick={resetMissionLock} disabled={missionActive}>
-              Reset Mission
-            </button>
-          </CollapsibleSection>
-
-          {foundHikers.length > 0 && (
-            <CollapsibleSection title={`Found Hikers (${foundHikers.length})`} defaultOpen={true}>
-              <div className="found-hiker-list">
-                {foundHikers.map((hiker) => (
-                  <div key={String(hiker.id)} className="found-hiker-item">
-                    <div className="found-hiker-title">Hiker {String(hiker.id)}</div>
-                    <div className="found-hiker-coords">
-                      Lat: {hiker.lat.toFixed(6)} | Lng: {hiker.lon.toFixed(6)}
-                    </div>
-                    <div className="found-hiker-time">Found at {formatSeconds(hiker.foundAt)}</div>
-                  </div>
-                ))}
-              </div>
-            </CollapsibleSection>
-          )}
-
+          <NavigationPanel
+            lat={lat}
+            lon={lon}
+            isValidCoord={isValidCoord}
+            onLatitudeChange={onLatitudeChange}
+            onLongitudeChange={onLongitudeChange}
+          />
+          <ActionsPanel
+            selectedBounds={selectedBounds}
+            missionActive={missionActive}
+            missionLocked={missionLocked}
+            validDroneCount={validDroneCount}
+            mission={mission}
+            onStartMission={startMission}
+            onStopMission={stopMission}
+            onResetMission={resetMissionLock}
+          />
+          <FoundHikersPanel hikers={foundHikers} />
         </aside>
       </main>
 
