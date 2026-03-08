@@ -1,4 +1,4 @@
-from scripts.swarm_command import connect_all, send_command
+from scripts.connect_swarm import Swarm
 from pymavlink import mavutil
 import requests
 import pyned2lla
@@ -10,32 +10,33 @@ import numpy as np
 D2R = math.pi / 180.0
 R2D = 180.0 / math.pi
 
-def get_drones_locations(conns):
+def get_drones_locations(drones):
     """
     Connect to multiple drones and return their GPS locations.
     """
-    locations = []
+    locations = [[0,0,0]] * len(drones)
 
-    for _, conn in conns:
+    for i, drone in enumerate(drones):
         # Request GPS position
-        send_command(conn, mavutil.mavlink.MAV_CMD_REQUEST_MESSAGE, 0, p1=mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT)
+        params = [0]*7
+        params[0] = mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT
+        drone.send_command(command=mavutil.mavlink.MAV_CMD_REQUEST_MESSAGE, params=params)
 
-        msg = conn.recv_match(type='GLOBAL_POSITION_INT', blocking=True)
+        msg = drone.conn.recv_match(type='GLOBAL_POSITION_INT', blocking=True)
 
         lat = msg.lat / 1e7
         lon = msg.lon / 1e7
         alt = msg.alt / 1e3
 
-        locations.append((lat, lon, alt))
-
+        locations[i] = [lat, lon, alt]
     return np.array(locations)
 
-# Not used 
-def send_location(conn, lat, lon, rel_alt):
+def send_location(drones, lats, lons, rel_alts):
     """
     Move vehicle to a specific lat/lon at a relative altitude using COMMAND_LONG.
     """
-    send_command(conn, mavutil.mavlink.MAV_CMD_DO_REPOSITION, conn.target_system, p1=-1, p2=1, p5=lat, p6=lon, p7=rel_alt)
+    for i, drone in enumerate(drones):
+        drone.goto(lats[i], lons[i], rel_alts[i])
 
 def get_elevation_open(lat, lon):
     url = f"https://api.opentopodata.org/v1/srtm90m?locations={lat},{lon}"
@@ -43,20 +44,37 @@ def get_elevation_open(lat, lon):
     return r["results"][0]["elevation"]
 
 if __name__ == "__main__":
-    conns = connect_all()
-    initial_locations = get_drones_locations(conns)
+    swarm = Swarm()
+
+    swarm.connect(count=12)
+
+    swarm.set_mode_all("GUIDED")
+    time.sleep(3)
+
+    swarm.arm_all()
+
+    swarm.takeoff_all(40)
+
+    time.sleep(30)
+
+    initial_locations = get_drones_locations(swarm.drones)
     print(initial_locations)
     
-    for i, (_, conn) in enumerate(conns):
+    lats, lons, alts = [], [], []
+    for i, drone in enumerate(swarm.drones):
         # assume ready to move for now
         (lat0, lon0, alt0) = initial_locations[i] # get location of drone
         (north, east, down) = 1334.3, -2543.6, 0
         (lat, lon, alt) = pyned2lla.ned2lla(lat0 * D2R, lon0 * D2R, alt0, north, east, down, pyned2lla.wgs84()) # convert to lat/lon
-        send_location(conn, lat, lon, 100) # send command to move drone to new location (relative altitude)
+        lats.append(lat)
+        lons.append(lon)
+        alts.append(alt)
+
+    send_location(swarm.drones, lats, lons, alts) # send command to move drone to new location (relative altitude)
 
     time.sleep(10) # wait for drones to move
     
-    after_locations = get_drones_locations(conns)
+    after_locations = get_drones_locations(swarm.drones)
     (initial_lat, initial_lon, initial_alt) = initial_locations[0]
     print(after_locations - initial_locations)
     
