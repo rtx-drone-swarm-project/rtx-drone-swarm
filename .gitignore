@@ -5,3 +5,8 @@ __pycache__/
 venv/
 .env
 *.log
+ardupilot/
+.DS_Store
+*.tlog
+*.raw
+watch_*
