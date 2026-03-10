@@ -152,7 +152,7 @@ def connect_all(drone_list: List[DroneAgent]) -> List[DroneAgent]:
 # ── CLI ──────────────────────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser(description="Stigmergy swarm — macOS SITL")
-    p.add_argument("--drones",       type=int,   default=5)
+    p.add_argument("--drones",       type=int,   default=15)
     p.add_argument("--duration",     type=float, default=0,
                    help="Seconds to run, 0 = forever (default: forever)")
     p.add_argument("--altitude",     type=float, default=10.0)
