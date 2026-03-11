@@ -7,12 +7,12 @@ export default defineConfig({
     port: 5173,
     host: "0.0.0.0",
     proxy: {
-      "/missions": "http://localhost:8000",
+      "/missions": "http://backend:8000",
+      "/health": "http://backend:8000",
       "/ws": {
-        target: "ws://localhost:8000",
+        target: "ws://backend:8000",
         ws: true
-      },
-      "/health": "http://localhost:8000"
+      }
     }
   }
 });

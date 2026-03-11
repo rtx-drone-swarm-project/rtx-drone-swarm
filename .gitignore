@@ -7,6 +7,9 @@ venv/
 *.log
 ardupilot/
 .DS_Store
+node_modules/
+.pytest_cache/
+.vscode/
 *.tlog
 *.raw
 watch_*
