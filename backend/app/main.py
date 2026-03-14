@@ -161,7 +161,8 @@ async def simulation_loop(mission_id: str):
             target["status"] = "confirming"
             return confirmer
         
-        # 1. Compute Voronoi centroids for all unassigned drones (once per tick).
+        # Start of main simulation logic for this tick:
+        # Compute Voronoi centroids for all unassigned drones (once per tick).
         # Only drones without an assigned target participate in coverage.
         centroid_map: dict = {}
         if "grid" in mission:
@@ -175,6 +176,8 @@ async def simulation_loop(mission_id: str):
                 new_centroids, _ = lloyd_step(grid_np, positions)
                 for d, c in zip(free_drones, new_centroids):
                     centroid_map[d["id"]] = c  # [lat, lon]
+                    
+        # End of main simulation logic for this tick.
 
         # 1. Drone and Target logic
         for drone in mission["drones"]:
