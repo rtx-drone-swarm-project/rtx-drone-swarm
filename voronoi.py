@@ -66,6 +66,45 @@ def run_lloyd(X, drones, lat, lon, n_iters=100, epsilon=0.1):
 
     return centroids, labels
 
+def setup_lloyd(lat, lon):
+    """
+    Initializes centroids based on drone locations.
+    """
+    from scripts.connect_swarm import Swarm
+    # start swarm
+    swarm = Swarm()
+
+    swarm.connect(count=5) # number of drones
+
+    swarm.wait_for_all_prearm(timeout=120)
+    swarm.wait_for_ekf_alignment(timeout=120)
+
+    swarm.set_mode_all("GUIDED")
+    time.sleep(3)
+
+    swarm.arm_all()
+
+    swarm.takeoff_all(40)
+
+    time.sleep(30)
+
+    # generate full map
+    full_width=100
+    full_height=100
+
+    x_coords = np.arange(full_width)
+    y_coords = np.arange(full_height)
+
+    xx, yy = np.meshgrid(x_coords, y_coords)
+    full_X = np.column_stack([xx.ravel(), yy.ravel()])
+
+    full_X *= 1000 # scale, default unit is meters
+
+    bottom, left =pyned2lla.ned2lla(lat*D2R, lon*D2R, 0, -50000, -50000, 0, pyned2lla.wgs84())[:2] # convert from middle of subregion to bottom left
+
+    centroids, labels = run_lloyd(full_X, swarm.drones, lat=bottom, lon=left, n_iters=100, epsilon=0.1)
+    return centroids, labels
+
 if __name__ == "__main__":
     from scripts.connect_swarm import Swarm
     # start swarm
