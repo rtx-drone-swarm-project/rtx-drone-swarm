@@ -5,7 +5,10 @@ import uuid
 import asyncio, json
 import math
 
+import numpy as np
+
 from app.models import MissionCreate, MissionStart
+from app.voronoi import build_search_grid, lloyd_step
 
 class ConnectionManager:
     def __init__(self):
@@ -158,6 +161,21 @@ async def simulation_loop(mission_id: str):
             target["status"] = "confirming"
             return confirmer
         
+        # 1. Compute Voronoi centroids for all unassigned drones (once per tick).
+        # Only drones without an assigned target participate in coverage.
+        centroid_map: dict = {}
+        if "grid" in mission:
+            free_drones = [
+                d for d in mission["drones"]
+                if not d.get("assigned_target_id") and d.get("role") not in ["finder", "confirmer"]
+            ]
+            if free_drones:
+                grid_np = np.array(mission["grid"])
+                positions = np.array([[d["lat"], d["lon"]] for d in free_drones])
+                new_centroids, _ = lloyd_step(grid_np, positions)
+                for d, c in zip(free_drones, new_centroids):
+                    centroid_map[d["id"]] = c  # [lat, lon]
+
         # 1. Drone and Target logic
         for drone in mission["drones"]:
             target_id = drone.get("assigned_target_id")
@@ -214,13 +232,27 @@ async def simulation_loop(mission_id: str):
             else:
                 if drone.get("role") not in ["finder", "confirmer"]:
                     drone["role"] = None
-                if "vx" not in drone:
-                    angle = random.uniform(0, 2 * math.pi)
-                    drone["vx"] = SPEED * math.cos(angle)
-                    drone["vy"] = SPEED * math.sin(angle)
-                drone["lat"] += drone["vx"]
-                drone["lon"] += drone["vy"]
-                bounce(drone, drone["vx"], drone["vy"])
+                centroid = centroid_map.get(drone["id"])
+                if centroid is not None:
+                    # Move toward Voronoi centroid for this drone's coverage cell.
+                    d_lat = centroid[0] - drone["lat"]
+                    d_lon = centroid[1] - drone["lon"]
+                    dist = math.hypot(d_lat, d_lon)
+                    if dist > TARGET_STOP_RADIUS:
+                        drone["lat"] += (d_lat / dist) * SPEED
+                        drone["lon"] += (d_lon / dist) * SPEED
+                        drone["lat"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+                        drone["lon"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+                    bounce(drone, d_lat, d_lon)
+                else:
+                    # Fallback: random walk (used while grid is not yet available).
+                    if "vx" not in drone:
+                        angle = random.uniform(0, 2 * math.pi)
+                        drone["vx"] = SPEED * math.cos(angle)
+                        drone["vy"] = SPEED * math.sin(angle)
+                    drone["lat"] += drone["vx"]
+                    drone["lon"] += drone["vy"]
+                    bounce(drone, drone["vx"], drone["vy"])
                 
         if "targets" in mission:
             for target in mission["targets"]:
@@ -335,6 +367,11 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
     import random
     
     bounds = mission["bounds"]
+
+    # Build the Voronoi search grid once and store it on the mission.
+    # simulation_loop reads this each tick to run lloyd_step.
+    mission["grid"] = build_search_grid(bounds, n=15).tolist()
+
     num_targets = random.randint(2, 3) # Randomly choose 2 or 3 targets as requested
     targets = []
     
