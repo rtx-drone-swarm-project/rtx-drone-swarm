@@ -54,6 +54,7 @@ def run_lloyd(X, drones, lat, lon, n_iters=100, epsilon=0.1):
 
         # print("Centroids:", centroids)
         # print("New centroids:", new_centroids)
+        print("Centroid movement:", np.max(np.linalg.norm(centroids - new_centroids, axis=1)))
         
         for i in range(len(centroids)):
             centroids[i] = pyned2lla.ned2lla(lat*D2R, lon*D2R, 0, new_centroids[i][0], new_centroids[i][1], 0, pyned2lla.wgs84())[:2] # convert back to lat/lon
@@ -103,6 +104,6 @@ if __name__ == "__main__":
 
     # X = full_X[mask]
 
-    full_X *= 10 # scale, default unit is meters
+    full_X *= 1 # scale, default unit is meters
 
     centroids, labels = run_lloyd(full_X, swarm.drones, lat=-35.363, lon=149.165, n_iters=100, epsilon=0.1)
