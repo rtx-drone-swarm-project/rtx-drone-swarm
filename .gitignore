@@ -5,6 +5,11 @@ __pycache__/
 venv/
 .env
 *.log
-.idea/
+ardupilot/
 .DS_Store
 node_modules/
+.pytest_cache/
+.vscode/
+*.tlog
+*.raw
+watch_*
