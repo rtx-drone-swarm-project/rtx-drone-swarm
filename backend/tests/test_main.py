@@ -239,6 +239,54 @@ def test_simulation_completes_when_progress_reaches_100():
         missions_db.pop(mission_id, None)
 
 
+def test_simulation_uses_voronoi_centroid_for_unassigned_simulated_drones():
+    mission_id = "sim-voronoi-motion"
+    missions_db[mission_id] = {
+        "id": mission_id,
+        "name": "Voronoi Motion Test",
+        "status": "running",
+        "progress": 0.0,
+        "elapsed_seconds": 0,
+        "bounds": {
+            "min_lat": 0.0,
+            "max_lat": 1.0,
+            "min_lon": 0.0,
+            "max_lon": 1.0,
+        },
+        "grid": [[0.8, 0.8], [0.9, 0.9]],
+        "drones": [
+            {
+                "id": "drone1",
+                "lat": 0.1,
+                "lon": 0.1,
+            }
+        ],
+        "targets": [],
+        "hikers": [],
+    }
+
+    async def stop_after_first_telemetry(message):
+        if message.get("type") == "telemetry":
+            missions_db[mission_id]["status"] = "stopped"
+
+    original_broadcast = manager.broadcast
+    original_get_states = sitl_bridge.get_states_by_sysid
+    manager.broadcast = stop_after_first_telemetry
+    sitl_bridge.get_states_by_sysid = lambda: {}
+
+    try:
+        asyncio.run(simulation_loop(mission_id))
+        drone = missions_db[mission_id]["drones"][0]
+    finally:
+        manager.broadcast = original_broadcast
+        sitl_bridge.get_states_by_sysid = original_get_states
+        missions_db.pop(mission_id, None)
+
+    assert drone["telemetry_source"] == "simulated"
+    assert drone["lat"] > 0.1
+    assert drone["lon"] > 0.1
+
+
 def test_start_mission_runs_dispatch_bridge_when_targets_present():
     mission_data = {
         "name": "Dispatch Start Mission",
