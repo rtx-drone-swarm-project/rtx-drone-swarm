@@ -128,6 +128,13 @@ def send_position_target(conn, target_system: int, lat: float, lon: float, alt: 
     )
 
 
+def prime_guided_takeoff(conn, target_system: int, alt: float, target_component: int = 1) -> None:
+    # Put the copter into GUIDED, arm it, and request takeoff before sending goto.
+    send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, target_component, 1, 5, 0, 0, 0, 0, 0)
+    send_command(conn, mav.MAV_CMD_COMPONENT_ARM_DISARM, target_system, target_component, 1, 21196)
+    send_command(conn, mav.MAV_CMD_NAV_TAKEOFF, target_system, target_component, 0, 0, 0, 0, 0, 0, alt)
+
+
 def parse_dispatch_assignments(assignments_json: str) -> list:
     try:
         parsed = json.loads(assignments_json)
@@ -225,6 +232,11 @@ def run_dispatch_targets(args) -> None:
             continue
 
         try:
+            prime_guided_takeoff(
+                conn,
+                target_system=target_sysid,
+                alt=item["alt"],
+            )
             send_position_target(
                 conn,
                 target_system=target_sysid,
@@ -237,7 +249,10 @@ def run_dispatch_targets(args) -> None:
                     "drone_id": item.get("drone_id"),
                     "sysid": target_sysid,
                     "success": True,
-                    "message": f"Dispatched goto lat={item['lat']:.6f} lon={item['lon']:.6f} alt={item['alt']:.1f}",
+                    "message": (
+                        f"Dispatched GUIDED/arm/takeoff/goto "
+                        f"lat={item['lat']:.6f} lon={item['lon']:.6f} alt={item['alt']:.1f}"
+                    ),
                 }
             )
         except Exception as exc:

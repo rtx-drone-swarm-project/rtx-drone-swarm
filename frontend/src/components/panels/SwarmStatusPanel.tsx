@@ -10,6 +10,7 @@ type SwarmStatusPanelProps = {
   searchStatus: string;
   averageBattery: string;
   lostHikerCount: number;
+  telemetryMode: string;
 };
 
 export default function SwarmStatusPanel({
@@ -19,7 +20,8 @@ export default function SwarmStatusPanel({
   missionActive,
   searchStatus,
   averageBattery,
-  lostHikerCount
+  lostHikerCount,
+  telemetryMode
 }: SwarmStatusPanelProps) {
   return (
     <CollapsibleSection title="Swarm Status">
@@ -34,8 +36,10 @@ export default function SwarmStatusPanel({
         <strong>{missionActive ? <SearchingLabel text="Searching" /> : statusLabel(searchStatus)}</strong>
         <span>Battery</span>
         <strong>{averageBattery}</strong>
-        <span>Latency</span>
-        <strong className="success">live</strong>
+        <span>Telemetry</span>
+        <strong className={telemetryMode === "LIVE SITL" ? "success" : telemetryMode === "SIMULATED" ? "warning-text" : ""}>
+          {telemetryMode}
+        </strong>
         <span>Hikers Lost</span>
         <strong>{lostHikerCount}</strong>
       </div>
