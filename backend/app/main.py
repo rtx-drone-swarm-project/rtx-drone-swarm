@@ -47,6 +47,9 @@ SWARM_COMMAND_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "swarm_
 DEFAULT_DISPATCH_HOST = "127.0.0.1"
 DEFAULT_DISPATCH_TIMEOUT_SECONDS = 15.0
 DEFAULT_DISPATCH_ALT = 30.0
+START_SITL_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "start_sitl_swarm.sh"
+AUTO_START_SITL_ON_MISSION_START = os.environ.get("AUTO_START_SITL_ON_MISSION_START", "0") == "1"
+DEFAULT_SITL_HOME_ALT = float(os.environ.get("SITL_HOME_ALT", "0"))
 DEFAULT_SITL_HOST = os.environ.get("SITL_HOST", "127.0.0.1")
 DEFAULT_SITL_BASE_PORT = int(os.environ.get("SITL_BASE_PORT", "14550"))
 DEFAULT_SITL_PORT_STEP = int(os.environ.get("SITL_PORT_STEP", "10"))
@@ -352,6 +355,83 @@ def _build_start_dispatch_assignments(mission: dict) -> List[dict]:
         )
 
     return assignments
+
+
+def _mission_bounds_center(bounds: dict) -> Tuple[float, float]:
+    return (
+        (float(bounds["min_lat"]) + float(bounds["max_lat"])) / 2.0,
+        (float(bounds["min_lon"]) + float(bounds["max_lon"])) / 2.0,
+    )
+
+
+def _generate_coverage_points(bounds: dict, drone_count: int) -> List[Tuple[float, float]]:
+    if drone_count <= 0:
+        return []
+
+    grid_side = max(2, math.ceil(math.sqrt(drone_count)))
+    grid_points = build_search_grid(bounds, n=grid_side)
+    if len(grid_points) <= drone_count:
+        return [(float(lat), float(lon)) for lat, lon in grid_points]
+
+    selected_indexes = np.linspace(0, len(grid_points) - 1, num=drone_count, dtype=int)
+    return [(float(grid_points[idx][0]), float(grid_points[idx][1])) for idx in selected_indexes]
+
+
+def _assign_start_area_targets(mission: dict) -> List[dict]:
+    drones = mission.get("drones", [])
+    points = _generate_coverage_points(mission["bounds"], len(drones))
+    assignments: List[dict] = []
+
+    for index, (drone, point) in enumerate(zip(drones, points), start=1):
+        lat, lon = point
+        drone["target_lat"] = lat
+        drone["target_lon"] = lon
+        if drone.get("lat") is None or drone.get("telemetry_source") != "sitl":
+            drone["lat"] = lat
+            drone["lon"] = lon
+
+        assignments.append(
+            {
+                "drone_id": str(drone.get("id")) if drone.get("id") is not None else None,
+                "sysid": _coerce_sysid(drone.get("sysid")) or index,
+                "lat": lat,
+                "lon": lon,
+                "alt": float(drone.get("alt") if drone.get("alt") is not None else DEFAULT_DISPATCH_ALT),
+            }
+        )
+
+    return assignments
+
+
+async def _ensure_sitl_running_for_mission(mission: dict) -> Optional[str]:
+    if not AUTO_START_SITL_ON_MISSION_START:
+        return None
+    if sitl_bridge.get_states_by_sysid():
+        return None
+    if not START_SITL_SCRIPT.exists():
+        return f"SITL start script not found: {START_SITL_SCRIPT}"
+
+    bounds = mission["bounds"]
+    center_lat, center_lon = _mission_bounds_center(bounds)
+    home = f"{center_lat:.7f},{center_lon:.7f},{DEFAULT_SITL_HOME_ALT:.1f},0"
+    env = os.environ.copy()
+    env["SITL_HOME"] = home
+    env["SITL_OUT_HOST"] = DEFAULT_SITL_HOST
+    env["SITL_BASE_PORT"] = str(DEFAULT_SITL_BASE_PORT)
+    env["SITL_PORT_STEP"] = str(DEFAULT_SITL_PORT_STEP)
+
+    try:
+        await asyncio.create_subprocess_exec(
+            str(START_SITL_SCRIPT),
+            str(max(len(mission.get("drones", [])), 1)),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            env=env,
+        )
+    except Exception as exc:
+        return f"Failed to auto-start SITL: {exc}"
+
+    return f"Starting SITL near mission center {center_lat:.5f}, {center_lon:.5f}"
 
 
 def _prepare_dispatch_assignments(
@@ -817,6 +897,9 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
     import random
     
     bounds = mission["bounds"]
+    startup_note = await _ensure_sitl_running_for_mission(mission)
+    if startup_note:
+        mission["sitl_startup_note"] = startup_note
 
     # Build the Voronoi search grid once and store it on the mission.
     # simulation_loop reads this each tick to run lloyd_step.
@@ -841,6 +924,8 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
     mission["targets"] = targets
 
     dispatch_assignments = _build_start_dispatch_assignments(mission)
+    if not dispatch_assignments:
+        dispatch_assignments = _assign_start_area_targets(mission)
     dispatch_results = []
     if dispatch_assignments:
         dispatch_results = await run_dispatch_script(
