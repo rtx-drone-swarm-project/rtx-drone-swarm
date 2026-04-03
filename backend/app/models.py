@@ -11,8 +11,14 @@ class Drone(BaseModel):
     id: str
     lat: float
     lon: float
+    sysid: Optional[int] = None
     alt: Optional[float] = None
     heading: Optional[float] = None
+    groundspeed: Optional[float] = None
+    battery_remaining: Optional[int] = None
+    armed: Optional[bool] = None
+    mode: Optional[str] = None
+    telemetry_source: Optional[str] = None
     status: str = "idle"
     target_lat: Optional[float] = None
     target_lon: Optional[float] = None
@@ -34,3 +40,25 @@ class MissionStart(BaseModel):
     drones: Optional[List[Drone]] = None
     algorithm: Optional[str] = None
     hikers: Optional[List[Hiker]] = None
+
+
+class DispatchAssignment(BaseModel):
+    drone_id: Optional[str] = None
+    sysid: Optional[int] = None
+    lat: float
+    lon: float
+    alt: Optional[float] = None
+
+
+class DispatchTargetsRequest(BaseModel):
+    assignments: List[DispatchAssignment]
+    host: Optional[str] = None
+    count: Optional[int] = None
+    timeout_seconds: Optional[float] = None
+
+
+class DispatchResult(BaseModel):
+    drone_id: Optional[str] = None
+    sysid: Optional[int] = None
+    success: bool
+    message: str
