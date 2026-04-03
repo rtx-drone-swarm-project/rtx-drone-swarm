@@ -3,10 +3,17 @@
 # Requires ArduPilot clone. Set ARDUPILOT_PATH if not ~/ardupilot.
 #
 # Logs: SITL outputs to logs/sitl/<run_id>/, capacity metrics to logs/swarm/
+#
+# Networking:
+# - By default SITL sends MAVLink UDP outputs to 127.0.0.1:14550,14560,...
+# - Override SITL_OUT_HOST to route telemetry to a backend container/service/VM.
 
 set -e
 COUNT="${1:-15}"
-ARDUPILOT_PATH="${ARDUPILOT_PATH:-$HOME/drone_project/ardupilot}"
+ARDUPILOT_PATH="${ARDUPILOT_PATH:-$HOME/ardupilot}"
+SITL_OUT_HOST="${SITL_OUT_HOST:-127.0.0.1}"
+BASE_PORT="${SITL_BASE_PORT:-14550}"
+PORT_STEP="${SITL_PORT_STEP:-10}"
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 LOG_BASE="$(cd "$(dirname "$0")/.." && pwd)/logs"
 mkdir -p "$LOG_BASE/sitl" "$LOG_BASE/swarm" "$LOG_BASE/cloud"
@@ -27,21 +34,18 @@ echo "Starting $COUNT headless SITL drones (run $RUN_ID)"
 echo "SITL logs: $SITL_LOG"
 echo "Swarm log: $SWARM_LOG"
 echo "Cloud log dir: $LOG_BASE/cloud"
+echo "Telemetry target: $SITL_OUT_HOST:$BASE_PORT step $PORT_STEP"
 echo ""
 
 cd "$ARDUPILOT_PATH"
 # Use swarm mode: --count, --auto-sysid, --location, --auto-offset-line so they don't overlap
-# Omit --map --console for headless (no GUI). MAVProxy runs for MAVLink on UDP 14550, 14551, ...
-
-# Base port and port step
-BASE_PORT=14550
-PORT_STEP=10
+# Omit --map --console for headless (no GUI).
 
 # Construct --out parameters for each drone
 OUT_ARGS=""
 for ((i=0;i<COUNT;i++)); do
   PORT=$((BASE_PORT + i*PORT_STEP))
-  OUT_ARGS+=" --out 127.0.0.1:$PORT"
+  OUT_ARGS+=" --out ${SITL_OUT_HOST}:$PORT"
 done
 
 # Start SITL with separate UDP outputs for each drone
