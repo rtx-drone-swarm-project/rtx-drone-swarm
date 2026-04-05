@@ -186,6 +186,16 @@ In a terminal, start the swarm and leave it running:
 ```bash
 ./scripts/start_sitl_swarm.sh 15   # 15 for this project; use any number
 ```
+By default SITL sends MAVLink UDP outputs to `127.0.0.1:14550,14560,...`.
+Override the destination when needed:
+```bash
+SITL_OUT_HOST=127.0.0.1 ./scripts/start_sitl_swarm.sh 15
+```
+To spawn the swarm near a specific mission area, provide an explicit home:
+```bash
+SITL_HOME="33.600000,-117.300000,0,0" ./scripts/start_sitl_swarm.sh 15
+```
+This is passed to ArduPilot `sim_vehicle.py` as `--custom-location`.
 
 ### 2) In another terminal: send swarm commands
 ```bash
@@ -212,3 +222,63 @@ docker compose up --build
 - `backend/` - FastAPI backend (currently /health, MAVLink)
 - `scripts/` - Current SITL swarm launcher utilizing MAVLink command tools
 - `docker-compose.yml` - local dev stack
+
+## Deployment and Runbooks
+
+### Local host backend + host SITL
+Use this when you want the simplest setup for development and telemetry debugging.
+
+1. Start SITL on the host:
+```bash
+./scripts/start_sitl_swarm.sh 15
+```
+2. In another terminal, start the backend on the host:
+```bash
+PYTHONPATH=backend uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+3. Optionally start only the frontend in Docker:
+```bash
+docker compose up --build frontend
+```
+4. Verify telemetry:
+```bash
+curl http://localhost:8000/health
+curl http://localhost:8000/sitl/status
+```
+
+Expected result:
+- `connected_count > 0` means the backend is receiving live SITL telemetry.
+- Websocket telemetry should include `telemetry_source: "sitl"` for live drones.
+
+### Docker backend + host SITL
+Use this when you want the backend in a container but still run ArduPilot SITL directly on the machine.
+
+1. Start the backend container:
+```bash
+docker compose up --build -d backend
+```
+2. Start SITL on the host. Keep the default `SITL_OUT_HOST=127.0.0.1`; Compose publishes UDP `14550-14690` into the backend container:
+```bash
+./scripts/start_sitl_swarm.sh 15
+```
+3. Verify telemetry:
+```bash
+curl http://localhost:8000/sitl/status
+```
+
+Expected result:
+- `connected_count > 0`
+- live drone entries with `lat`, `lon`, `alt`, `mode`, `armed`
+
+### Docker service or multi-host deployment
+Use this when SITL and backend are separate services or separate machines.
+
+Point SITL at the backend-reachable address:
+```bash
+SITL_OUT_HOST=<backend-private-ip-or-dns> ./scripts/start_sitl_swarm.sh 15
+```
+
+If the backend runs in Docker on that destination machine, ensure these UDP ports are open/published:
+- `14550-14690/udp`
+
+If the backend runs directly on the host, ensure the VM firewall/security rules allow those UDP ports from the SITL host.

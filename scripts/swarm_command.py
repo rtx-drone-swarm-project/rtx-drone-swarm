@@ -16,6 +16,7 @@ Requires: pymavlink. MAVProxy multi-vehicle uses UDP 14550, 14560, 14570, ... (s
 import argparse
 import sys
 import time
+import json
 from pathlib import Path
 
 # Ensure backend pymavlink is available
@@ -32,6 +33,7 @@ STATUS_SAMPLE_SECONDS = 2.5
 COMMAND_RETRIES = 2
 COMMAND_RETRY_DELAY_SECONDS = 0.2
 VERIFY_TIMEOUT_SECONDS = 4.0
+GOTO_TYPE_MASK = 0b110111111000
 
 # ArduCopter custom_mode -> name (subset)
 COPTER_MODE_NAMES = {
@@ -105,6 +107,167 @@ def send_command(
     )
 
 
+def send_position_target(conn, target_system: int, lat: float, lon: float, alt: float, target_component: int = 1):
+    conn.mav.set_position_target_global_int_send(
+        0,
+        target_system,
+        target_component,
+        mav.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+        GOTO_TYPE_MASK,
+        int(lat * 1e7),
+        int(lon * 1e7),
+        alt,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
+
+
+def prime_guided_takeoff(conn, target_system: int, alt: float, target_component: int = 1) -> None:
+    # Put the copter into GUIDED, arm it, and request takeoff before sending goto.
+    send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, target_component, 1, 5, 0, 0, 0, 0, 0)
+    send_command(conn, mav.MAV_CMD_COMPONENT_ARM_DISARM, target_system, target_component, 1, 21196)
+    send_command(conn, mav.MAV_CMD_NAV_TAKEOFF, target_system, target_component, 0, 0, 0, 0, 0, 0, alt)
+
+
+def parse_dispatch_assignments(assignments_json: str) -> list:
+    try:
+        parsed = json.loads(assignments_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid --assignments-json payload: {exc}") from exc
+
+    if not isinstance(parsed, list):
+        raise ValueError("--assignments-json must be a JSON array")
+
+    assignments = []
+    for index, row in enumerate(parsed):
+        if not isinstance(row, dict):
+            raise ValueError(f"Assignment at index {index} must be an object")
+
+        sysid = row.get("sysid")
+        if sysid is None:
+            raise ValueError(f"Assignment at index {index} is missing required field 'sysid'")
+
+        try:
+            sysid_int = int(sysid)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Assignment at index {index} has invalid sysid: {sysid}") from exc
+        if sysid_int <= 0:
+            raise ValueError(f"Assignment at index {index} has non-positive sysid: {sysid_int}")
+
+        try:
+            lat = float(row["lat"])
+            lon = float(row["lon"])
+            alt = float(row["alt"])
+        except KeyError as exc:
+            raise ValueError(f"Assignment at index {index} missing field: {exc}") from exc
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Assignment at index {index} has non-numeric coordinate") from exc
+
+        assignments.append(
+            {
+                "drone_id": row.get("drone_id"),
+                "sysid": sysid_int,
+                "lat": lat,
+                "lon": lon,
+                "alt": alt,
+            }
+        )
+
+    return assignments
+
+
+def run_dispatch_targets(args) -> None:
+    try:
+        assignments = parse_dispatch_assignments(args.assignments_json)
+    except ValueError as exc:
+        print(json.dumps([{"drone_id": None, "sysid": None, "success": False, "message": str(exc)}]))
+        sys.exit(1)
+
+    if not assignments:
+        print("[]")
+        return
+
+    conns = connect_all(host=args.host, base_port=args.port, port_step=args.port_step, count=args.count)
+    if not conns:
+        results = [
+            {
+                "drone_id": item.get("drone_id"),
+                "sysid": item["sysid"],
+                "success": False,
+                "message": "No SITL drones connected.",
+            }
+            for item in assignments
+        ]
+        print(json.dumps(results))
+        sys.exit(1)
+
+    conn_by_sysid = {}
+    for index, conn in conns:
+        sysid = int(getattr(conn, "target_system", 0) or 0)
+        if sysid > 0 and sysid not in conn_by_sysid:
+            conn_by_sysid[sysid] = conn
+        expected_sysid = index + 1
+        if expected_sysid not in conn_by_sysid:
+            conn_by_sysid[expected_sysid] = conn
+
+    results = []
+    for item in assignments:
+        target_sysid = item["sysid"]
+        conn = conn_by_sysid.get(target_sysid)
+        if conn is None:
+            results.append(
+                {
+                    "drone_id": item.get("drone_id"),
+                    "sysid": target_sysid,
+                    "success": False,
+                    "message": f"No MAVLink connection for sysid {target_sysid}.",
+                }
+            )
+            continue
+
+        try:
+            prime_guided_takeoff(
+                conn,
+                target_system=target_sysid,
+                alt=item["alt"],
+            )
+            send_position_target(
+                conn,
+                target_system=target_sysid,
+                lat=item["lat"],
+                lon=item["lon"],
+                alt=item["alt"],
+            )
+            results.append(
+                {
+                    "drone_id": item.get("drone_id"),
+                    "sysid": target_sysid,
+                    "success": True,
+                    "message": (
+                        f"Dispatched GUIDED/arm/takeoff/goto "
+                        f"lat={item['lat']:.6f} lon={item['lon']:.6f} alt={item['alt']:.1f}"
+                    ),
+                }
+            )
+        except Exception as exc:
+            results.append(
+                {
+                    "drone_id": item.get("drone_id"),
+                    "sysid": target_sysid,
+                    "success": False,
+                    "message": f"Dispatch failed: {exc}",
+                }
+            )
+
+    print(json.dumps(results))
+
+
 def collect_heartbeat_states(conns: list, count: int, timeout: float = STATUS_SAMPLE_SECONDS) -> dict:
     """
     Aggregate latest HEARTBEAT by sysid across all links.
@@ -175,12 +338,13 @@ def main() -> None:
         description="Send commands to SITL drone swarm via MAVLink",
         epilog="Example: python scripts/swarm_command.py status  # confirm state",
     )
-    parser.add_argument("command", help="status, arm, disarm, hover, loiter, takeoff, rtl, land")
+    parser.add_argument("command", help="status, arm, disarm, hover, loiter, takeoff, rtl, land, dispatch-targets")
     parser.add_argument("arg", nargs="?", type=float, default=0, help="Optional arg (e.g. altitude for takeoff)")
     parser.add_argument("--host", default="127.0.0.1", help="SITL server IP or hostname")
     parser.add_argument("--port", type=int, default=BASE_PORT, help=f"Base UDP port (default: {BASE_PORT})")
     parser.add_argument("--port-step", type=int, default=PORT_STEP, dest="port_step", help=f"Port step for multi-vehicle (default: {PORT_STEP}; use 10 for sim_vehicle.py --count)")
     parser.add_argument("--count", type=int, default=COUNT, help=f"Number of drones (default: {COUNT})")
+    parser.add_argument("--assignments-json", default="[]", help="JSON list of per-drone assignments for dispatch-targets")
     parser.add_argument("--wait-ack", action="store_true", help="After sending command, wait for COMMAND_ACK from each drone")
     parser.add_argument("--retries", type=int, default=COMMAND_RETRIES, help=f"Resend passes for reliability (default: {COMMAND_RETRIES})")
     parser.add_argument("--no-verify", action="store_true", help="Skip post-command verification from HEARTBEAT state")
@@ -191,6 +355,10 @@ def main() -> None:
 
     if cmd == "status":
         run_status(host=args.host, base_port=args.port, port_step=args.port_step, count=args.count)
+        return
+
+    if cmd == "dispatch-targets":
+        run_dispatch_targets(args)
         return
 
     conns = connect_all(host=args.host, base_port=args.port, port_step=args.port_step, count=args.count)

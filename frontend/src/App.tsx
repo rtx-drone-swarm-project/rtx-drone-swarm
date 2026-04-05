@@ -64,6 +64,16 @@ export default function App() {
     return `${Math.round(values.reduce((a, b) => a + b, 0) / values.length)}%`;
   }, [telemetry]);
 
+  const telemetryMode = useMemo(() => {
+    const sources = telemetry
+      .map((drone) => drone.telemetry_source)
+      .filter((value): value is string => typeof value === "string" && value.length > 0);
+    if (!sources.length) return wsConnected ? "NO DATA" : "DISCONNECTED";
+    if (sources.some((source) => source === "sitl")) return "LIVE SITL";
+    if (sources.every((source) => source === "simulated")) return "SIMULATED";
+    return "MIXED";
+  }, [telemetry, wsConnected]);
+
   const validDrones = useMemo<ValidDrone[]>(
     () =>
       telemetry
@@ -287,6 +297,7 @@ export default function App() {
             searchStatus={searchStatus}
             averageBattery={averageBattery}
             lostHikerCount={lostHikerCount}
+            telemetryMode={telemetryMode}
           />
           <LegendPanel />
         </aside>

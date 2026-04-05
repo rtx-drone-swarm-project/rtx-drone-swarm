@@ -3,10 +3,22 @@
 # Requires ArduPilot clone. Set ARDUPILOT_PATH if not ~/ardupilot.
 #
 # Logs: SITL outputs to logs/sitl/<run_id>/, capacity metrics to logs/swarm/
+#
+# Networking:
+# - By default SITL sends MAVLink UDP outputs to 127.0.0.1:14550,14560,...
+# - Override SITL_OUT_HOST to route telemetry to a backend container/service/VM.
+# Spawn:
+# - Set SITL_HOME="lat,lon,alt,heading" to start the swarm near a mission area.
+# - Otherwise the script uses SITL_LOCATION (default: CMAC).
 
 set -e
 COUNT="${1:-15}"
-ARDUPILOT_PATH="${ARDUPILOT_PATH:-$HOME/drone_project/ardupilot}"
+ARDUPILOT_PATH="${ARDUPILOT_PATH:-$HOME/ardupilot}"
+SITL_OUT_HOST="${SITL_OUT_HOST:-127.0.0.1}"
+SITL_HOME="${SITL_HOME:-}"
+SITL_LOCATION="${SITL_LOCATION:-CMAC}"
+BASE_PORT="${SITL_BASE_PORT:-14550}"
+PORT_STEP="${SITL_PORT_STEP:-10}"
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 LOG_BASE="$(cd "$(dirname "$0")/.." && pwd)/logs"
 mkdir -p "$LOG_BASE/sitl" "$LOG_BASE/swarm" "$LOG_BASE/cloud"
@@ -27,29 +39,41 @@ echo "Starting $COUNT headless SITL drones (run $RUN_ID)"
 echo "SITL logs: $SITL_LOG"
 echo "Swarm log: $SWARM_LOG"
 echo "Cloud log dir: $LOG_BASE/cloud"
+echo "Telemetry target: $SITL_OUT_HOST:$BASE_PORT step $PORT_STEP"
+if [[ -n "$SITL_HOME" ]]; then
+  echo "Spawn home: $SITL_HOME"
+else
+  echo "Spawn location: $SITL_LOCATION"
+fi
 echo ""
 
 cd "$ARDUPILOT_PATH"
 # Use swarm mode: --count, --auto-sysid, --location, --auto-offset-line so they don't overlap
-# Omit --map --console for headless (no GUI). MAVProxy runs for MAVLink on UDP 14550, 14551, ...
-
-# Base port and port step
-BASE_PORT=14550
-PORT_STEP=10
+# Omit --map --console for headless (no GUI).
 
 # Construct --out parameters for each drone
 OUT_ARGS=""
 for ((i=0;i<COUNT;i++)); do
   PORT=$((BASE_PORT + i*PORT_STEP))
-  OUT_ARGS+=" --out 127.0.0.1:$PORT"
+  OUT_ARGS+=" --out ${SITL_OUT_HOST}:$PORT"
 done
 
+SIM_VEHICLE_ARGS=(
+  ./Tools/autotest/sim_vehicle.py
+  -v ArduCopter
+  -f quad
+  --count "$COUNT"
+  --auto-sysid
+  --auto-offset-line 90,10
+  --mavproxy-args="--cmd=\"module load swarm\""
+  -w
+)
+
+if [[ -n "$SITL_HOME" ]]; then
+  SIM_VEHICLE_ARGS+=(--custom-location "$SITL_HOME")
+else
+  SIM_VEHICLE_ARGS+=(--location "$SITL_LOCATION")
+fi
+
 # Start SITL with separate UDP outputs for each drone
-./Tools/autotest/sim_vehicle.py -v ArduCopter -f quad \
-  --count "$COUNT" \
-  --auto-sysid \
-  --location CMAC \
-  --auto-offset-line 90,10 \
-  --mavproxy-args="--cmd=\"module load swarm\"" \
-  -w $OUT_ARGS \
-  2>&1 | tee "$SWARM_LOG"
+"${SIM_VEHICLE_ARGS[@]}" $OUT_ARGS 2>&1 | tee "$SWARM_LOG"

@@ -16,6 +16,9 @@ export type TelemetryDrone = {
   alt?: number | string | null;
   heading?: number | string | null;
   battery_remaining?: number | null;
+  telemetry_source?: string | null;
+  mode?: string | null;
+  armed?: boolean | null;
   target_lat?: number;
   target_lon?: number;
   role?: string | null;
