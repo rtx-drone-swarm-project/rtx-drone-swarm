@@ -10,11 +10,8 @@ ardupilot/
 node_modules/
 .pytest_cache/
 .vscode/
-<<<<<<< HEAD
 ardupilot/
 .DS_Store
-=======
->>>>>>> ac75e11eaaec3984dfda61d39b64f78ea1d3be8c
 *.tlog
 *.raw
 watch_*
