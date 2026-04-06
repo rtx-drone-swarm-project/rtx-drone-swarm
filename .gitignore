@@ -15,4 +15,9 @@ ardupilot/
 *.tlog
 *.raw
 watch_*
-*.bin
+
+# Catch All Ignores
+_*
+.*
+*.log
+*.log.*

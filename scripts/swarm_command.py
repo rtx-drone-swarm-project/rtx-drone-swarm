@@ -38,13 +38,15 @@ GOTO_TYPE_MASK = 0b110111111000
 # ArduCopter custom_mode -> name (subset)
 COPTER_MODE_NAMES = {
     0: "STABILIZE",
+    1: "ACRO",
     2: "ALT_HOLD",
-    3: "LOITER",
-    5: "GUIDED",
+    3: "AUTO",
+    4: "GUIDED",
+    5: "LOITER",
     6: "RTL",
     7: "CIRCLE",
     9: "LAND",
-    15: "AUTO",
+    15: "AUTOTUNE",
 }
 
 
@@ -130,7 +132,7 @@ def send_position_target(conn, target_system: int, lat: float, lon: float, alt: 
 
 def prime_guided_takeoff(conn, target_system: int, alt: float, target_component: int = 1) -> None:
     # Put the copter into GUIDED, arm it, and request takeoff before sending goto.
-    send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, target_component, 1, 5, 0, 0, 0, 0, 0)
+    send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, target_component, 1, 4, 0, 0, 0, 0, 0)
     send_command(conn, mav.MAV_CMD_COMPONENT_ARM_DISARM, target_system, target_component, 1, 21196)
     send_command(conn, mav.MAV_CMD_NAV_TAKEOFF, target_system, target_component, 0, 0, 0, 0, 0, 0, alt)
 
@@ -385,12 +387,12 @@ def main() -> None:
                 elif cmd == "disarm":
                     send_command(conn, mav.MAV_CMD_COMPONENT_ARM_DISARM, target_system, 1, 0, 0)
                 elif cmd in ("hover", "loiter"):
-                    # LOITER mode = 3 in ArduCopter.
-                    send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, 1, 1, 3, 0, 0, 0, 0, 0)
+                    # LOITER mode = 5 in ArduCopter.
+                    send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, 1, 1, 5, 0, 0, 0, 0, 0)
                 elif cmd == "takeoff":
                     # Auto-arm + GUIDED before takeoff for better reliability in SITL.
                     send_command(conn, mav.MAV_CMD_COMPONENT_ARM_DISARM, target_system, 1, 1, 21196)
-                    send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, 1, 1, 5, 0, 0, 0, 0, 0)
+                    send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, 1, 1, 4, 0, 0, 0, 0, 0)
                     send_command(conn, mav.MAV_CMD_NAV_TAKEOFF, target_system, 1, 0, 0, 0, 0, 0, 0, arg or 5)
                 elif cmd == "rtl":
                     send_command(conn, mav.MAV_CMD_DO_SET_MODE, target_system, 1, 1, 6, 0, 0, 0, 0, 0)
