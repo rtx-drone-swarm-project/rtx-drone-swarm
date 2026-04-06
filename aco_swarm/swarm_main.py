@@ -34,6 +34,7 @@ import subprocess
 import sys
 import time
 import threading
+import numpy as np
 from typing import List
 
 from stigmergy_engine import InMemoryPheromoneGrid, GridConfig
@@ -301,6 +302,20 @@ def main():
         log.info("Running indefinitely — Ctrl+C to stop")
         while True:
             time.sleep(1)
+
+            #CHECKS PARITIONS
+            for agent in agents:
+                if agent.lat is None or agent.territory is None or len(agent.territory) == 0:
+                    continue
+                pos = np.array([agent.lat, agent.lon])
+                dists = np.linalg.norm(agent.territory - pos, axis=1)
+                nearest = dists.min()
+                in_zone = nearest < 0.002
+                log.info(
+                    f"[Drone {agent.drone_id}] pos=({agent.lat:.5f},{agent.lon:.5f}) "
+                    f"nearest_territory_point={nearest:.5f}deg "
+                    f"{'✓ IN ZONE' if in_zone else '✗ OUT OF ZONE'}"
+                )
 
 
 if __name__ == "__main__":
