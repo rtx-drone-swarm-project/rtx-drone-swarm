@@ -17,8 +17,7 @@ Start SITL manually before running this script:
   # Terminal 2 — SITL (paste --home output from above)
   cd ~/ardupilot/ArduCopter
   python3 ../Tools/autotest/sim_vehicle.py \
-    -v ArduCopter --count=15 --no-mavproxy --speedup=1 --auto-sysid \
-    '--home=<paste here>'
+    -v ArduCopter --count=15 --no-mavproxy --speedup=1 --auto-sysid 
 
   # Terminal 3 — Swarm (MAVProxy map opens automatically)
   python3 swarm_main.py --drones 15
@@ -34,11 +33,13 @@ import socket
 import subprocess
 import sys
 import time
+import threading
 from typing import List
 
 from stigmergy_engine import InMemoryPheromoneGrid, GridConfig
 from drone_agent import DroneAgent
-from visualiser import SwarmVisualiser
+from voronoi_aco_hybrid import VoronoiACOPlanner, DroneState
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -168,6 +169,18 @@ def parse_args():
                    help="Print --home string for sim_vehicle.py and exit")
     return p.parse_args()
 
+# -- Lloyd Helper
+def _lloyd_loop(planner, agents, interval=10):
+    while True:
+        time.sleep(interval)
+        states = [DroneState(id=a.drone_id, lat=a.lat, lon=a.lon)
+                  for a in agents if a.lat is not None]
+        if not states:
+            continue
+        planner._run_lloyd(states)
+        for state, agent in zip(states, agents):
+            agent.territory = state.territory
+
 
 # ── Main ─────────────────────────────────────────────────────────────
 def main():
@@ -200,6 +213,22 @@ def main():
     )
     grid = InMemoryPheromoneGrid(cfg)
     grid.start_evaporation()
+
+    #ACO_VORONOI IMPLEMENTATION
+    bounds = {
+    "min_lat": cfg.lat_min, "max_lat": cfg.lat_max,
+    "min_lon": cfg.lon_min, "max_lon": cfg.lon_max,
+    }
+    planner = VoronoiACOPlanner(
+        bounds=bounds,
+        grid_config=cfg,
+        pheromone_grid=grid,
+        n_grid=15,
+        lloyd_interval=10,
+        aco_radius=2,
+        alpha=0.3,
+    )                   
+
     log.info(f"Pheromone grid {cfg.rows}×{cfg.cols} | evap={cfg.evaporation_rate}")
 
     # 1. Wait for SITL ports
@@ -219,6 +248,7 @@ def main():
             drone_id=i,
             connection=f"udpin:127.0.0.1:{agent_udp(i)}",
             grid=grid,
+            planner=planner,
             altitude=args.altitude,
             loop_hz=args.loop_hz,
             expected_sysid=i + 1,
@@ -227,11 +257,17 @@ def main():
         drone.start_lon = lon
         drone_list.append(drone)
 
-    # 4. Connect
+    # 4a. Connect
     agents = connect_all(drone_list)
     if not agents:
         log.error("No drones connected — exiting.")
         sys.exit(1)
+
+    # 4b. Lloyd background thread
+    threading.Thread(
+    target=_lloyd_loop, args=(planner, agents), daemon=True
+    ).start()
+    log.info("Lloyd re-partition thread started ✓")
 
     # 5. Staggered takeoffs
     log.info("Starting agents…")

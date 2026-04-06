@@ -15,6 +15,7 @@ from typing import Optional
 
 from pymavlink import mavutil
 from stigmergy_engine import InMemoryPheromoneGrid
+from voronoi_aco_hybrid import VoronoiACOPlanner, DroneState
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ class DroneAgent:
         altitude: float = 10.0,
         loop_hz: float  = 0.5,
         expected_sysid: int = None,
+        planner=None,    
     ):
         self.drone_id       = drone_id
         self.connection_str = connection
@@ -55,6 +57,8 @@ class DroneAgent:
         self.lon:    Optional[float] = None
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self.planner = planner
+        self.territory = None   
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
@@ -134,13 +138,17 @@ class DroneAgent:
             log.error(f"[Drone {self.drone_id}] Fatal: {e}", exc_info=True)
 
     def _stigmergy_step(self):
-        self.grid.deposit(self.lat, self.lon)
-        target_lat, target_lon = self.grid.get_gradient(self.lat, self.lon)
+        if self.planner:
+            state = DroneState(id=self.drone_id, lat=self.lat, lon=self.lon)
+            # Restore territory if lloyd thread has updated it
+            if self.territory is not None:
+                state.territory = self.territory
+            target_lat, target_lon = self.planner._aco_waypoint(state)
+            self.planner.pheromone.deposit(self.lat, self.lon)
+        else:
+            target_lat, target_lon = self.grid.get_gradient(self.lat, self.lon)
+            self.grid.deposit(self.lat, self.lon)
         self._goto(target_lat, target_lon, self.altitude)
-        log.debug(
-            f"[Drone {self.drone_id}] ({self.lat:.5f},{self.lon:.5f}) "
-            f"→ ({target_lat:.5f},{target_lon:.5f})"
-        )
 
     # ── MAVLink helpers ─────────────────────────────────────────────
 
