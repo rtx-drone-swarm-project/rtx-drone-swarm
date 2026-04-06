@@ -15,9 +15,8 @@ Start SITL manually before running this script:
   python3 swarm_main.py --print-homes
 
   # Terminal 2 — SITL (paste --home output from above)
-  cd ~/ardupilot/ArduCopter
-  python3 ../Tools/autotest/sim_vehicle.py \
-    -v ArduCopter --count=15 --no-mavproxy --speedup=1 --auto-sysid 
+   cd ~/Desktop/ICS/180/rtx-drone-swarm/ardupilot/ArduCopter && 
+   python3 ../Tools/autotest/sim_vehicle.py -v ArduCopter --count 5 --no-mavproxy --speedup 1 --auto-sysid --custom-location=-35.363262,149.165237,0,0
 
   # Terminal 3 — Swarm (MAVProxy map opens automatically)
   python3 swarm_main.py --drones 15
@@ -55,6 +54,8 @@ SITL_PORT_STEP = 10
 AGENT_UDP_BASE = 14560
 MAVPROXY_WAIT  = 40
 SPAWN_RADIUS_M = 15.0
+STATE_FILE     = os.path.join(os.path.dirname(__file__), ".agent_state.npy")
+PATH_MAX_LEN   = 200   # max positions kept per drone trail
 
 
 # ── Port helpers ─────────────────────────────────────────────────────
@@ -90,6 +91,11 @@ def launch_mavproxy(num_drones: int):
     for i in range(num_drones):
         parts.append(f"--out=udpout:127.0.0.1:{agent_udp(i)}")
     parts += ["--map", "--console"]
+
+    # Load Voronoi overlay module
+    module_path = os.path.join(os.path.dirname(__file__), "mavproxy_voronoi")
+    parts.append(f"--load-module={module_path}")
+
     cmd = " ".join(parts)
 
     venv     = os.environ.get("VIRTUAL_ENV", "")
@@ -151,6 +157,37 @@ def connect_all(drone_list: List[DroneAgent]) -> List[DroneAgent]:
     return agents
 
 
+# ── State writer (feeds MAVProxy Voronoi module) ─────────────────────
+def _write_state(agents: List[DroneAgent], planner: VoronoiACOPlanner):
+    """
+    Serialise current drone positions, territories, and flight paths
+    to .agent_state.npy so mavproxy_voronoi.py can read them.
+    """
+    agent_data = []
+    for a in agents:
+        if a.lat is None:
+            continue
+        # Accumulate flight path trail on the agent object
+        if not hasattr(a, "_path"):
+            a._path = []
+        a._path.append([a.lat, a.lon])
+        if len(a._path) > PATH_MAX_LEN:
+            a._path = a._path[-PATH_MAX_LEN:]
+
+        agent_data.append({
+            "id":        a.drone_id,
+            "lat":       a.lat,
+            "lon":       a.lon,
+            "territory": a.territory.tolist() if a.territory is not None and len(a.territory) > 0 else [],
+            "path":      list(a._path),
+        })
+
+    np.save(STATE_FILE, {
+        "pheromone": planner.pheromone.get_snapshot(),
+        "agents":    agent_data,
+    })
+
+
 # ── CLI ──────────────────────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser(description="Stigmergy swarm — macOS SITL")
@@ -170,7 +207,8 @@ def parse_args():
                    help="Print --home string for sim_vehicle.py and exit")
     return p.parse_args()
 
-# -- Lloyd Helper
+
+# ── Lloyd helper ─────────────────────────────────────────────────────
 def _lloyd_loop(planner, agents, interval=10):
     while True:
         time.sleep(interval)
@@ -192,7 +230,6 @@ def main():
 
     positions = circular_spawn(args.drones, home_lat, home_lon, args.spawn_radius)
 
-    # Just print the --home string for SITL and exit
     if args.print_homes:
         homes = "|".join(f"{lat:.7f},{lon:.7f},0,0" for lat, lon in positions)
         print(f"--home='{homes}'")
@@ -215,10 +252,10 @@ def main():
     grid = InMemoryPheromoneGrid(cfg)
     grid.start_evaporation()
 
-    #ACO_VORONOI IMPLEMENTATION
+    # ACO + Voronoi planner
     bounds = {
-    "min_lat": cfg.lat_min, "max_lat": cfg.lat_max,
-    "min_lon": cfg.lon_min, "max_lon": cfg.lon_max,
+        "min_lat": cfg.lat_min, "max_lat": cfg.lat_max,
+        "min_lon": cfg.lon_min, "max_lon": cfg.lon_max,
     }
     planner = VoronoiACOPlanner(
         bounds=bounds,
@@ -228,21 +265,21 @@ def main():
         lloyd_interval=10,
         aco_radius=2,
         alpha=0.3,
-    )                   
+    )
 
     log.info(f"Pheromone grid {cfg.rows}×{cfg.cols} | evap={cfg.evaporation_rate}")
 
     # 1. Wait for SITL ports
     wait_for_ports(args.drones, timeout=300.0)
 
-    # 2. Launch MAVProxy (provides udpout to agents)
+    # 2. Launch MAVProxy
     if not args.no_map:
         launch_mavproxy(args.drones)
         log.info("Waiting 20s for MAVProxy to stabilise…")
         time.sleep(20)
         log.info("MAVProxy ready ✓")
 
-    # 3. Build agents — UDP via MAVProxy udpout
+    # 3. Build agents
     drone_list = []
     for i, (lat, lon) in enumerate(positions):
         drone = DroneAgent(
@@ -266,7 +303,7 @@ def main():
 
     # 4b. Lloyd background thread
     threading.Thread(
-    target=_lloyd_loop, args=(planner, agents), daemon=True
+        target=_lloyd_loop, args=(planner, agents), daemon=True
     ).start()
     log.info("Lloyd re-partition thread started ✓")
 
@@ -275,16 +312,13 @@ def main():
     for agent in agents:
         agent.start()
         time.sleep(0.8)
-    #vis = SwarmVisualiser(grid, agents)
-    #vis._run()
 
-    # 6. Shutdown
+    # 6. Shutdown handlers
     def _cleanup():
         log.info("Shutting down…")
         for a in agents:
             a.stop()
         grid.stop_evaporation()
-        #vis.stop()
         log.info("Done.")
 
     def _signal_handler(sig, frame):
@@ -294,21 +328,20 @@ def main():
     signal.signal(signal.SIGINT,  _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
-    if args.duration > 0:
-        log.info(f"Running for {args.duration}s — Ctrl+C to stop early")
-        time.sleep(args.duration)
-        _cleanup()
-    else:
-        log.info("Running indefinitely — Ctrl+C to stop")
+    # 7. Main loop — write state + check partitions
+    def _main_loop():
         while True:
-            time.sleep(1)
+            time.sleep(2)
 
-            #CHECKS PARITIONS
+            # Write state for MAVProxy Voronoi overlay
+            _write_state(agents, planner)
+
+            # Check partition compliance
             for agent in agents:
                 if agent.lat is None or agent.territory is None or len(agent.territory) == 0:
                     continue
-                pos = np.array([agent.lat, agent.lon])
-                dists = np.linalg.norm(agent.territory - pos, axis=1)
+                pos    = np.array([agent.lat, agent.lon])
+                dists  = np.linalg.norm(agent.territory - pos, axis=1)
                 nearest = dists.min()
                 in_zone = nearest < 0.002
                 log.info(
@@ -316,6 +349,17 @@ def main():
                     f"nearest_territory_point={nearest:.5f}deg "
                     f"{'✓ IN ZONE' if in_zone else '✗ OUT OF ZONE'}"
                 )
+
+    if args.duration > 0:
+        log.info(f"Running for {args.duration}s — Ctrl+C to stop early")
+        deadline = time.time() + args.duration
+        while time.time() < deadline:
+            _write_state(agents, planner)
+            time.sleep(2)
+        _cleanup()
+    else:
+        log.info("Running indefinitely — Ctrl+C to stop")
+        _main_loop()
 
 
 if __name__ == "__main__":
