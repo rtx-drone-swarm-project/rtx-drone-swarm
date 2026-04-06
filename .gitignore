@@ -13,3 +13,9 @@ node_modules/
 *.tlog
 *.raw
 watch_*
+
+# Catch All Ignores
+_*
+.*
+*.log
+*.log.*
