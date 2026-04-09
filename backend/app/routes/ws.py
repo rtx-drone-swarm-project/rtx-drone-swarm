@@ -1,3 +1,5 @@
+"""WebSocket route for streaming telemetry to browser clients."""
+
 import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -11,6 +13,7 @@ router = APIRouter()
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    """Accept a telemetry socket and push the latest idle SITL snapshot on connect."""
     await manager.connect(websocket)
     try:
         drones = telemetry_drones_from_sitl_bridge()

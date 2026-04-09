@@ -28,6 +28,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(messag
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    """Start background SITL telemetry on startup and stop it during shutdown."""
     sitl_bridge.start()
     idle_task = asyncio.create_task(idle_sitl_telemetry_loop())
     try:

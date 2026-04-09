@@ -1,3 +1,5 @@
+"""Mission lifecycle routes for create, start, dispatch, stop, and delete flows."""
+
 import asyncio
 import logging
 import random
@@ -29,6 +31,7 @@ router = APIRouter()
 
 @router.post("/missions")
 def create_mission(mission_data: MissionCreate):
+    """Create an in-memory mission record from validated request data."""
     mission_id = str(uuid.uuid4())
     mission = {
         "id": mission_id,
@@ -44,7 +47,16 @@ def create_mission(mission_data: MissionCreate):
     return mission
 
 
+@router.get("/missions/{mission_id}")
+def get_mission(mission_id: str):
+    """Return one stored mission or raise ``404`` if the id is unknown."""
+    if mission_id not in missions_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    return missions_db[mission_id]
+
+
 async def _background_dispatch(mission: dict, mission_id: str, assignments: List[dict]) -> None:
+    """Run startup dispatch in the background and broadcast normalized results."""
     logger.info("_background_dispatch: dispatching %d drones for mission %s", len(assignments), mission_id)
     try:
         results = await run_direct_dispatch(assignments)
@@ -81,6 +93,7 @@ async def _background_dispatch(mission: dict, mission_id: str, assignments: List
 
 @router.post("/missions/{mission_id}/start")
 async def start_mission(mission_id: str, start_data: Optional[MissionStart] = None):
+    """Start a mission, seed targets and coverage points, then launch simulation tasks."""
     if mission_id not in missions_db:
         raise HTTPException(status_code=404, detail="Mission not found")
 
@@ -149,6 +162,7 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
 
 @router.post("/missions/{mission_id}/dispatch-targets")
 async def dispatch_targets(mission_id: str, dispatch_data: DispatchTargetsRequest):
+    """Dispatch one or more mission drones to explicit coordinates via the helper script."""
     if mission_id not in missions_db:
         raise HTTPException(status_code=404, detail="Mission not found")
 
@@ -174,6 +188,7 @@ async def dispatch_targets(mission_id: str, dispatch_data: DispatchTargetsReques
 
 @router.post("/missions/{mission_id}/stop")
 async def stop_mission(mission_id: str):
+    """Stop a mission and broadcast that it is no longer running."""
     if mission_id not in missions_db:
         raise HTTPException(status_code=404, detail="Mission not found")
 
@@ -198,6 +213,7 @@ async def stop_mission(mission_id: str):
 
 @router.delete("/missions/{mission_id}")
 async def delete_mission(mission_id: str):
+    """Delete a mission record and notify connected clients that it is gone."""
     if mission_id not in missions_db:
         raise HTTPException(status_code=404, detail="Mission not found")
     mission = missions_db.pop(mission_id)

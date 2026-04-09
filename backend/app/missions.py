@@ -1,3 +1,5 @@
+"""Mission-state helpers shared by routes, dispatch, and simulation."""
+
 import asyncio
 import json
 import math
@@ -22,6 +24,7 @@ missions_db: Dict[str, dict] = {}
 
 
 def _coerce_sysid(value: object) -> Optional[int]:
+    """Convert a candidate system id into a positive integer or None."""
     try:
         parsed = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -30,6 +33,7 @@ def _coerce_sysid(value: object) -> Optional[int]:
 
 
 def _dispatch_failure_row(drone_id: Optional[str], sysid: Optional[int], message: str) -> dict:
+    """Build a normalized dispatch failure payload."""
     return {
         "drone_id": drone_id,
         "sysid": sysid,
@@ -39,6 +43,7 @@ def _dispatch_failure_row(drone_id: Optional[str], sysid: Optional[int], message
 
 
 def _extract_result_payload(stdout_text: str) -> Optional[List[dict]]:
+    """Extract the last JSON list payload from a helper script's stdout text."""
     if not stdout_text:
         return None
 
@@ -55,6 +60,7 @@ def _extract_result_payload(stdout_text: str) -> Optional[List[dict]]:
 
 
 def _normalize_script_results(raw_results: object, expected_assignments: List[dict]) -> List[dict]:
+    """Match raw script rows back to requested assignments and normalize the shape."""
     candidate_rows: List[dict] = []
     if isinstance(raw_results, list):
         candidate_rows = [row for row in raw_results if isinstance(row, dict)]
@@ -104,6 +110,7 @@ def _normalize_script_results(raw_results: object, expected_assignments: List[di
 
 
 def _mission_drone_to_sysid_map(mission: dict) -> Dict[str, int]:
+    """Infer or persist a mission's drone-id to MAVLink sysid mapping."""
     mapping: Dict[str, int] = {}
     for index, drone in enumerate(mission.get("drones", []), start=1):
         drone_id = drone.get("id")
@@ -116,6 +123,7 @@ def _mission_drone_to_sysid_map(mission: dict) -> Dict[str, int]:
 
 
 def _sync_mission_drones_with_sitl(mission: dict) -> set[str]:
+    """Overlay live SITL telemetry onto mission drones and return live drone ids."""
     from app.sitl import sitl_bridge
 
     live_states = sitl_bridge.get_states_by_sysid()
@@ -151,6 +159,7 @@ def _sync_mission_drones_with_sitl(mission: dict) -> set[str]:
 
 
 def _build_start_dispatch_assignments(mission: dict) -> List[dict]:
+    """Create startup dispatch commands from any pre-assigned drone target coordinates."""
     assignments = []
     for index, drone in enumerate(mission.get("drones", []), start=1):
         target_lat = drone.get("target_lat")
@@ -173,6 +182,7 @@ def _build_start_dispatch_assignments(mission: dict) -> List[dict]:
 
 
 def _mission_bounds_center(bounds: dict) -> Tuple[float, float]:
+    """Return the geographic midpoint of mission bounds."""
     return (
         (float(bounds["min_lat"]) + float(bounds["max_lat"])) / 2.0,
         (float(bounds["min_lon"]) + float(bounds["max_lon"])) / 2.0,
@@ -180,6 +190,7 @@ def _mission_bounds_center(bounds: dict) -> Tuple[float, float]:
 
 
 def _generate_coverage_points(bounds: dict, drone_count: int) -> List[Tuple[float, float]]:
+    """Generate evenly distributed coverage points inside mission bounds."""
     if drone_count <= 0:
         return []
 
@@ -193,6 +204,7 @@ def _generate_coverage_points(bounds: dict, drone_count: int) -> List[Tuple[floa
 
 
 def _assign_start_area_targets(mission: dict) -> List[dict]:
+    """Assign each mission drone an initial coverage point and matching dispatch row."""
     drones = mission.get("drones", [])
     points = _generate_coverage_points(mission["bounds"], len(drones))
     assignments: List[dict] = []
@@ -219,6 +231,7 @@ def _assign_start_area_targets(mission: dict) -> List[dict]:
 
 
 async def _ensure_sitl_running_for_mission(mission: dict) -> Optional[str]:
+    """Optionally auto-start SITL near the mission center when no bridge data exists."""
     from app.sitl import sitl_bridge
 
     if not AUTO_START_SITL_ON_MISSION_START:
@@ -252,6 +265,7 @@ async def _ensure_sitl_running_for_mission(mission: dict) -> Optional[str]:
 
 
 def _prepare_dispatch_assignments(request, mission: dict) -> Tuple[List[dict], List[dict]]:
+    """Resolve request assignments into valid dispatch rows plus preflight failures."""
     mission_sysid_map = _mission_drone_to_sysid_map(mission)
     valid_assignments: List[dict] = []
     preflight_failures: List[dict] = []

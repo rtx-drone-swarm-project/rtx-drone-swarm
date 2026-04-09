@@ -1,3 +1,5 @@
+"""Routes for inspecting the SITL bridge and manually testing dispatch."""
+
 import asyncio
 
 from fastapi import APIRouter, HTTPException
@@ -10,6 +12,7 @@ router = APIRouter()
 
 @router.post("/sitl/test-dispatch/{sysid}")
 async def test_dispatch_single(sysid: int, alt: float = 30.0):
+    """Dispatch a connected SITL drone to its current coordinates for smoke testing."""
     states = sitl_bridge.get_states_by_sysid()
     state = states.get(sysid)
     if state is None:
@@ -37,6 +40,7 @@ async def test_dispatch_single(sysid: int, alt: float = 30.0):
 
 @router.get("/sitl/status")
 def sitl_status():
+    """Return the bridge configuration plus the latest telemetry snapshot per drone."""
     states = sorted(sitl_bridge.get_states_by_sysid().values(), key=lambda row: row["sysid"])
     return {
         "host": sitl_bridge.host,

@@ -1,3 +1,5 @@
+"""Helpers for sending mission dispatch commands to live SITL drones."""
+
 import asyncio
 import concurrent.futures
 import json
@@ -14,7 +16,8 @@ from app.missions import (
 from app.settings import (
     DEFAULT_DISPATCH_HOST,
     DEFAULT_DISPATCH_TIMEOUT_SECONDS,
-    SWARM_COMMAND_SCRIPT,
+    DISPATCH_MAX_WORKERS,
+    SWARM_COMMAND_SCRIPT
 )
 from app.sitl import sitl_bridge
 
@@ -28,6 +31,7 @@ async def run_dispatch_script(
     timeout_seconds: float = DEFAULT_DISPATCH_TIMEOUT_SECONDS,
     count: Optional[int] = None,
 ) -> List[dict]:
+    """Run the external swarm command helper and normalize its JSON results."""
     if not assignments:
         return []
 
@@ -126,10 +130,12 @@ async def run_dispatch_script(
 
 
 async def run_direct_dispatch(assignments: List[dict]) -> List[dict]:
+    """Dispatch assignments directly through the in-process SITL bridge."""
     if not assignments:
         return []
 
     def _dispatch_one(item: dict) -> dict:
+        """Validate one assignment and forward it to ``sitl_bridge.dispatch_drone``."""
         sysid = _coerce_sysid(item.get("sysid"))
         if sysid is None:
             return _dispatch_failure_row(item.get("drone_id"), None, "Invalid sysid")
@@ -142,7 +148,9 @@ async def run_direct_dispatch(assignments: List[dict]) -> List[dict]:
         )
 
     def _dispatch_all() -> List[dict]:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(assignments)) as pool:
+        """Run direct dispatches in a bounded thread pool to limit concurrent arming."""
+        workers = DISPATCH_MAX_WORKERS
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [pool.submit(_dispatch_one, item) for item in assignments]
             return [f.result() for f in futures]
 
