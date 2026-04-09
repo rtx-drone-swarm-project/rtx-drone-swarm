@@ -1,21 +1,23 @@
 logs/
-*.pyc
 __pycache__/
 .venv/
 venv/
 .env
-*.log
 ardupilot/
 .DS_Store
 node_modules/
 .pytest_cache/
 .vscode/
-*.tlog
-*.raw
-watch_*
 
 # Catch All Ignores
 _*
 .*
 *.log
 *.log.*
+*.tlog
+*.raw
+watch_*
+*.pyc
+
+# Allowlist
+!__init__.py
