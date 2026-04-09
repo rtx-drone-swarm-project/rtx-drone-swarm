@@ -1,8 +1,16 @@
 services:
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      - SITL_HOST=${SITL_HOST:-127.0.0.1}
+      - SITL_BASE_PORT=${SITL_BASE_PORT:-14550}
+      - SITL_PORT_STEP=${SITL_PORT_STEP:-10}
+      - SITL_COUNT=${SITL_COUNT:-15}
     ports:
       - "8000:8000"   # Change to "8001:8000" if 8000 is in use
+      - "14550-14690:14550-14690/udp"   # Receive SITL MAVLink UDP from host or another machine
     restart: unless-stopped
   frontend:
     build: ./frontend

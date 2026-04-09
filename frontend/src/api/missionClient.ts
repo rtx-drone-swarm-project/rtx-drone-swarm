@@ -12,6 +12,7 @@ export type MissionApiClient = {
   createMission: (payload: MissionCreateRequest) => Promise<MissionRecord>;
   startMission: (missionId: string | number) => Promise<MissionRecord>;
   stopMission: (missionId: string | number) => Promise<MissionRecord>;
+  deleteMission: (missionId: string | number) => Promise<void>;
 };
 
 export function createMissionClient(apiBase: string): MissionApiClient {
@@ -31,6 +32,11 @@ export function createMissionClient(apiBase: string): MissionApiClient {
     stopMission: (missionId) =>
       requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/stop`, {
         method: "POST"
+      }),
+
+    deleteMission: (missionId) =>
+      requestJson<void>(`${apiBase}/missions/${missionId}`, {
+        method: "DELETE"
       })
   };
 }

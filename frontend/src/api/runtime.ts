@@ -8,10 +8,7 @@ export function getApiBase(apiPort: string): string {
 
 export function getWsUrl(apiPort: string): string {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-  const wsHost =
-    import.meta.env.DEV && typeof window !== "undefined"
-      ? window.location.host
-      : `${window.location.hostname}:${apiPort}`;
+  const wsHost = `${window.location.hostname}:${apiPort}`;
 
   return `${scheme}://${wsHost}/ws`;
 }

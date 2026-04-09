@@ -1,214 +1,73 @@
-# RTX – AI-Based Drone Swarm in Search and Rescue
+# RTX: AI-Based Drone Swarm for Search and Rescue
 
-A capstone prototype for coordinating and monitoring a simulated multi-drone “swarm” for search-and-rescue scenarios.
-We will use **ArduPilot SITL** (simulated autopilots), a **web UI** for mission input/visualization, and a **backend service** to connect UI and swarm control (in progress)
+RTX is a capstone prototype for coordinating a simulated multi-drone swarm in search-and-rescue scenarios. The system combines ArduPilot SITL drones, a FastAPI mission and telemetry service, and a React map UI so teams can launch a mission, observe live drone state, and test swarm behavior without physical hardware.
 
-## Team
-- Madison Lin (team lead)
+## Why It Matters
+
+This prototype demonstrates how a coordinated drone swarm could help search teams cover large areas faster, monitor vehicle state in real time, and evaluate mission behavior safely in simulation before field deployment.
+
+**Stack**
+- ArduPilot SITL for simulated drones
+- FastAPI backend for mission control, telemetry, and dispatch
+- React + Leaflet frontend for mission planning and visualization
+
+**Sponsor**
+- RTX
+- Sponsor liaisons: Simon Wong, Alex Joseph
+- Faculty advisor: Prof. Gago-Masague
+
+**Team**
+- Madison Lin (Team Lead)
 - Kaydee Reyes
 - Lawrence Tam
 - Ian Tang
 - Louie Gutierrez
 
-## Sponsor
-Sponsor: RTX  
-Sponsor Liaisons: Simon Wong, Alex Joseph  
-Faculty Advisor: Prof. Gago-Masague
+## Run the Demo
 
+These commands assume ArduPilot SITL is already installed and built on the host machine. If not, follow the one-time setup guide in [docs/SITL_QUICKSTART.md](docs/SITL_QUICKSTART.md).
 
-# ArduPilot SITL macOS Setup
-
-- **Official docs:** [Building setup (MacOSX)](https://ardupilot.org/dev/docs/building-setup-mac.html) and [SITL setup landing page](https://ardupilot.org/dev/docs/SITL-setup-landingpage.html).
-- **To run this project’s swarm:** do the setup below, then clone this repo and follow **Quickstart** from the repo root (use `./scripts/start_sitl_swarm.sh 15`). Also install MAVProxy and script deps (see below).
-
-## Prerequisites
-
-### 1. Xcode Command Line Tools
-
-```bash
-xcode-select --install
-```
-
-### 2. Homebrew
-
-Install [Homebrew](https://brew.sh/) if needed:
-
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-### 3. Clone ArduPilot
-
-```bash
-cd ~
-git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git
-cd ardupilot
-```
-
-### 4. Install ArduPilot dependencies (recommended)
-
-From the `ardupilot` directory:
-
-```bash
-sh ./Tools/environment_install/install-prereqs-mac.sh
-```
-
-Then reload your shell (or run `source ~/.zshrc` or `source ~/.bash_profile`).
-
-**Manual alternative** (if the script fails): install build tools and Python deps:
-
-```bash
-brew update
-brew install genromfs gcc-arm-none-eabi gawk
-# Python deps (use pip3 if you use Python 3 by default)
-pip3 install pyserial future empy
-```
-
-### 5. Build ArduPilot SITL
-
-From the `ardupilot` directory, configure and build (see [BUILD.md](https://github.com/ArduPilot/ardupilot/blob/master/BUILD.md) in that repo):
-
-```bash
-./waf configure --board sitl
-./waf copter
-```
-
-### 6. MAVProxy and project Python deps
-
-MAVProxy is required for the swarm script. On macOS you can use `readline` from Homebrew:
-
-```bash
-brew install readline
-pip3 install MAVProxy future pyserial empy
-```
-
-If you prefer the same deps as Linux: `pip3 install MAVProxy future gnureadline` (may need `brew install readline` first).
-
-From **this project’s repo root**, install script/backend deps:
+1. Install repo Python dependencies:
 
 ```bash
 pip3 install -r requirements.txt
-pip3 install -r backend/requirements.txt
 ```
 
-## Testing SITL (single copter)
+2. Start the simulated swarm from the repo root:
 
 ```bash
-cd ~/ardupilot/ArduCopter
-../Tools/autotest/sim_vehicle.py -v ArduCopter -f quad --map --console
+./scripts/start_sitl_swarm.sh 15
 ```
 
-In the MAVProxy console:
+3. In a second terminal, start the app stack:
 
-```bash
-mode guided
-arm throttle
-takeoff 40
-```
-
-To land: `mode rtl` or `mode land`.
-
----
-
-# ArduPilot SITL Windows Setup
-- Website Instructions - https://ardupilot.org/dev/docs/sitl-on-windows-wsl.html  
-- **To run this project’s swarm:** do the setup below in WSL, then clone this repo and follow **Quickstart** from the repo root (use `./scripts/start_sitl_swarm.sh 15` in WSL). Also install MAVProxy: `pip install MAVProxy future gnureadline`.
-
-## Prerequisites:
-### Install WSL
-Open PowerShell as Administrator and run:
-
-```powershell
-wsl --install
-```
-After Reboot, Ubuntu should ask you to create a username and password
-
-**ONLY IF UBUNTU DOES NOT INSTALL AUTOMATICALLY** run:
-```powershell
-wsl --install -d Ubuntu
-```
-
-## Steps:
-### Get Git on WSL
-```powershell
-sudo apt-get update
-
-sudo apt-get install git
-
-sudo apt-get install gitk git-gui
-```
-
-### Clone ArduPilot Repo
-```powershell
-git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git
-cd ardupilot
-```
-
-### Install ArduPilot Dependencies
-```powershell
-Tools/environment_install/install-prereqs-ubuntu.sh -y
-```
-
-### Reload WSL Terminal or Run:
-```powershell
-source ~/.profile
-```
-
-## Testing SITL:
-If you want to use VSCode with WSL follow this [link](https://ardupilot.org/dev/docs/editing-the-code-with-vscode.html#editing-the-code-with-vscode)
-
-Navigate to one of the vehicle directories (in this case Copter) and call sim_vehicle.py to start SITL.
-```powershell
-cd ~/ardupilot/ArduCopter
-../Tools/autotest/sim_vehicle.py --map --console
-```
-
-Send commands to SITL from the command prompt and observe the results on the map. You should see the altitude increase on the console
-```powershell
-mode guided
-arm throttle
-takeoff 40
-```
-
-When you’re ready to land you can set the mode to RTL (or LAND).
-```powershell
-mode rtl
-```
-
----
-
-## Quickstart (See something running)
-
-**Prerequisites for the swarm:** ArduPilot must be built and on your machine (see **ArduPilot SITL macOS Setup** or **ArduPilot SITL Windows Setup** above, or [ArduPilot dev docs](https://ardupilot.org/dev/index.html) for Linux). You also need **MAVProxy** and its deps (`pip install MAVProxy future gnureadline` on Linux/WSL; on macOS see the macOS section). Install script deps from the repo root: `pip install -r requirements.txt`. All commands below are from the **repo root**.
-
-### 1) Run a SITL swarm (n drones)
-In a terminal, start the swarm and leave it running:
-```bash
-./scripts/start_sitl_swarm.sh 15   # 15 for this project; use any number
-```
-
-### 2) In another terminal: send swarm commands
-```bash
-python3 scripts/swarm_command.py status   # confirm all drones are visible
-python3 scripts/swarm_command.py arm
-python3 scripts/swarm_command.py takeoff 5
-python3 scripts/swarm_command.py hover
-# python3 scripts/swarm_command.py land   # when done
-```
-See `scripts/swarm_command.py` for more commands (disarm, rtl, etc.).
-
-**Stop the swarm:** In the terminal where the swarm is running, press **Ctrl+C**. To kill from elsewhere: `pkill -f arducopter; pkill -f mavproxy`.
-
-### 3) (Optional) Run the web app
-- Please ensure that [Docker Desktop](https://www.docker.com/products/docker-desktop/) is downloaded and running in order to start the web app side.
 ```bash
 docker compose up --build
 ```
-- Frontend: http://localhost:5173  
-- Backend: http://localhost:8000/health
 
-## Repository Structure
-- `frontend/` - React + leaflet UI
-- `backend/` - FastAPI backend (currently /health, MAVLink)
-- `scripts/` - Current SITL swarm launcher utilizing MAVLink command tools
-- `docker-compose.yml` - local dev stack
+## What You Should See
+
+- Frontend: `http://localhost:5173`
+- Backend health: `http://localhost:8000/health`
+- SITL telemetry status: `http://localhost:8000/sitl/status`
+
+When SITL is connected correctly, `/sitl/status` should report `connected_count > 0` and include live drone entries.
+
+## Operational Notes
+
+- `scripts/start_sitl_swarm.sh` expects a local ArduPilot checkout at `~/ardupilot` by default. Override with `ARDUPILOT_PATH=/path/to/ardupilot`.
+- The default SITL telemetry ports are UDP `14550`, `14560`, `14570`, and so on.
+- Docker publishes UDP `14550-14690` to the backend container so host SITL can stream telemetry into the app.
+- Stop the swarm with `Ctrl+C` in the SITL terminal. If needed, kill remaining processes with `pkill -f arducopter` and `pkill -f mavproxy`.
+
+## Repository Layout
+
+- `frontend/` React + Leaflet mission UI
+- `backend/` FastAPI mission, telemetry, and dispatch service
+- `scripts/` SITL swarm launch and command helpers
+- `docker-compose.yml` local app stack for frontend + backend
+
+## More Detail
+
+- [SITL quickstart and platform setup](docs/SITL_QUICKSTART.md)
+- [Backend overview](backend/README.md)

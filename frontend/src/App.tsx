@@ -45,6 +45,7 @@ export default function App() {
   const [lon, setLon] = useState(DEFAULT_CENTER[1].toFixed(6));
   const [isValidCoord, setIsValidCoord] = useState(true);
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(DEFAULT_CENTER);
+  const [mapAutocentered, setMapAutocentered] = useState(false);
   const [selectedBounds, setSelectedBounds] = useState<Bounds | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [selectedDrone, setSelectedDrone] = useState<SelectedDrone>(null);
@@ -63,6 +64,16 @@ export default function App() {
     if (!values.length) return "--";
     return `${Math.round(values.reduce((a, b) => a + b, 0) / values.length)}%`;
   }, [telemetry]);
+
+  const telemetryMode = useMemo(() => {
+    const sources = telemetry
+      .map((drone) => drone.telemetry_source)
+      .filter((value): value is string => typeof value === "string" && value.length > 0);
+    if (!sources.length) return wsConnected ? "NO DATA" : "DISCONNECTED";
+    if (sources.some((source) => source === "sitl")) return "LIVE SITL";
+    if (sources.every((source) => source === "simulated")) return "SIMULATED";
+    return "MIXED";
+  }, [telemetry, wsConnected]);
 
   const validDrones = useMemo<ValidDrone[]>(
     () =>
@@ -102,7 +113,18 @@ export default function App() {
   }, [searchStatus]);
 
   const onTelemetry = useCallback((message: TelemetryMessage) => {
-    setTelemetry(Array.isArray(message.drones) ? message.drones : []);
+    const drones = Array.isArray(message.drones) ? message.drones : [];
+    setTelemetry(drones);
+    setMapAutocentered((prev) => {
+      if (prev) return prev;
+      const lats = drones.map((d) => Number(d.lat)).filter(Number.isFinite);
+      const lons = drones.map((d) => Number(d.lon)).filter(Number.isFinite);
+      if (!lats.length) return prev;
+      const avgLat = lats.reduce((a, b) => a + b, 0) / lats.length;
+      const avgLon = lons.reduce((a, b) => a + b, 0) / lons.length;
+      setMapCenter([avgLat, avgLon]);
+      return true;
+    });
   }, []);
 
   const onMissionStatus = useCallback(
@@ -287,6 +309,7 @@ export default function App() {
             searchStatus={searchStatus}
             averageBattery={averageBattery}
             lostHikerCount={lostHikerCount}
+            telemetryMode={telemetryMode}
           />
           <LegendPanel />
         </aside>
