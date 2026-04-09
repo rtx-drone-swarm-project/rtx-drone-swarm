@@ -30,6 +30,10 @@ Expected result:
 - `/health` returns `{"ok": true}`
 - `/sitl/status` reports `connected_count > 0`
 
+## Recommended Startup
+
+At current state of V1 please follow the **Host SITL + host backend** setup at the bottom for a full end-to-end demo
+
 ## macOS Setup
 
 Official references:
