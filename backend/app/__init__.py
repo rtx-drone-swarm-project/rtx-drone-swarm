@@ -1,7 +1,7 @@
-# Backend for the search and rescue drone simulation. That currently includes:
-# - FastAPI server with endpoints for creating and managing missions
-# - Pydantic models for request validation and response formatting
-# - In-memory "database" for storing mission data (to be replaced with Redis later)
+"""Backend package entrypoint.
 
-# Re-export the fully-routed app from main so that `from app import app` works.
-from app.main import app 
+This package exposes the fully configured FastAPI application so tests and
+local runners can import ``app`` directly from ``app``.
+"""
+
+from app.main import app

@@ -3,6 +3,8 @@ from fastapi.testclient import TestClient
 from app import app
 from app.main import missions_db, simulation_loop, manager, _sync_mission_drones_with_sitl, sitl_bridge
 import app.main as main_module
+import app.routes.missions as missions_routes
+import app.simulation as simulation_module
 
 client = TestClient(app)
 
@@ -68,6 +70,36 @@ def test_create_mission():
         assert res_drone["lon"] == req_drone["lon"]
         assert res_drone["status"] == "idle"
     assert data["hikers"] == mission_data["hikers"]
+
+
+def test_get_mission_returns_stored_bounds():
+    mission_data = {
+        "name": "Mission Lookup Test",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.05, "lon": -118.05}
+        ],
+    }
+
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    response = client.get(f"/missions/{mission_id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == mission_id
+    assert payload["bounds"] == mission_data["bounds"]
+
+    missing_response = client.get("/missions/invalid_id")
+    assert missing_response.status_code == 404
+    assert missing_response.json() == {"detail": "Mission not found"}
+
 
 def test_start_mission():
     mission_data = {
@@ -199,13 +231,13 @@ def test_simulation_emits_target_found_and_completes_mission():
     assert isinstance(target_found["found_at"], int)
 
 
-def test_simulation_completes_when_progress_reaches_100():
-    mission_id = "sim-progress-complete"
+def test_simulation_progress_only_advances_when_targets_are_found():
+    mission_id = "sim-progress-from-found-targets"
     missions_db[mission_id] = {
         "id": mission_id,
-        "name": "Progress Completion Test",
+        "name": "Progress From Found Targets Test",
         "status": "running",
-        "progress": 99.7,
+        "progress": 0.0,
         "elapsed_seconds": 0,
         "bounds": {
             "min_lat": 34.0,
@@ -220,7 +252,10 @@ def test_simulation_completes_when_progress_reaches_100():
                 "lon": -117.5,
             }
         ],
-        "targets": [],
+        "targets": [
+            {"id": "t1", "lat": 34.5, "lon": -117.5, "status": "found"},
+            {"id": "t2", "lat": 34.6, "lon": -117.4, "status": "wandering"},
+        ],
         "hikers": [],
     }
 
@@ -230,8 +265,53 @@ def test_simulation_completes_when_progress_reaches_100():
     original_broadcast = manager.broadcast
     manager.broadcast = no_op_broadcast
     try:
-        asyncio.run(simulation_loop(mission_id))
         mission = missions_db[mission_id]
+        all_targets_found = asyncio.run(simulation_module._finalize_mission_progress(mission))
+        assert all_targets_found is False
+        assert mission["status"] == "running"
+        assert mission["progress"] == 50.0
+    finally:
+        manager.broadcast = original_broadcast
+        missions_db.pop(mission_id, None)
+
+
+def test_simulation_completes_when_all_targets_are_found():
+    mission_id = "sim-complete-all-targets-found"
+    missions_db[mission_id] = {
+        "id": mission_id,
+        "name": "All Targets Found Completion Test",
+        "status": "running",
+        "progress": 0.0,
+        "elapsed_seconds": 0,
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 35.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {
+                "id": "drone1",
+                "lat": 34.5,
+                "lon": -117.5,
+            }
+        ],
+        "targets": [
+            {"id": "t1", "lat": 34.5, "lon": -117.5, "status": "found"},
+            {"id": "t2", "lat": 34.6, "lon": -117.4, "status": "found"},
+        ],
+        "hikers": [],
+    }
+
+    async def no_op_broadcast(_message):
+        return None
+
+    original_broadcast = manager.broadcast
+    manager.broadcast = no_op_broadcast
+    try:
+        mission = missions_db[mission_id]
+        all_targets_found = asyncio.run(simulation_module._finalize_mission_progress(mission))
+        assert all_targets_found is True
         assert mission["status"] == "complete"
         assert mission["progress"] == 100.0
     finally:
@@ -310,9 +390,8 @@ def test_start_mission_runs_dispatch_bridge_when_targets_present():
 
     captured = {}
 
-    async def fake_run_dispatch(assignments, host, timeout_seconds, count=None):
+    async def fake_direct_dispatch(assignments):
         captured["assignments"] = assignments
-        captured["host"] = host
         return [
             {
                 "drone_id": "drone-alpha",
@@ -322,8 +401,8 @@ def test_start_mission_runs_dispatch_bridge_when_targets_present():
             }
         ]
 
-    original_run_dispatch = main_module.run_dispatch_script
-    main_module.run_dispatch_script = fake_run_dispatch
+    original_run_direct = missions_routes.run_direct_dispatch
+    missions_routes.run_direct_dispatch = fake_direct_dispatch
 
     try:
         create_response = client.post("/missions", json=mission_data)
@@ -334,18 +413,11 @@ def test_start_mission_runs_dispatch_bridge_when_targets_present():
         assert start_response.status_code == 200
         payload = start_response.json()
         assert payload["status"] == "running"
-        assert payload["dispatch_results"] == [
-            {
-                "drone_id": "drone-alpha",
-                "sysid": 1,
-                "success": True,
-                "message": "ok",
-            }
-        ]
+        import time; time.sleep(0.3)
         assert len(captured.get("assignments", [])) == 1
         assert captured["assignments"][0]["sysid"] == 1
     finally:
-        main_module.run_dispatch_script = original_run_dispatch
+        missions_routes.run_direct_dispatch = original_run_direct
 
 
 def test_sync_mission_drones_with_sitl_uses_live_positions():
@@ -422,8 +494,8 @@ def test_dispatch_targets_endpoint_returns_preflight_and_script_results():
             }
         ]
 
-    original_run_dispatch = main_module.run_dispatch_script
-    main_module.run_dispatch_script = fake_run_dispatch
+    original_run_dispatch = missions_routes.run_dispatch_script
+    missions_routes.run_dispatch_script = fake_run_dispatch
 
     try:
         create_response = client.post("/missions", json=mission_data)
@@ -453,7 +525,7 @@ def test_dispatch_targets_endpoint_returns_preflight_and_script_results():
         assert script_success["sysid"] == 1
         assert script_success["success"] is True
     finally:
-        main_module.run_dispatch_script = original_run_dispatch
+        missions_routes.run_dispatch_script = original_run_dispatch
 
 
 def test_run_dispatch_script_timeout_returns_failure_rows():
@@ -474,12 +546,14 @@ def test_run_dispatch_script_timeout_returns_failure_rows():
     async def fake_create_subprocess_exec(*_args, **_kwargs):
         return slow_process
 
-    original_create_subprocess_exec = main_module.asyncio.create_subprocess_exec
-    main_module.asyncio.create_subprocess_exec = fake_create_subprocess_exec
+    import app.dispatch as dispatch_module
+
+    original_create_subprocess_exec = dispatch_module.asyncio.create_subprocess_exec
+    dispatch_module.asyncio.create_subprocess_exec = fake_create_subprocess_exec
 
     try:
         results = asyncio.run(
-            main_module.run_dispatch_script(
+            dispatch_module.run_dispatch_script(
                 assignments=[{"drone_id": "d1", "sysid": 1, "lat": 34.5, "lon": -117.5, "alt": 30.0}],
                 timeout_seconds=1.0,
             )
@@ -491,7 +565,7 @@ def test_run_dispatch_script_timeout_returns_failure_rows():
         assert "timeout" in results[0]["message"].lower()
         assert slow_process.killed is True
     finally:
-        main_module.asyncio.create_subprocess_exec = original_create_subprocess_exec
+        dispatch_module.asyncio.create_subprocess_exec = original_create_subprocess_exec
 
 
 def test_run_dispatch_script_non_zero_exit_returns_failure_rows():
@@ -505,12 +579,14 @@ def test_run_dispatch_script_non_zero_exit_returns_failure_rows():
     async def fake_create_subprocess_exec(*_args, **_kwargs):
         return FailingProcess()
 
-    original_create_subprocess_exec = main_module.asyncio.create_subprocess_exec
-    main_module.asyncio.create_subprocess_exec = fake_create_subprocess_exec
+    import app.dispatch as dispatch_module
+
+    original_create_subprocess_exec = dispatch_module.asyncio.create_subprocess_exec
+    dispatch_module.asyncio.create_subprocess_exec = fake_create_subprocess_exec
 
     try:
         results = asyncio.run(
-            main_module.run_dispatch_script(
+            dispatch_module.run_dispatch_script(
                 assignments=[{"drone_id": "d2", "sysid": 2, "lat": 34.4, "lon": -117.4, "alt": 30.0}],
                 timeout_seconds=2.0,
             )
@@ -521,4 +597,54 @@ def test_run_dispatch_script_non_zero_exit_returns_failure_rows():
         assert results[0]["success"] is False
         assert "exited with code 1" in results[0]["message"].lower()
     finally:
-        main_module.asyncio.create_subprocess_exec = original_create_subprocess_exec
+        dispatch_module.asyncio.create_subprocess_exec = original_create_subprocess_exec
+
+
+def test_mission_drone_to_sysid_map_assigns_existing_and_fallback_sysids():
+    mission = {
+        "drones": [
+            {"id": "drone-a", "sysid": 7},
+            {"id": "drone-b"},
+            {"id": "drone-c", "sysid": "3"},
+        ]
+    }
+
+    mapping = main_module._mission_drone_to_sysid_map(mission)
+
+    assert mapping == {
+        "drone-a": 7,
+        "drone-b": 2,
+        "drone-c": 3,
+    }
+    assert mission["drones"][1]["sysid"] == 2
+
+
+def test_normalize_script_results_matches_expected_assignments_by_sysid_and_drone_id():
+    expected_assignments = [
+        {"drone_id": "drone-a", "sysid": 1},
+        {"drone_id": "drone-b", "sysid": 2},
+        {"drone_id": "drone-c", "sysid": 3},
+    ]
+    raw_results = [
+        {"drone_id": "drone-b", "sysid": 2, "success": True, "message": "sent"},
+        {"drone_id": "other-name", "sysid": 1, "success": False, "message": "denied"},
+    ]
+
+    normalized = main_module._normalize_script_results(raw_results, expected_assignments)
+
+    assert normalized[0] == {
+        "drone_id": "other-name",
+        "sysid": 1,
+        "success": False,
+        "message": "denied",
+    }
+    assert normalized[1] == {
+        "drone_id": "drone-b",
+        "sysid": 2,
+        "success": True,
+        "message": "sent",
+    }
+    assert normalized[2]["drone_id"] == "drone-c"
+    assert normalized[2]["sysid"] == 3
+    assert normalized[2]["success"] is False
+    assert "No dispatch result returned" in normalized[2]["message"]

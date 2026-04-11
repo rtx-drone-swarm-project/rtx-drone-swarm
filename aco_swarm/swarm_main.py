@@ -221,6 +221,7 @@ def _lloyd_loop(planner, agents, interval=10):
             agent.territory = state.territory
 
 
+
 # ── Main ─────────────────────────────────────────────────────────────
 def main():
     args = parse_args()
@@ -332,23 +333,33 @@ def main():
     def _main_loop():
         while True:
             time.sleep(2)
-
-            # Write state for MAVProxy Voronoi overlay
             _write_state(agents, planner)
 
-            # Check partition compliance
             for agent in agents:
                 if agent.lat is None or agent.territory is None or len(agent.territory) == 0:
                     continue
+
                 pos    = np.array([agent.lat, agent.lon])
                 dists  = np.linalg.norm(agent.territory - pos, axis=1)
                 nearest = dists.min()
                 in_zone = nearest < 0.002
+
                 log.info(
                     f"[Drone {agent.drone_id}] pos=({agent.lat:.5f},{agent.lon:.5f}) "
-                    f"nearest_territory_point={nearest:.5f}deg "
+                    f"nearest={nearest:.5f}deg "
                     f"{'✓ IN ZONE' if in_zone else '✗ OUT OF ZONE'}"
                 )
+
+                # Drift correction — send drone back to nearest territory point
+                if not in_zone:
+                    nearest_idx  = np.argmin(dists)
+                    recover_lat  = float(agent.territory[nearest_idx, 0])
+                    recover_lon  = float(agent.territory[nearest_idx, 1])
+                    log.warning(
+                        f"[Drone {agent.drone_id}] DRIFT CORRECTION "
+                        f"→ ({recover_lat:.5f},{recover_lon:.5f})"
+                    )
+                    agent._goto(recover_lat, recover_lon, agent.altitude)
 
     if args.duration > 0:
         log.info(f"Running for {args.duration}s — Ctrl+C to stop early")
