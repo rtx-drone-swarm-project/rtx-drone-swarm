@@ -104,12 +104,10 @@ class VoronoiACOPlanner:
 
     def _aco_waypoint(self, drone: DroneState) -> Tuple[float, float]:
         if len(drone.territory) == 0:
-            # No territory yet — fall back to global gradient
             return self.pheromone.get_gradient(
                 drone.lat, drone.lon, radius=self.aco_radius
             )
 
-        # Score every cell in this drone's Voronoi region
         best_val = float("inf")
         candidates = []
 
@@ -123,10 +121,30 @@ class VoronoiACOPlanner:
 
         aco_target = random.choice(candidates)
 
-        # Blend ACO target with Voronoi centroid pull
         if len(drone.territory) > 0 and self.alpha > 0:
             centroid = drone.territory.mean(axis=0)
             blended = (1 - self.alpha) * aco_target + self.alpha * centroid
-            return float(blended[0]), float(blended[1])
+            lat, lon = float(blended[0]), float(blended[1])
+        else:
+            lat, lon = float(aco_target[0]), float(aco_target[1])
 
-        return float(aco_target[0]), float(aco_target[1])
+        # Hard clamp — never leave territory
+        return self.clamp_to_territory(drone, lat, lon)
+
+    def clamp_to_territory(self, drone: DroneState, lat: float, lon: float):
+        """
+        If (lat, lon) is outside the drone's territory, snap it to the
+        nearest territory point instead.
+        """
+        if len(drone.territory) == 0:
+            return lat, lon
+
+        target = np.array([lat, lon])
+        dists  = np.linalg.norm(drone.territory - target, axis=1)
+        nearest_idx = np.argmin(dists)
+        nearest = drone.territory[nearest_idx]
+
+        # Only snap if the point is farther than the grid cell spacing
+        if dists[nearest_idx] > 0.001:   # ~100m in degrees
+            return float(nearest[0]), float(nearest[1])
+        return lat, lon
