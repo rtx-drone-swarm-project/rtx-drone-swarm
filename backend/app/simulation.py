@@ -164,7 +164,7 @@ def _build_centroid_map(mission: dict) -> dict:
     return centroid_map
 
 
-def _rearm_live_drones_if_needed(mission: dict, live_drone_ids: set[str]) -> None:
+'''def _rearm_live_drones_if_needed(mission: dict, live_drone_ids: set[str]) -> None:
     """Periodically recover live drones back into GUIDED flight if they disarm.
 
     This is a lightweight safety net for live SITL drones. It only runs on a
@@ -230,7 +230,7 @@ def _rearm_live_drones_if_needed(mission: dict, live_drone_ids: set[str]) -> Non
                     0,
                     0,
                     DEFAULT_DISPATCH_ALT,
-                )
+                )'''
 
 
 def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map: dict) -> None:
@@ -314,11 +314,16 @@ async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], centr
             d_lat = target["lat"] - drone["lat"]
             d_lon = target["lon"] - drone["lon"]
             dist = math.hypot(d_lat, d_lon)
-            if dist > TARGET_STOP_RADIUS and not has_live_telemetry:
-                drone["lat"] += (d_lat / dist) * SPEED
-                drone["lon"] += (d_lon / dist) * SPEED
-                drone["lat"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
-                drone["lon"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+
+            
+            if dist > TARGET_STOP_RADIUS:
+                
+                if not has_live_telemetry:
+                    drone["lat"] += (d_lat / dist) * SPEED
+                    drone["lon"] += (d_lon / dist) * SPEED
+                    drone["lat"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+                    drone["lon"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+                    
                 continue
 
             if target.get("status") in ["detected", "wandering"]:
@@ -479,7 +484,7 @@ async def simulation_loop(mission_id: str):
         live_drone_ids = _sync_mission_drones_with_sitl(mission)
         centroid_map = _build_centroid_map(mission)
 
-        _rearm_live_drones_if_needed(mission, live_drone_ids)
+        #_rearm_live_drones_if_needed(mission, live_drone_ids)
         _send_live_drone_gotos(mission, live_drone_ids, centroid_map)
         await _update_drones_for_tick(mission, live_drone_ids, centroid_map, bounds)
         _update_targets_for_tick(mission, bounds)
