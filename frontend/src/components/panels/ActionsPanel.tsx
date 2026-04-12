@@ -1,5 +1,11 @@
-import type { Bounds, MissionRecord } from "../../types/mission";
+import type { AlgorithmOption, Bounds, MissionRecord } from "../../types/mission";
 import CollapsibleSection from "../common/CollapsibleSection";
+
+const ALGORITHM_OPTIONS: { value: AlgorithmOption; label: string }[] = [
+  { value: "default", label: "Default" },
+  { value: "aco", label: "ACO" },
+  { value: "voronoi", label: "Voronoi" }
+];
 
 type ActionsPanelProps = {
   selectedBounds: Bounds | null;
@@ -7,6 +13,8 @@ type ActionsPanelProps = {
   missionLocked: boolean;
   validDroneCount: number;
   mission: MissionRecord | null;
+  selectedAlgorithm: AlgorithmOption;
+  onAlgorithmChange: (algorithm: AlgorithmOption) => void;
   onStartMission: () => void;
   onStopMission: () => void;
   onResetMission: () => void;
@@ -18,12 +26,35 @@ export default function ActionsPanel({
   missionLocked,
   validDroneCount,
   mission,
+  selectedAlgorithm,
+  onAlgorithmChange,
   onStartMission,
   onStopMission,
   onResetMission
 }: ActionsPanelProps) {
+  const selectorDisabled = missionActive || missionLocked;
+
   return (
     <CollapsibleSection title="Actions">
+      <div className="algorithm-selector">
+        <label className="algorithm-label" htmlFor="algorithm-select">
+          Algorithm
+        </label>
+        <select
+          id="algorithm-select"
+          className="algorithm-select"
+          value={selectedAlgorithm}
+          onChange={(e) => onAlgorithmChange(e.target.value as AlgorithmOption)}
+          disabled={selectorDisabled}
+        >
+          {ALGORITHM_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <button
         className="action-btn start"
         onClick={onStartMission}

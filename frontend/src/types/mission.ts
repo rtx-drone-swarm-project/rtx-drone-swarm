@@ -1,5 +1,7 @@
 export type MissionStatus = "idle" | "running" | "stopped" | "complete";
 
+export type AlgorithmOption = "default" | "aco" | "voronoi";
+
 export type EntityId = string | number;
 
 export type Bounds = {
@@ -44,6 +46,7 @@ export type MissionRecord = {
   status?: string;
   progress?: number;
   targets?: Target[];
+  algorithm?: string;
 };
 
 export type MissionState = MissionRecord | null;

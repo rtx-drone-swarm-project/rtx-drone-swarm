@@ -13,6 +13,7 @@ import SwarmStatusPanel from "./components/panels/SwarmStatusPanel";
 import useMissionActions from "./hooks/useMissionActions";
 import useMissionSocket from "./hooks/useMissionSocket";
 import type {
+  AlgorithmOption,
   Bounds,
   FoundHiker,
   MissionState,
@@ -52,6 +53,7 @@ export default function App() {
   const [hikerSummaryOpen, setHikerSummaryOpen] = useState(false);
   const [completedTargets, setCompletedTargets] = useState<Target[]>([]);
   const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState<AlgorithmOption>("default");
 
   const pushAlert = useCallback((message: string) => {
     setAlerts((prev) => [message, ...prev].slice(0, 10));
@@ -186,6 +188,7 @@ export default function App() {
     apiBase,
     missionLocked,
     selectedBounds,
+    selectedAlgorithm,
     validDrones,
     validDroneCount,
     mission,
@@ -310,6 +313,7 @@ export default function App() {
             averageBattery={averageBattery}
             lostHikerCount={lostHikerCount}
             telemetryMode={telemetryMode}
+            selectedAlgorithm={selectedAlgorithm}
           />
           <LegendPanel />
         </aside>
@@ -328,6 +332,8 @@ export default function App() {
             missionLocked={missionLocked}
             validDroneCount={validDroneCount}
             mission={mission}
+            selectedAlgorithm={selectedAlgorithm}
+            onAlgorithmChange={setSelectedAlgorithm}
             onStartMission={startMission}
             onStopMission={stopMission}
             onResetMission={resetMissionLock}
