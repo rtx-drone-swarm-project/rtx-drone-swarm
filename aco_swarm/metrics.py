@@ -17,16 +17,17 @@ import os
 
 class MetricsTracker:
 
-    def __init__(self, planner, agents):
+    def __init__(self, planner, agents, output_dir=None, csv_interval=5):
         self.planner    = planner
         self.agents     = agents
         self._start     = time.time()
         self._prev_pos  = {}
         self._dist      = {}
+        self._csv_interval = csv_interval
+        self._report_count = 0
 
-         # CSV output
-        log_dir = log_dir or os.path.dirname(os.path.abspath(__file__))
-        self._csv_path = os.path.join(log_dir, f"swarm_metrics_{int(self._start)}.csv")
+        out = output_dir or os.path.dirname(os.path.abspath(__file__))
+        self._csv_path = os.path.join(out, f"swarm_metrics_{int(self._start)}.csv")
         with open(self._csv_path, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -89,35 +90,45 @@ class MetricsTracker:
 
     def report(self):
         self.update_positions()
+        self._report_count += 1
         elapsed = time.time() - self._start
         cov     = self.coverage()
         ovl     = self.overlap()
 
-        # Print to terminal
+        # Always print to terminal
         print("\n" + "═" * 70)
         print(f"  SWARM METRICS  |  elapsed={elapsed:.0f}s  |  "
-              f"coverage={cov:.1%}  |  overlap={ovl:.1%}")
+            f"coverage={cov:.1%}  |  overlap={ovl:.1%}")
         print("─" * 70)
         print(f"  {'Drone':<7} {'Position':<26} {'Dist(m)':<10} {'Efficiency':<13} {'Utilization'}")
         print("─" * 70)
 
-        # Write to CSV
-        with open(self._csv_path, "a", newline="") as f:
-            writer = csv.writer(f)
-            for agent in self.agents:
-                if agent.lat is None:
-                    continue
-                dist = self._dist.get(agent.drone_id, 0.0)
-                eff  = self.path_efficiency(agent)
-                util = self.utilization(agent)
-                ter  = len(agent.territory) if agent.territory is not None else 0
+        # Only write CSV every csv_interval reports
+        write_csv = (self._report_count % self._csv_interval == 0)
 
+        if write_csv:
+            f_csv = open(self._csv_path, "a", newline="")
+            writer = csv.writer(f_csv)
+
+        for agent in self.agents:
+            if agent.lat is None:
+                continue
+            dist = self._dist.get(agent.drone_id, 0.0)
+            eff  = self.path_efficiency(agent)
+            util = self.utilization(agent)
+            ter  = len(agent.territory) if agent.territory is not None else 0
+
+            if write_csv:
                 writer.writerow([
                     f"{elapsed:.1f}", f"{cov:.4f}", f"{ovl:.4f}",
                     agent.drone_id, f"{agent.lat:.6f}", f"{agent.lon:.6f}",
                     f"{dist:.1f}", f"{eff:.4f}", f"{util:.4f}", ter
                 ])
 
-                print(f"  D{agent.drone_id:<6} ({agent.lat:.5f},{agent.lon:.5f})  "
-                      f"{dist:<10.1f} {eff:<13.1%} {util:.1%}  [{ter} cells]")
+            print(f"  D{agent.drone_id:<6} ({agent.lat:.5f},{agent.lon:.5f})  "
+                f"{dist:<10.1f} {eff:<13.1%} {util:.1%}  [{ter} cells]")
+
+        if write_csv:
+            f_csv.close()
+
         print("═" * 70)

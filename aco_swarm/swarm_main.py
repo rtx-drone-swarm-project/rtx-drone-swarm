@@ -301,7 +301,7 @@ def main():
         bounds=bounds,
         grid_config=cfg,
         pheromone_grid=grid,
-        n_grid=15,
+        n_grid=30,
         lloyd_interval=10,
         aco_radius=2,
         alpha=0.3,

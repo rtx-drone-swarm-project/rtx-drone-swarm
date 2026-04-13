@@ -62,7 +62,6 @@ class VoronoiModule(mp_module.MPModule):
         except Exception:
             return
 
-        # Get the map module
         map_module = self.module("map")
         if map_module is None:
             return
@@ -75,25 +74,23 @@ class VoronoiModule(mp_module.MPModule):
             if len(territory) == 0:
                 continue
 
-            pts = np.array(territory)  # (N, 2) lat/lon
+            pts = np.array(territory)
 
-            # Draw territory points as a translucent polygon
-            # convex hull gives a cleaner boundary than raw scatter
             try:
                 from scipy.spatial import ConvexHull
-                hull  = ConvexHull(pts)
-                verts = pts[hull.vertices]
-                # close the polygon
-                verts = np.vstack([verts, verts[0]])
-                polygon = [(float(p[0]), float(p[1])) for p in verts]
+                if len(pts) < 3:
+                    polygon = [(float(pts[0][0]), float(pts[0][1]))]
+                else:
+                    hull  = ConvexHull(pts)
+                    verts = pts[hull.vertices]
+                    verts = np.vstack([verts, verts[0]])
+                    polygon = [(float(p[0]), float(p[1])) for p in verts]
             except Exception:
-                # scipy not available — just use raw points
                 polygon = [(float(p[0]), float(p[1])) for p in pts]
 
-            key = f"voronoi_zone_{drone_id}"
             map_module.map.add_object(
                 mp_slipmap.SlipPolygon(
-                    key,
+                    f"voronoi_zone_{drone_id}",
                     polygon,
                     layer="voronoi",
                     linewidth=2,
@@ -101,11 +98,12 @@ class VoronoiModule(mp_module.MPModule):
                 )
             )
 
-            # Draw drone label
+            centroid_lat = float(pts[:, 0].mean())
+            centroid_lon = float(pts[:, 1].mean())
             map_module.map.add_object(
                 mp_slipmap.SlipLabel(
                     f"voronoi_label_{drone_id}",
-                    (float(a["lat"]), float(a["lon"])),
+                    (centroid_lat, centroid_lon),
                     f"D{drone_id}",
                     layer="voronoi",
                     colour=color,
