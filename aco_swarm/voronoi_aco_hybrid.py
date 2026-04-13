@@ -92,8 +92,8 @@ class VoronoiACOPlanner:
         for i, drone in enumerate(drones):
             drone.territory = self.grid_points[labels == i]
 
-    # REMOVED: the two lines that did drone.lat = new_centroids[i, 0]
-    # Drones steer toward their centroid naturally via alpha blending in _aco_waypoint.
+        # REMOVED: the two lines that did drone.lat = new_centroids[i, 0]
+        # Drones steer toward their centroid naturally via alpha blending in _aco_waypoint.
 
     # ------------------------------------------------------------------ #
     #  ACO waypoint — least-visited cell, constrained to Voronoi region   #

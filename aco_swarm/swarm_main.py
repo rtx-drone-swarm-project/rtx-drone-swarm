@@ -34,6 +34,7 @@ from typing import List
 from stigmergy_engine import InMemoryPheromoneGrid, GridConfig
 from drone_agent import DroneAgent
 from voronoi_aco_hybrid import VoronoiACOPlanner, DroneState
+from metrics import MetricsTracker
 
 
 logging.basicConfig(
@@ -206,7 +207,9 @@ def parse_args():
 
 
 # ── Lloyd helper ─────────────────────────────────────────────────────
-def _lloyd_loop(planner, agents, interval=10):
+def _lloyd_loop(planner, agents, interval=5, coverage_threshold=0.85):
+    bootstrapped = False
+
     while True:
         time.sleep(interval)
         states = [
@@ -215,15 +218,49 @@ def _lloyd_loop(planner, agents, interval=10):
         ]
         if not states:
             continue
+
+        # Push current territories from live agents into throwaway states
+        state_map = {s.id: s for s in states}
+        for agent in agents:
+            if agent.drone_id in state_map and agent.territory is not None:
+                state_map[agent.drone_id].territory = agent.territory
+
+        # First pass — run Lloyd immediately to assign initial territories
+        if not bootstrapped:
+            log.info("Lloyd bootstrap — assigning initial territories")
+            planner._run_lloyd(states)
+            state_map = {s.id: s for s in states}
+            for agent in agents:
+                if agent.drone_id in state_map:
+                    agent.territory = state_map[agent.drone_id].territory
+            bootstrapped = True
+            continue
+
+        # Subsequent passes — only repartition when coverage threshold met
+        coverages = {
+            s.id: planner._territory_coverage(s)
+            for s in states
+            if s.territory is not None and len(s.territory) > 0
+        }
+
+        if not coverages:
+            continue
+
+        all_covered = all(c >= coverage_threshold for c in coverages.values())
+
+        if not all_covered:
+            log.info(
+                "Lloyd skipped — coverage: "
+                + " ".join(f"D{k}:{v:.0%}" for k, v in sorted(coverages.items()))
+            )
+            continue
+
+        log.info("All territories covered — running Lloyd repartition")
         planner._run_lloyd(states)
-        # Push updated territories back to the live agents
         state_map = {s.id: s for s in states}
         for agent in agents:
             if agent.drone_id in state_map:
                 agent.territory = state_map[agent.drone_id].territory
-
-
-
 # ── Main ─────────────────────────────────────────────────────────────
 def main():
     args = parse_args()
@@ -333,46 +370,25 @@ def main():
 
     # 7. Main loop — write state + check partitions
     def _main_loop():
+        metrics = MetricsTracker(planner, agents)
         while True:
             time.sleep(2)
             _write_state(agents, planner)
+            metrics.report()
 
             for agent in agents:
                 if agent.lat is None or agent.territory is None or len(agent.territory) == 0:
                     continue
-
-                pos    = np.array([agent.lat, agent.lon])
-                dists  = np.linalg.norm(agent.territory - pos, axis=1)
+                pos     = np.array([agent.lat, agent.lon])
+                dists   = np.linalg.norm(agent.territory - pos, axis=1)
                 nearest = dists.min()
-                in_zone = nearest < 0.002
-
-                log.info(
-                    f"[Drone {agent.drone_id}] pos=({agent.lat:.5f},{agent.lon:.5f}) "
-                    f"nearest={nearest:.5f}deg "
-                    f"{'✓ IN ZONE' if in_zone else '✗ OUT OF ZONE'}"
-                )
-
-                # Drift correction — send drone back to nearest territory point
-                if not in_zone:
-                    nearest_idx  = np.argmin(dists)
-                    recover_lat  = float(agent.territory[nearest_idx, 0])
-                    recover_lon  = float(agent.territory[nearest_idx, 1])
-                    log.warning(
-                        f"[Drone {agent.drone_id}] DRIFT CORRECTION "
-                        f"→ ({recover_lat:.5f},{recover_lon:.5f})"
-                    )
+                if nearest >= 0.002:
+                    nearest_idx = np.argmin(dists)
+                    recover_lat = float(agent.territory[nearest_idx, 0])
+                    recover_lon = float(agent.territory[nearest_idx, 1])
+                    log.warning(f"[Drone {agent.drone_id}] DRIFT CORRECTION "
+                                f"→ ({recover_lat:.5f},{recover_lon:.5f})")
                     agent._goto(recover_lat, recover_lon, agent.altitude)
-
-    if args.duration > 0:
-        log.info(f"Running for {args.duration}s — Ctrl+C to stop early")
-        deadline = time.time() + args.duration
-        while time.time() < deadline:
-            _write_state(agents, planner)
-            time.sleep(2)
-        _cleanup()
-    else:
-        log.info("Running indefinitely — Ctrl+C to stop")
-        _main_loop()
 
 
 if __name__ == "__main__":
