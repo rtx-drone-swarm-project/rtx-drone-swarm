@@ -123,6 +123,15 @@ class InMemoryPheromoneGrid:
             with self._lock:
                 self.grid *= self.config.evaporation_rate
 
+    def deposit_path(self, lat0: float, lon0: float, lat1: float, lon1: float, steps: int = 4):
+        """
+        Deposit pheromone at `steps` evenly-spaced points between two positions.
+        Call this with (prev_lat, prev_lon, curr_lat, curr_lon) each tick.
+        """
+        for i in range(steps + 1):
+            t = i / steps
+            self.deposit(lat0 + t * (lat1 - lat0), lon0 + t * (lon1 - lon0))
+
 
 # ── Redis stub ──────────────────────────────────────────────────────
 

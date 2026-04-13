@@ -138,26 +138,23 @@ class DroneAgent:
             log.error(f"[Drone {self.drone_id}] Fatal: {e}", exc_info=True)
 
     def _stigmergy_step(self):
+        prev_lat, prev_lon = self.lat, self.lon   # snapshot before goto
+
         if self.planner:
             state = DroneState(id=self.drone_id, lat=self.lat, lon=self.lon)
             if self.territory is not None:
                 state.territory = self.territory
             target_lat, target_lon = self.planner._aco_waypoint(state)
-
-            # Secondary enforcement — if waypoint escapes territory, clamp it
             target_lat, target_lon = self.planner.clamp_to_territory(
                 state, target_lat, target_lon
             )
-            self.planner.pheromone.deposit(self.lat, self.lon)
+            # Deposit along the path traveled since last tick, not just current cell
+            self.planner.pheromone.deposit_path(prev_lat, prev_lon, self.lat, self.lon)
         else:
             target_lat, target_lon = self.grid.get_gradient(self.lat, self.lon)
-            self.grid.deposit(self.lat, self.lon)
+            self.grid.deposit_path(prev_lat, prev_lon, self.lat, self.lon)
 
         self._goto(target_lat, target_lon, self.altitude)
-        log.debug(
-            f"[Drone {self.drone_id}] ({self.lat:.5f},{self.lon:.5f}) "
-            f"→ ({target_lat:.5f},{target_lon:.5f})"
-        )
 
     # ── MAVLink helpers ─────────────────────────────────────────────
 

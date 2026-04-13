@@ -12,12 +12,7 @@ Architecture
 Start SITL manually before running this script:
 
   # Terminal 1 — get home positions
-  python3 swarm_main.py --print-homes
-
-  # Terminal 2 — SITL (paste --home output from above)
-   cd ~/Desktop/ICS/180/rtx-drone-swarm/ardupilot/ArduCopter && 
-   python3 ../Tools/autotest/sim_vehicle.py -v ArduCopter --count 5 --no-mavproxy --speedup 1 --auto-sysid --custom-location=-35.363262,149.165237,0,0
-
+  cd ~/Desktop/ICS/180/rtx-drone-swarm/ardupilot/ArduCopter && python3 ../Tools/autotest/sim_vehicle.py -v ArduCopter --count 5 --no-mavproxy --speedup 1 --auto-sysid --custom-location=-35.363262,149.165237,0,0
   # Terminal 3 — Swarm (MAVProxy map opens automatically)
   python3 swarm_main.py --drones 15
 """
@@ -91,16 +86,16 @@ def launch_mavproxy(num_drones: int):
     for i in range(num_drones):
         parts.append(f"--out=udpout:127.0.0.1:{agent_udp(i)}")
     parts += ["--map", "--console"]
-
-    # Load Voronoi overlay module
-    module_path = os.path.join(os.path.dirname(__file__), "mavproxy_voronoi")
-    parts.append(f"--load-module={module_path}")
+    parts.append("--load-module=mavproxy_voronoi")
 
     cmd = " ".join(parts)
 
-    venv     = os.environ.get("VIRTUAL_ENV", "")
-    activate = f"source {venv}/bin/activate && " if venv else ""
-    full     = activate + cmd
+    module_dir = os.path.dirname(os.path.abspath(__file__))  # resolves to aco_swarm/
+    venv       = os.environ.get("VIRTUAL_ENV", "")
+    activate   = f"source {venv}/bin/activate && " if venv else ""
+    pythonpath = f"export PYTHONPATH={module_dir}:$PYTHONPATH && "
+    full       = activate + pythonpath + cmd
+
     applescript = 'tell application "Terminal" to do script "' + full + '"'
     subprocess.Popen(["osascript", "-e", applescript])
     log.info(f"MAVProxy launched — waiting {MAVPROXY_WAIT}s…")
@@ -205,6 +200,8 @@ def parse_args():
     p.add_argument("--loop-hz",      type=float, default=0.5)
     p.add_argument("--print-homes",  action="store_true",
                    help="Print --home string for sim_vehicle.py and exit")
+    p.add_argument("--home-lat", type=float, default=-35.363262)
+    p.add_argument("--home-lon", type=float, default=149.165237)
     return p.parse_args()
 
 
@@ -212,13 +209,18 @@ def parse_args():
 def _lloyd_loop(planner, agents, interval=10):
     while True:
         time.sleep(interval)
-        states = [DroneState(id=a.drone_id, lat=a.lat, lon=a.lon)
-                  for a in agents if a.lat is not None]
+        states = [
+            DroneState(id=a.drone_id, lat=a.lat, lon=a.lon)
+            for a in agents if a.lat is not None
+        ]
         if not states:
             continue
         planner._run_lloyd(states)
-        for state, agent in zip(states, agents):
-            agent.territory = state.territory
+        # Push updated territories back to the live agents
+        state_map = {s.id: s for s in states}
+        for agent in agents:
+            if agent.drone_id in state_map:
+                agent.territory = state_map[agent.drone_id].territory
 
 
 
@@ -226,7 +228,7 @@ def _lloyd_loop(planner, agents, interval=10):
 def main():
     args = parse_args()
 
-    home_lat, home_lon = -35.363262, 149.165237
+    home_lat, home_lon = args.home_lat, args.home_lon
     span = 0.004
 
     positions = circular_spawn(args.drones, home_lat, home_lon, args.spawn_radius)

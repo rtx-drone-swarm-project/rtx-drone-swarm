@@ -92,11 +92,8 @@ class VoronoiACOPlanner:
         for i, drone in enumerate(drones):
             drone.territory = self.grid_points[labels == i]
 
-        # Optional: nudge drones toward their new centroid
-        # (you can instead just let ACO steer them there naturally)
-        for i, drone in enumerate(drones):
-            drone.lat = float(new_centroids[i, 0])
-            drone.lon = float(new_centroids[i, 1])
+    # REMOVED: the two lines that did drone.lat = new_centroids[i, 0]
+    # Drones steer toward their centroid naturally via alpha blending in _aco_waypoint.
 
     # ------------------------------------------------------------------ #
     #  ACO waypoint — least-visited cell, constrained to Voronoi region   #
@@ -148,3 +145,13 @@ class VoronoiACOPlanner:
         if dists[nearest_idx] > 0.001:   # ~100m in degrees
             return float(nearest[0]), float(nearest[1])
         return lat, lon
+
+    def _territory_coverage(self, drone: DroneState) -> float:
+        """Returns fraction of territory cells that have been visited (pheromone > 0)."""
+        if len(drone.territory) == 0:
+            return 0.0
+        visited = sum(
+            1 for pt in drone.territory
+            if self.pheromone.get_value(pt[0], pt[1]) > 0
+        )
+        return visited / len(drone.territory)
