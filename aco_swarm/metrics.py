@@ -11,6 +11,8 @@ Live swarm performance metrics.
 import math
 import time
 import numpy as np
+import csv
+import os
 
 
 class MetricsTracker:
@@ -21,6 +23,17 @@ class MetricsTracker:
         self._start     = time.time()
         self._prev_pos  = {}
         self._dist      = {}
+
+         # CSV output
+        log_dir = log_dir or os.path.dirname(os.path.abspath(__file__))
+        self._csv_path = os.path.join(log_dir, f"swarm_metrics_{int(self._start)}.csv")
+        with open(self._csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "elapsed_s", "coverage", "overlap",
+                "drone_id", "lat", "lon", "dist_m", "efficiency", "utilization", "territory_cells"
+            ])
+        print(f"[metrics] Logging to {self._csv_path}")
 
     def update_positions(self):
         for agent in self.agents:
@@ -80,19 +93,31 @@ class MetricsTracker:
         cov     = self.coverage()
         ovl     = self.overlap()
 
+        # Print to terminal
         print("\n" + "═" * 70)
         print(f"  SWARM METRICS  |  elapsed={elapsed:.0f}s  |  "
               f"coverage={cov:.1%}  |  overlap={ovl:.1%}")
         print("─" * 70)
         print(f"  {'Drone':<7} {'Position':<26} {'Dist(m)':<10} {'Efficiency':<13} {'Utilization'}")
         print("─" * 70)
-        for agent in self.agents:
-            if agent.lat is None:
-                continue
-            dist = self._dist.get(agent.drone_id, 0.0)
-            eff  = self.path_efficiency(agent)
-            util = self.utilization(agent)
-            ter  = len(agent.territory) if agent.territory is not None else 0
-            print(f"  D{agent.drone_id:<6} ({agent.lat:.5f},{agent.lon:.5f})  "
-                  f"{dist:<10.1f} {eff:<13.1%} {util:.1%}  [{ter} cells]")
+
+        # Write to CSV
+        with open(self._csv_path, "a", newline="") as f:
+            writer = csv.writer(f)
+            for agent in self.agents:
+                if agent.lat is None:
+                    continue
+                dist = self._dist.get(agent.drone_id, 0.0)
+                eff  = self.path_efficiency(agent)
+                util = self.utilization(agent)
+                ter  = len(agent.territory) if agent.territory is not None else 0
+
+                writer.writerow([
+                    f"{elapsed:.1f}", f"{cov:.4f}", f"{ovl:.4f}",
+                    agent.drone_id, f"{agent.lat:.6f}", f"{agent.lon:.6f}",
+                    f"{dist:.1f}", f"{eff:.4f}", f"{util:.4f}", ter
+                ])
+
+                print(f"  D{agent.drone_id:<6} ({agent.lat:.5f},{agent.lon:.5f})  "
+                      f"{dist:<10.1f} {eff:<13.1%} {util:.1%}  [{ter} cells]")
         print("═" * 70)

@@ -389,6 +389,17 @@ def main():
                     log.warning(f"[Drone {agent.drone_id}] DRIFT CORRECTION "
                                 f"→ ({recover_lat:.5f},{recover_lon:.5f})")
                     agent._goto(recover_lat, recover_lon, agent.altitude)
+    
+    if args.duration > 0:
+        log.info(f"Running for {args.duration}s — Ctrl+C to stop early")
+        deadline = time.time() + args.duration
+        while time.time() < deadline:
+            _write_state(agents, planner)
+            time.sleep(2)
+        _cleanup()
+    else:
+        log.info("Running indefinitely — Ctrl+C to stop")
+        _main_loop()
 
 
 if __name__ == "__main__":
