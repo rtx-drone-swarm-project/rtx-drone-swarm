@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 import time
 import threading
+import logging
 from pymavlink import mavutil
-
+logger = logging.getLogger(__name__)
 
 
 ARM_CMD = mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM
 TAKEOFF_CMD = mavutil.mavlink.MAV_CMD_NAV_TAKEOFF
+ACCEPTED_ACK_RESULTS = {
+    mavutil.mavlink.MAV_RESULT_ACCEPTED,
+    mavutil.mavlink.MAV_RESULT_IN_PROGRESS,
+}
 
 class Drone:
     TELEMETRY_MSGS = {"HEARTBEAT", "VFR_HUD", "GLOBAL_POSITION_INT", "SYS_STATUS", "EKF_STATUS_REPORT"}
@@ -29,6 +34,10 @@ class Drone:
         self.last_status = None
         self.last_ekf = None
         self.last_ack = None
+        self.last_message_at = time.time()
+        self.disconnected = False
+        self.last_error = None
+        self._install_eof_handler()
 
         self.state = {
             "index": self.index,
@@ -45,13 +54,31 @@ class Drone:
         }
 
     
+    def _install_eof_handler(self):
+        """Replace pymavlink's repeated 
+        EOF print with a one-shot disconnect signal. (Credit to GPT-5.4 for trick)"""
+        def _handle_eof():
+            self.disconnected = True
+            self.last_error = "EOF on TCP socket"
+            try:
+                if getattr(self.conn, "port", None) is not None:
+                    self.conn.port.close()
+            except Exception:
+                pass
+            logger.warning("Drone %s TCP connection closed; waiting for SITL to reconnect", self.sysid)
+            raise EOFError(self.last_error)
+
+        self.conn.handle_eof = _handle_eof
 
     def send_command(self, command, params=None, wait_ack=True, timeout=3):
         if params is None:
             params = [0] * 7
 
         self.conn.mav.command_long_send(self.sysid, self.comp, command, 0, *(params[:7]))
-        self.wait_ack(command)
+        result = self.wait_ack(command, timeout=timeout)
+        if result not in ACCEPTED_ACK_RESULTS:
+            raise RuntimeError(f"Drone {self.sysid}: command {command} rejected with ACK result {result}")
+        return result
 
 
     def goto(self, lat, lon, alt):
@@ -88,12 +115,18 @@ class Drone:
 
     def arm(self, timeout = 5):
         self.conn.mav.command_long_send(self.sysid, self.comp, ARM_CMD, 0, 1, 0, 0, 0, 0, 0, 0)
-        self.wait_ack(ARM_CMD)
+        result = self.wait_ack(ARM_CMD, timeout=timeout)
+        if result not in ACCEPTED_ACK_RESULTS:
+            raise RuntimeError(f"Drone {self.sysid}: arm rejected with ACK result {result}")
+        return result
 
     def takeoff(self, altitude, timeout = 5):
         self.target_alt = altitude
         self.conn.mav.command_long_send(self.sysid, self.comp,TAKEOFF_CMD,0, 0, 0, 0, 0, 0, 0, altitude)
-        self.wait_ack(TAKEOFF_CMD)
+        result = self.wait_ack(TAKEOFF_CMD, timeout=timeout)
+        if result not in ACCEPTED_ACK_RESULTS:
+            raise RuntimeError(f"Drone {self.sysid}: takeoff rejected with ACK result {result}")
+        return result
 
     def wait_ack(self, command, timeout=5):
         start = time.time()
@@ -117,9 +150,16 @@ class Drone:
 
         # 1. Drain the OS buffer as fast as physically possible
         while True:
-            msg = self.conn.recv_match(blocking=False)
+            try:
+                msg = self.conn.recv_match(blocking=False)
+            except Exception as exc:
+                self.disconnected = True
+                self.last_error = str(exc)
+                break
             if msg is None:
                 break
+
+            self.last_message_at = time.time()
 
             msg_type = msg.get_type()
             
@@ -161,6 +201,9 @@ class Drone:
                         
                     elif msg_type == "EKF_STATUS_REPORT":
                         self.last_ekf = msg
+
+    def is_connection_alive(self, stale_after: float = 5.0):
+        return not self.disconnected and (time.time() - self.last_message_at) <= stale_after
 
     def is_ekf_gps_ready(self):
         #self.update()
@@ -234,19 +277,30 @@ class Swarm:
     def get_states(self):
         return [d.get_state() for d in self.drones]
 
-    def connect(self, count, start_port=5762):
+    def reset_connections(self):
+        for drone in self.drones:
+            try:
+                if hasattr(drone.conn, "close"):
+                    drone.conn.close()
+            except Exception:
+                pass
+        self.drones = []
+
+    def connect(self, count, host="127.0.0.1", start_port=5762, port_step=10):
+        connected_drones = []
         for i in range(count):
-            port = start_port + i * 10
-            print(f"Connecting to port {port}...")
-            conn = mavutil.mavlink_connection(f"tcp:127.0.0.1:{port}")
-            hb = conn.wait_heartbeat()
+            port = start_port + i * port_step
+            print(f"Connecting to {host}:{port}...")
+            conn = mavutil.mavlink_connection(f"tcp:{host}:{port}")
+            hb = conn.wait_heartbeat(timeout=15)
 
             drone = Drone(conn=conn, sysid=hb.get_srcSystem(), index=i + 1)
             drone.request_data_streams()
 
-            self.drones.append(drone)
+            connected_drones.append(drone)
             print(f"  Drone {i+1} connected (sysid={drone.sysid})")
 
+        self.drones = connected_drones
         print(f"\nConnected {len(self.drones)} drones\n")
 
 

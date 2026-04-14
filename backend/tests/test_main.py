@@ -41,6 +41,22 @@ def test_sitl_status_endpoint_returns_bridge_snapshot():
     finally:
         sitl_bridge.get_states_by_sysid = original_get_states
 
+
+def test_sitl_status_endpoint_includes_last_connect_error():
+    original_get_states = sitl_bridge.get_states_by_sysid
+    original_last_connect_error = sitl_bridge._last_connect_error
+    sitl_bridge.get_states_by_sysid = lambda: {}
+    sitl_bridge._last_connect_error = "connection refused"
+    try:
+        response = client.get("/sitl/status")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["connected_count"] == 0
+        assert payload["last_connect_error"] == "connection refused"
+    finally:
+        sitl_bridge.get_states_by_sysid = original_get_states
+        sitl_bridge._last_connect_error = original_last_connect_error
+
 def test_create_mission():
     mission_data = {
         "name": "Test Mission",
@@ -598,6 +614,171 @@ def test_run_dispatch_script_non_zero_exit_returns_failure_rows():
         assert "exited with code 1" in results[0]["message"].lower()
     finally:
         dispatch_module.asyncio.create_subprocess_exec = original_create_subprocess_exec
+
+
+def test_dispatch_drone_fails_when_arm_never_reflects_in_state():
+    import app.sitl as sitl_module
+
+    class FakeDrone:
+        def __init__(self):
+            self.sysid = 7
+            self.state = {"mode": "GUIDED", "armed": False, "rel_alt": 0.0}
+            self.arm_called = False
+            self.takeoff_called = False
+            self.goto_called = False
+
+        def arm(self):
+            self.arm_called = True
+
+        def takeoff(self, _alt):
+            self.takeoff_called = True
+
+        def goto(self, _lat, _lon, _alt):
+            self.goto_called = True
+
+        def get_state(self):
+            return self.state
+
+    bridge = sitl_module.SITLTelemetryBridge()
+    fake_drone = FakeDrone()
+    bridge.swarm.drones = [fake_drone]
+
+    original_wait = sitl_module._wait_for_condition
+    sitl_module._wait_for_condition = lambda *_args, **_kwargs: False
+    try:
+        result = bridge.dispatch_drone(sysid=7, lat=34.5, lon=-117.5, alt=30.0, drone_id="drone-7")
+    finally:
+        sitl_module._wait_for_condition = original_wait
+
+    assert result["success"] is False
+    assert "never reported armed state" in result["message"]
+    assert fake_drone.arm_called is True
+    assert fake_drone.takeoff_called is False
+    assert fake_drone.goto_called is False
+
+
+def test_drone_eof_handler_marks_connection_disconnected():
+    import app.connect_swarm as connect_swarm_module
+
+    class FakePort:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class FakeConn:
+        def __init__(self):
+            self.target_component = 1
+            self.port = FakePort()
+
+    drone = connect_swarm_module.Drone(FakeConn(), sysid=3, index=1)
+
+    try:
+        drone.conn.handle_eof()
+        assert False, "expected EOFError"
+    except EOFError as exc:
+        assert "EOF on TCP socket" in str(exc)
+
+    assert drone.disconnected is True
+    assert drone.last_error == "EOF on TCP socket"
+    assert drone.conn.port.closed is True
+
+
+def test_ensure_connected_drops_stale_links_and_retries():
+    import app.sitl as sitl_module
+
+    class FakeDrone:
+        def is_connection_alive(self, _stale_after):
+            return False
+
+    bridge = sitl_module.SITLTelemetryBridge()
+    bridge.swarm.drones = [FakeDrone()]
+
+    reset_calls = {"count": 0}
+    connect_calls = {"count": 0}
+
+    def fake_reset_connections():
+        reset_calls["count"] += 1
+        bridge.swarm.drones = []
+
+    bridge.swarm.reset_connections = fake_reset_connections
+
+    def fake_connect(*_args, **_kwargs):
+        connect_calls["count"] += 1
+        bridge.swarm.drones = []
+        raise RuntimeError("connection refused")
+
+    bridge.swarm.connect = fake_connect
+
+    result = bridge.ensure_connected(force=True)
+
+    assert result is False
+    assert reset_calls["count"] == 1
+    assert connect_calls["count"] == 1
+    assert "connection refused" in (bridge._last_connect_error or "")
+
+
+def test_send_live_drone_gotos_logs_skip_reasons_for_not_airborne(caplog):
+    original_get_states = sitl_bridge.get_states_by_sysid
+    original_is_dispatching = sitl_bridge.is_dispatching
+
+    sitl_bridge.get_states_by_sysid = lambda: {
+        1: {
+            "armed": False,
+            "alt": 0.0,
+        }
+    }
+    sitl_bridge.is_dispatching = lambda _sysid: False
+
+    mission = {
+        "elapsed_seconds": 10,
+        "drones": [
+            {
+                "id": "drone-1",
+                "sysid": 1,
+                "lat": 34.5,
+                "lon": -117.5,
+                "alt": 0.0,
+            }
+        ],
+    }
+
+    try:
+        with caplog.at_level("INFO"):
+            simulation_module._send_live_drone_gotos(mission, {"drone-1"}, {})
+    finally:
+        sitl_bridge.get_states_by_sysid = original_get_states
+        sitl_bridge.is_dispatching = original_is_dispatching
+
+    assert "goto_loop: 0/1 drones got goto" in caplog.text
+    assert "blocked airborne=1" in caplog.text
+
+
+def test_get_states_by_sysid_triggers_reconnect_for_stale_links():
+    import app.sitl as sitl_module
+
+    class FakeDrone:
+        def is_connection_alive(self, _stale_after):
+            return False
+
+    bridge = sitl_module.SITLTelemetryBridge()
+    bridge.swarm.drones = [FakeDrone()]
+
+    reconnect_attempted = {"count": 0}
+
+    def fake_connect(*_args, **_kwargs):
+        reconnect_attempted["count"] += 1
+        raise RuntimeError("connection refused")
+
+    bridge.swarm.connect = fake_connect
+    bridge.swarm.reset_connections = lambda: setattr(bridge.swarm, "drones", [])
+
+    states = bridge.get_states_by_sysid()
+
+    assert states == {}
+    assert reconnect_attempted["count"] == 1
+    assert "connection refused" in (bridge._last_connect_error or "")
 
 
 def test_mission_drone_to_sysid_map_assigns_existing_and_fallback_sysids():
