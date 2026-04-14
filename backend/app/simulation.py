@@ -318,11 +318,11 @@ async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], centr
             
             if dist > TARGET_STOP_RADIUS:
                 
-                if not has_live_telemetry:
+                '''if not has_live_telemetry:
                     drone["lat"] += (d_lat / dist) * SPEED
-                    drone["lon"] += (d_lon / dist) * SPEED
-                    drone["lat"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
-                    drone["lon"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+                    drone["lon"] += (d_lon / dist) * SPEED 
+                    drone["lat"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)        #ONLY FOR USING MOCK DATA, NOT NEEDED?
+                    drone["lon"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)'''
                     
                 continue
 
@@ -482,7 +482,7 @@ async def simulation_loop(mission_id: str):
         # Pull live SITL state into the mission before making any coverage or
         # targeting decisions for this tick.
         live_drone_ids = _sync_mission_drones_with_sitl(mission)
-        centroid_map = _build_centroid_map(mission)
+        centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
 
         #_rearm_live_drones_if_needed(mission, live_drone_ids)
         _send_live_drone_gotos(mission, live_drone_ids, centroid_map)

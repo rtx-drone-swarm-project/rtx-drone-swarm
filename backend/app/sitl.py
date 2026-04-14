@@ -43,6 +43,8 @@ class SITLTelemetryBridge:
         self.swarm.connect(count=self.count, start_port=self.base_port)
         # Start the background thread
         self.swarm.start_background_telemetry()
+        self.swarm.wait_for_all_prearm(timeout = 60)
+        self.swarm.wait_for_ekf_alignment(timeout = 60)
 
     def stop(self) -> None:
         """Stop the background polling thread."""
