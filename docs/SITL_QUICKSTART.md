@@ -255,7 +255,7 @@ curl http://localhost:8000/sitl/status
 
 ### Host SITL + Docker backend
 
-Use this when SITL runs directly on the machine but the backend stays in a container.
+Use this when SITL runs directly on the machine but the backend stays in a container. The backend uses direct TCP SITL ports `5762`, `5772`, `5782`, and so on, exposed by `sim_vehicle.py`.
 
 1. Start the backend container:
 
@@ -281,20 +281,11 @@ Expected result:
 
 ### Multi-host deployment
 
-If SITL and the backend run on different machines, point SITL at the backend-reachable address:
-
-```bash
-SITL_OUT_HOST=<backend-private-ip-or-dns> ./scripts/start_sitl_swarm.sh 15
-```
-
-If the backend runs in Docker, ensure these UDP ports are published:
-- `14550-14690/udp`
-
-If the backend runs directly on the host, ensure firewall or security rules allow those UDP ports from the SITL host.
+If SITL and the backend run on different machines, set `SITL_HOST` for the backend to a host or DNS name that exposes the TCP SITL ports.
 
 ## Troubleshooting
 
 - If `start_sitl_swarm.sh` says ArduPilot is missing, set `ARDUPILOT_PATH` or clone ArduPilot into `~/ardupilot`.
-- If `/sitl/status` shows `connected_count: 0`, confirm SITL is still running and that UDP ports `14550-14690` are not blocked.
+- If `/sitl/status` shows `connected_count: 0`, confirm SITL is still running and that TCP ports `5762`, `5772`, `5782`, and so on are reachable from the backend.
 - If Docker is part of your flow, make sure Docker Desktop is running before `docker compose up --build`.
 - If port `8000` or `5173` is already in use, adjust the host port mappings in `docker-compose.yml`.
