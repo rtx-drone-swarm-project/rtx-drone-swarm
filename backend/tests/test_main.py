@@ -41,6 +41,22 @@ def test_sitl_status_endpoint_returns_bridge_snapshot():
     finally:
         sitl_bridge.get_states_by_sysid = original_get_states
 
+
+def test_sitl_status_endpoint_includes_last_connect_error():
+    original_get_states = sitl_bridge.get_states_by_sysid
+    original_last_connect_error = sitl_bridge._last_connect_error
+    sitl_bridge.get_states_by_sysid = lambda: {}
+    sitl_bridge._last_connect_error = "connection refused"
+    try:
+        response = client.get("/sitl/status")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["connected_count"] == 0
+        assert payload["last_connect_error"] == "connection refused"
+    finally:
+        sitl_bridge.get_states_by_sysid = original_get_states
+        sitl_bridge._last_connect_error = original_last_connect_error
+
 def test_create_mission():
     mission_data = {
         "name": "Test Mission",
@@ -598,6 +614,83 @@ def test_run_dispatch_script_non_zero_exit_returns_failure_rows():
         assert "exited with code 1" in results[0]["message"].lower()
     finally:
         dispatch_module.asyncio.create_subprocess_exec = original_create_subprocess_exec
+
+
+def test_dispatch_drone_fails_when_arm_never_reflects_in_state():
+    import app.sitl as sitl_module
+
+    class FakeDrone:
+        def __init__(self):
+            self.sysid = 7
+            self.state = {"mode": "GUIDED", "armed": False, "rel_alt": 0.0}
+            self.arm_called = False
+            self.takeoff_called = False
+            self.goto_called = False
+
+        def arm(self):
+            self.arm_called = True
+
+        def takeoff(self, _alt):
+            self.takeoff_called = True
+
+        def goto(self, _lat, _lon, _alt):
+            self.goto_called = True
+
+        def get_state(self):
+            return self.state
+
+    bridge = sitl_module.SITLTelemetryBridge()
+    fake_drone = FakeDrone()
+    bridge.swarm.drones = [fake_drone]
+
+    original_wait = sitl_module._wait_for_condition
+    sitl_module._wait_for_condition = lambda *_args, **_kwargs: False
+    try:
+        result = bridge.dispatch_drone(sysid=7, lat=34.5, lon=-117.5, alt=30.0, drone_id="drone-7")
+    finally:
+        sitl_module._wait_for_condition = original_wait
+
+    assert result["success"] is False
+    assert "never reported armed state" in result["message"]
+    assert fake_drone.arm_called is True
+    assert fake_drone.takeoff_called is False
+    assert fake_drone.goto_called is False
+
+
+def test_send_live_drone_gotos_logs_skip_reasons_for_not_airborne(caplog):
+    original_get_states = sitl_bridge.get_states_by_sysid
+    original_is_dispatching = sitl_bridge.is_dispatching
+
+    sitl_bridge.get_states_by_sysid = lambda: {
+        1: {
+            "armed": False,
+            "alt": 0.0,
+        }
+    }
+    sitl_bridge.is_dispatching = lambda _sysid: False
+
+    mission = {
+        "elapsed_seconds": 10,
+        "drones": [
+            {
+                "id": "drone-1",
+                "sysid": 1,
+                "lat": 34.5,
+                "lon": -117.5,
+                "alt": 0.0,
+            }
+        ],
+    }
+
+    try:
+        with caplog.at_level("INFO"):
+            simulation_module._send_live_drone_gotos(mission, {"drone-1"}, {})
+    finally:
+        sitl_bridge.get_states_by_sysid = original_get_states
+        sitl_bridge.is_dispatching = original_is_dispatching
+
+    assert "goto_loop: 0/1 drones got goto" in caplog.text
+    assert "blocked airborne=1" in caplog.text
 
 
 def test_mission_drone_to_sysid_map_assigns_existing_and_fallback_sysids():
