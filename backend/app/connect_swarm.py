@@ -7,6 +7,10 @@ from pymavlink import mavutil
 
 ARM_CMD = mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM
 TAKEOFF_CMD = mavutil.mavlink.MAV_CMD_NAV_TAKEOFF
+ACCEPTED_ACK_RESULTS = {
+    mavutil.mavlink.MAV_RESULT_ACCEPTED,
+    mavutil.mavlink.MAV_RESULT_IN_PROGRESS,
+}
 
 class Drone:
     TELEMETRY_MSGS = {"HEARTBEAT", "VFR_HUD", "GLOBAL_POSITION_INT", "SYS_STATUS", "EKF_STATUS_REPORT"}
@@ -51,7 +55,10 @@ class Drone:
             params = [0] * 7
 
         self.conn.mav.command_long_send(self.sysid, self.comp, command, 0, *(params[:7]))
-        self.wait_ack(command)
+        result = self.wait_ack(command, timeout=timeout)
+        if result not in ACCEPTED_ACK_RESULTS:
+            raise RuntimeError(f"Drone {self.sysid}: command {command} rejected with ACK result {result}")
+        return result
 
 
     def goto(self, lat, lon, alt):
@@ -88,12 +95,18 @@ class Drone:
 
     def arm(self, timeout = 5):
         self.conn.mav.command_long_send(self.sysid, self.comp, ARM_CMD, 0, 1, 0, 0, 0, 0, 0, 0)
-        self.wait_ack(ARM_CMD)
+        result = self.wait_ack(ARM_CMD, timeout=timeout)
+        if result not in ACCEPTED_ACK_RESULTS:
+            raise RuntimeError(f"Drone {self.sysid}: arm rejected with ACK result {result}")
+        return result
 
     def takeoff(self, altitude, timeout = 5):
         self.target_alt = altitude
         self.conn.mav.command_long_send(self.sysid, self.comp,TAKEOFF_CMD,0, 0, 0, 0, 0, 0, 0, altitude)
-        self.wait_ack(TAKEOFF_CMD)
+        result = self.wait_ack(TAKEOFF_CMD, timeout=timeout)
+        if result not in ACCEPTED_ACK_RESULTS:
+            raise RuntimeError(f"Drone {self.sysid}: takeoff rejected with ACK result {result}")
+        return result
 
     def wait_ack(self, command, timeout=5):
         start = time.time()
@@ -234,19 +247,21 @@ class Swarm:
     def get_states(self):
         return [d.get_state() for d in self.drones]
 
-    def connect(self, count, start_port=5762):
+    def connect(self, count, host="127.0.0.1", start_port=5762, port_step=10):
+        connected_drones = []
         for i in range(count):
-            port = start_port + i * 10
-            print(f"Connecting to port {port}...")
-            conn = mavutil.mavlink_connection(f"tcp:127.0.0.1:{port}")
-            hb = conn.wait_heartbeat()
+            port = start_port + i * port_step
+            print(f"Connecting to {host}:{port}...")
+            conn = mavutil.mavlink_connection(f"tcp:{host}:{port}")
+            hb = conn.wait_heartbeat(timeout=15)
 
             drone = Drone(conn=conn, sysid=hb.get_srcSystem(), index=i + 1)
             drone.request_data_streams()
 
-            self.drones.append(drone)
+            connected_drones.append(drone)
             print(f"  Drone {i+1} connected (sysid={drone.sysid})")
 
+        self.drones = connected_drones
         print(f"\nConnected {len(self.drones)} drones\n")
 
 

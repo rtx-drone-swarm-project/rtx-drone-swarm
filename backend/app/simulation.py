@@ -246,11 +246,15 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map
 
     airborne_states = sitl_bridge.get_states_by_sysid()
     goto_sent = 0
+    skipped_not_dispatchable = 0
+    skipped_not_airborne = 0
+    skipped_no_destination = 0
     for drone in mission["drones"]:
         if str(drone.get("id")) not in live_drone_ids:
             continue
         sysid = drone.get("sysid")
         if not sysid or sitl_bridge.is_dispatching(sysid):
+            skipped_not_dispatchable += 1
             continue
         state = airborne_states.get(sysid, {})
         # Some paths keep altitude on the mission drone record rather than the
@@ -258,6 +262,7 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map
         # the drone is safely airborne.
         rel_alt = max(float(state.get("alt") or 0), float(drone.get("alt") or 0))
         if not state.get("armed") or rel_alt < 3.0:
+            skipped_not_airborne += 1
             continue
         target_id = drone.get("assigned_target_id")
         if target_id:
@@ -279,9 +284,19 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map
         if centroid is not None:
             sitl_bridge.send_goto(sysid, float(centroid[0]), float(centroid[1]), DEFAULT_DISPATCH_ALT)
             goto_sent += 1
+            continue
+        skipped_no_destination += 1
 
     if mission.get("elapsed_seconds", 0) % 10 == 0:
-        logger.info("goto_loop: %d/%d drones got goto, centroids=%d", goto_sent, len(live_drone_ids), len(centroid_map))
+        logger.info(
+            "goto_loop: %d/%d drones got goto, centroids=%d, blocked dispatching=%d, blocked airborne=%d, blocked destination=%d",
+            goto_sent,
+            len(live_drone_ids),
+            len(centroid_map),
+            skipped_not_dispatchable,
+            skipped_not_airborne,
+            skipped_no_destination,
+        )
 
 
 async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], centroid_map: dict, bounds: dict) -> None:

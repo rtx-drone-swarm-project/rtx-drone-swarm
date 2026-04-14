@@ -13,9 +13,20 @@ from app.settings import (
     DEFAULT_SITL_BASE_PORT,
     DEFAULT_SITL_COUNT,
     DEFAULT_SITL_HOST,
+    DEFAULT_SITL_PORT_STEP,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _wait_for_condition(predicate, timeout: float, interval: float = 0.25) -> bool:
+    """Poll a state predicate until it becomes true or timeout expires."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return bool(predicate())
 
 class SITLTelemetryBridge:
     """Adapter that exposes the new Swarm class to the rest of the FastAPI backend."""
@@ -24,25 +35,74 @@ class SITLTelemetryBridge:
         self,
         host: str = DEFAULT_SITL_HOST,
         base_port: int = DEFAULT_SITL_BASE_PORT,
+        port_step: int = DEFAULT_SITL_PORT_STEP,
         count: int = DEFAULT_SITL_COUNT,
     ):
         self.host = host
         self.base_port = base_port
+        self.port_step = port_step
         self.count = count
-        
-
         self.swarm = Swarm()
-        
         # Keep tracking dispatching to prevent simulation.py from interrupting
         self._dispatching_sysids: set = set()
-        #self._last_arm_time: Dict[int, float] = {}
+        self._connect_lock = threading.Lock()
+        self._last_connect_error: str | None = None
+        self._last_connect_attempt_at = 0.0
+        self._retry_interval_seconds = 5.0
 
     def start(self) -> None:
-        """Start the swarm connections and background telemetry thread."""
-        # Connect the swarm 
-        self.swarm.connect(count=self.count, start_port=self.base_port)
-        # Start the background thread
-        self.swarm.start_background_telemetry()
+        """Start the telemetry thread and attempt an initial TCP SITL connection."""
+        if not self.swarm.telemetry_thread or not self.swarm.telemetry_thread.is_alive():
+            self.swarm.start_background_telemetry()
+        self.ensure_connected(force=True)
+
+    def ensure_connected(self, force: bool = False) -> bool:
+        """Attempt to connect to SITL over TCP without crashing the API on failure."""
+        if self.swarm.drones:
+            self._last_connect_error = None
+            return True
+
+        now = time.time()
+        if not force and now - self._last_connect_attempt_at < self._retry_interval_seconds:
+            return False
+
+        with self._connect_lock:
+            if self.swarm.drones:
+                self._last_connect_error = None
+                return True
+
+            now = time.time()
+            if not force and now - self._last_connect_attempt_at < self._retry_interval_seconds:
+                return False
+
+            self._last_connect_attempt_at = now
+
+            try:
+                self.swarm.connect(
+                    count=self.count,
+                    host=self.host,
+                    start_port=self.base_port,
+                    port_step=self.port_step,
+                )
+                self._last_connect_error = None
+                logger.info(
+                    "Connected to %s SITL drone(s) at tcp://%s:%s step %s",
+                    len(self.swarm.drones),
+                    self.host,
+                    self.base_port,
+                    self.port_step,
+                )
+                return True
+            except Exception as exc:
+                self._last_connect_error = str(exc)
+                logger.warning(
+                    "SITL connection failed at tcp://%s:%s step %s: %s",
+                    self.host,
+                    self.base_port,
+                    self.port_step,
+                    exc,
+                )
+                return False
 
     def stop(self) -> None:
         """Stop the background polling thread."""
@@ -117,13 +177,26 @@ class SITLTelemetryBridge:
             # Check if it needs to arm and takeoff
             if not drone.state["armed"]:
                 drone.arm()
-                #self._last_arm_time[sysid] = time.time()
-                time.sleep(2) # Give it a second
+                if not _wait_for_condition(lambda: bool(drone.get_state()["armed"]), timeout=10.0):
+                    return {
+                        "drone_id": drone_id,
+                        "sysid": sysid,
+                        "success": False,
+                        "message": "Arm command ACKed but drone never reported armed state",
+                    }
                 
             if drone.state["rel_alt"] < alt - 2:
                 drone.takeoff(alt)
-                # Wait briefly for takeoff to register before giving a goto
-                time.sleep(3)
+                if not _wait_for_condition(
+                    lambda: float(drone.get_state()["rel_alt"]) >= min(alt - 2.0, 3.0),
+                    timeout=20.0,
+                ):
+                    return {
+                        "drone_id": drone_id,
+                        "sysid": sysid,
+                        "success": False,
+                        "message": "Takeoff ACKed but drone never reached safe goto altitude",
+                    }
 
             # Send the goto command using your new method
             drone.goto(lat, lon, alt)
@@ -170,6 +243,7 @@ async def idle_sitl_telemetry_loop() -> None:
     while True:
         try:
             await asyncio.sleep(1.0) # Update the UI once per second when idle
+            sitl_bridge.ensure_connected()
             
             # Don't waste CPU if no one is looking at the web page
             if not manager.active_connections:
