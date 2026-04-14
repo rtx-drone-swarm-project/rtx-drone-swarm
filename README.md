@@ -36,7 +36,14 @@ pip3 install -r requirements.txt
 2. Start the simulated swarm from the repo root:
 
 ```bash
-./scripts/start_sitl_swarm.sh 15
+./scripts/launch_sitl.sh
+```
+
+`launch_sitl.sh` is the main SITL launcher for this repo. By default it starts a 15-drone ArduCopter swarm and loads `scripts/sitl_params.param`. You can also pass an explicit drone count and param file:
+
+```bash
+./scripts/launch_sitl.sh 15
+./scripts/launch_sitl.sh 15 ./scripts/sitl_params.param
 ```
 
 3. In a second terminal, start the app stack:
@@ -45,19 +52,27 @@ pip3 install -r requirements.txt
 docker compose up --build
 ```
 
+If you only want to refresh the Docker images, run:
+
+```bash
+docker compose build
+```
+
 ## What You Should See
 
 - Frontend: `http://localhost:5173`
 - Backend health: `http://localhost:8000/health`
 - SITL telemetry status: `http://localhost:8000/sitl/status`
 
-When SITL is connected correctly, `/sitl/status` should report `connected_count > 0` and include live drone entries.
+When SITL is connected correctly, `/sitl/status` should report `connected_count > 0` and include live drone entries. If SITL is still booting, the backend will stay up and `last_connect_error` will explain the current connection failure.
 
 ## Operational Notes
 
-- `scripts/start_sitl_swarm.sh` expects a local ArduPilot checkout at `~/ardupilot` by default. Override with `ARDUPILOT_PATH=/path/to/ardupilot`.
-- The default SITL telemetry ports are UDP `14550`, `14560`, `14570`, and so on.
-- Docker publishes UDP `14550-14690` to the backend container so host SITL can stream telemetry into the app.
+- `scripts/launch_sitl.sh` expects a local ArduPilot checkout at `~/ardupilot` by default. Override with `ARDUPILOT_PATH=/path/to/ardupilot`.
+- `docker compose up --build` builds the backend from `backend/Dockerfile` and the frontend from `frontend/Dockerfile`.
+- Use `docker compose up -d --build` if you want the app stack to keep running in the background.
+- The backend connects directly to host SITL over TCP on ports `5762`, `5772`, `5782`, and so on.
+- In Docker, the backend resolves the host via `host.docker.internal`.
 - Stop the swarm with `Ctrl+C` in the SITL terminal. If needed, kill remaining processes with `pkill -f arducopter` and `pkill -f mavproxy`.
 
 ## Repository Layout

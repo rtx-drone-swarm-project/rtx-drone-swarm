@@ -1,6 +1,6 @@
 import type { Bounds } from "../types/mission";
 
-export const HALF_SIDE_KM = 5;
+export const HALF_SIDE_KM = 2;
 
 export function kmToLatDelta(km: number): number {
   return km / 110.574;

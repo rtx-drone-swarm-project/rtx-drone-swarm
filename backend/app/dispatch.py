@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 from typing import List, Optional
+import time
 
 from app.missions import (
     _coerce_sysid,
@@ -133,6 +134,35 @@ async def run_direct_dispatch(assignments: List[dict]) -> List[dict]:
     """Dispatch assignments directly through the in-process SITL bridge."""
     if not assignments:
         return []
+    
+    logger.info("Dispatch invoked. Waiting for Swarm EKF and Pre-arm checks...")
+    start_time = time.time()
+    timeout = 120
+    is_ready = False
+    
+    while time.time() - start_time < timeout:
+        ekf_ready = all(d.is_ekf_gps_ready() for d in sitl_bridge.swarm.drones)
+        prearm_ready = all(d.is_prearm_passed() for d in sitl_bridge.swarm.drones)
+        
+        if ekf_ready and prearm_ready:
+            is_ready = True
+            break
+            
+        await asyncio.sleep(1)
+        
+    if not is_ready:
+        logger.error("Dispatch aborted: Pre-flight timeout.")
+        return [
+            _dispatch_failure_row(
+                item.get("drone_id"),
+                _coerce_sysid(item.get("sysid")),
+                "Launch aborted: EKF or Pre-arm checks timed out."
+            )
+            for item in assignments
+        ]
+
+    
+    logger.info("Pre-flight checks passed! Executing swarm takeoff in thread pool.")
 
     def _dispatch_one(item: dict) -> dict:
         """Validate one assignment and forward it to ``sitl_bridge.dispatch_drone``."""

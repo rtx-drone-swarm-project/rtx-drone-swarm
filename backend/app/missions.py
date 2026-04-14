@@ -15,7 +15,7 @@ from app.settings import (
     DEFAULT_SITL_HOME_ALT,
     DEFAULT_SITL_HOST,
     DEFAULT_SITL_PORT_STEP,
-    START_SITL_SCRIPT,
+    LAUNCH_SITL_SCRIPT,
 )
 from app.voronoi import build_search_grid
 
@@ -238,8 +238,8 @@ async def _ensure_sitl_running_for_mission(mission: dict) -> Optional[str]:
         return None
     if sitl_bridge.get_states_by_sysid():
         return None
-    if not START_SITL_SCRIPT.exists():
-        return f"SITL start script not found: {START_SITL_SCRIPT}"
+    if not LAUNCH_SITL_SCRIPT.exists():
+        return f"SITL launch script not found: {LAUNCH_SITL_SCRIPT}"
 
     bounds = mission["bounds"]
     center_lat, center_lon = _mission_bounds_center(bounds)
@@ -252,7 +252,7 @@ async def _ensure_sitl_running_for_mission(mission: dict) -> Optional[str]:
 
     try:
         await asyncio.create_subprocess_exec(
-            str(START_SITL_SCRIPT),
+            str(LAUNCH_SITL_SCRIPT),
             str(max(len(mission.get("drones", [])), 1)),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
