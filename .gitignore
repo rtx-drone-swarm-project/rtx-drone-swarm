@@ -21,3 +21,4 @@ watch_*
 
 # Allowlist
 !__init__.py
+!.github/
