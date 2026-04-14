@@ -6,6 +6,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
     docker-build-check:
         runs-on: ubuntu-latest
@@ -19,4 +23,3 @@ jobs:
 
         -   name: Build frontend image
             run: docker build -f frontend/Dockerfile -t frontend-check ./frontend
-
