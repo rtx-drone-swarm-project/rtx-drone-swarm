@@ -4,7 +4,8 @@ import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.sitl import telemetry_drones_from_sitl_bridge
+# Import sitl_bridge directly!
+from app.sitl import sitl_bridge
 from app.ws import manager
 
 
@@ -16,9 +17,12 @@ async def websocket_endpoint(websocket: WebSocket):
     """Accept a telemetry socket and push the latest idle SITL snapshot on connect."""
     await manager.connect(websocket)
     try:
-        drones = telemetry_drones_from_sitl_bridge()
-        if drones:
-            await websocket.send_text(json.dumps({"type": "telemetry", "drones": drones}))
+        # Get the states directly from the bridge and convert the dict to a list
+        states_dict = sitl_bridge.get_states_by_sysid()
+        if states_dict:
+            drones_list = list(states_dict.values())
+            await websocket.send_text(json.dumps({"type": "telemetry", "drones": drones_list}))
+            
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
