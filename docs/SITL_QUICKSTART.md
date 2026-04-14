@@ -10,13 +10,19 @@ The primary demo path for this repo is:
 2. Start the swarm from the repo root:
 
 ```bash
-./scripts/start_sitl_swarm.sh 15
+./scripts/launch_sitl.sh
 ```
 
 3. Start the frontend and backend:
 
 ```bash
 docker compose up --build
+```
+
+If you only need to rebuild the frontend and backend images, run:
+
+```bash
+docker compose build
 ```
 
 4. Verify telemetry:
@@ -32,7 +38,7 @@ Expected result:
 
 ## Recommended Startup
 
-At current state of V1 please follow the **Host SITL + host backend** setup at the bottom for a full end-to-end demo
+Use `launch_sitl.sh` as the main swarm launcher. Docker currently builds and runs the frontend and backend application stack, while SITL itself still runs on the host machine.
 
 ## macOS Setup
 
@@ -196,19 +202,13 @@ mode rtl
 Start the default 15-drone swarm:
 
 ```bash
-./scripts/start_sitl_swarm.sh 15
+./scripts/launch_sitl.sh 15
 ```
 
-Override telemetry destination:
+Start with a custom parameter file:
 
 ```bash
-SITL_OUT_HOST=127.0.0.1 ./scripts/start_sitl_swarm.sh 15
-```
-
-Spawn near a specific mission area:
-
-```bash
-SITL_HOME="33.600000,-117.300000,0,0" ./scripts/start_sitl_swarm.sh 15
+./scripts/launch_sitl.sh 15 ./scripts/sitl_params.param
 ```
 
 In another terminal, send commands:
@@ -229,7 +229,7 @@ Use this when you want the simplest setup for telemetry debugging.
 1. Start SITL:
 
 ```bash
-./scripts/start_sitl_swarm.sh 15
+./scripts/launch_sitl.sh 15
 ```
 
 2. Start the backend:
@@ -266,7 +266,7 @@ docker compose up --build -d backend
 2. Start SITL on the host with the default target:
 
 ```bash
-./scripts/start_sitl_swarm.sh 15
+./scripts/launch_sitl.sh 15
 ```
 
 3. Verify telemetry:
@@ -285,7 +285,8 @@ If SITL and the backend run on different machines, set `SITL_HOST` for the backe
 
 ## Troubleshooting
 
-- If `start_sitl_swarm.sh` says ArduPilot is missing, set `ARDUPILOT_PATH` or clone ArduPilot into `~/ardupilot`.
+- If `launch_sitl.sh` says ArduPilot is missing, set `ARDUPILOT_PATH` or clone ArduPilot into `~/ardupilot`.
 - If `/sitl/status` shows `connected_count: 0`, confirm SITL is still running and that TCP ports `5762`, `5772`, `5782`, and so on are reachable from the backend.
 - If Docker is part of your flow, make sure Docker Desktop is running before `docker compose up --build`.
+- If you changed a Dockerfile and want fresh images without starting containers yet, run `docker compose build`.
 - If port `8000` or `5173` is already in use, adjust the host port mappings in `docker-compose.yml`.
