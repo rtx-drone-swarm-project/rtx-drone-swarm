@@ -49,6 +49,7 @@ class SITLTelemetryBridge:
         self._last_connect_error: str | None = None
         self._last_connect_attempt_at = 0.0
         self._retry_interval_seconds = 5.0
+        self._stale_connection_seconds = 5.0
 
     def start(self) -> None:
         """Start the telemetry thread and attempt an initial TCP SITL connection."""
@@ -56,11 +57,28 @@ class SITLTelemetryBridge:
             self.swarm.start_background_telemetry()
         self.ensure_connected(force=True)
 
+    def _connections_healthy(self) -> bool:
+        if not self.swarm.drones:
+            return False
+        return all(drone.is_connection_alive(self._stale_connection_seconds) for drone in self.swarm.drones)
+
+    def _drop_stale_connections(self, reason: str) -> None:
+        if not self.swarm.drones:
+            return
+        logger.warning(reason)
+        self.swarm.reset_connections()
+        self._last_connect_error = reason
+
     def ensure_connected(self, force: bool = False) -> bool:
         """Attempt to connect to SITL over TCP without crashing the API on failure."""
-        if self.swarm.drones:
+        if self._connections_healthy():
             self._last_connect_error = None
             return True
+
+        if self.swarm.drones:
+            self._drop_stale_connections(
+                f"SITL TCP connection lost at tcp://{self.host}:{self.base_port} step {self.port_step}; waiting for reconnection"
+            )
 
         now = time.time()
         if not force and now - self._last_connect_attempt_at < self._retry_interval_seconds:
@@ -119,6 +137,7 @@ class SITLTelemetryBridge:
 
     def get_states_by_sysid(self) -> Dict[int, dict]:
         """Map the Swarm's internal state format to what the backend expects."""
+        self.ensure_connected()
         states = {}
         for drone in self.swarm.drones:
             d_state = drone.get_state()

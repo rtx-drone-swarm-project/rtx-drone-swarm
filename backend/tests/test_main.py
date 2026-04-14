@@ -657,6 +657,68 @@ def test_dispatch_drone_fails_when_arm_never_reflects_in_state():
     assert fake_drone.goto_called is False
 
 
+def test_drone_eof_handler_marks_connection_disconnected():
+    import app.connect_swarm as connect_swarm_module
+
+    class FakePort:
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class FakeConn:
+        def __init__(self):
+            self.target_component = 1
+            self.port = FakePort()
+
+    drone = connect_swarm_module.Drone(FakeConn(), sysid=3, index=1)
+
+    try:
+        drone.conn.handle_eof()
+        assert False, "expected EOFError"
+    except EOFError as exc:
+        assert "EOF on TCP socket" in str(exc)
+
+    assert drone.disconnected is True
+    assert drone.last_error == "EOF on TCP socket"
+    assert drone.conn.port.closed is True
+
+
+def test_ensure_connected_drops_stale_links_and_retries():
+    import app.sitl as sitl_module
+
+    class FakeDrone:
+        def is_connection_alive(self, _stale_after):
+            return False
+
+    bridge = sitl_module.SITLTelemetryBridge()
+    bridge.swarm.drones = [FakeDrone()]
+
+    reset_calls = {"count": 0}
+    connect_calls = {"count": 0}
+
+    def fake_reset_connections():
+        reset_calls["count"] += 1
+        bridge.swarm.drones = []
+
+    bridge.swarm.reset_connections = fake_reset_connections
+
+    def fake_connect(*_args, **_kwargs):
+        connect_calls["count"] += 1
+        bridge.swarm.drones = []
+        raise RuntimeError("connection refused")
+
+    bridge.swarm.connect = fake_connect
+
+    result = bridge.ensure_connected(force=True)
+
+    assert result is False
+    assert reset_calls["count"] == 1
+    assert connect_calls["count"] == 1
+    assert "connection refused" in (bridge._last_connect_error or "")
+
+
 def test_send_live_drone_gotos_logs_skip_reasons_for_not_airborne(caplog):
     original_get_states = sitl_bridge.get_states_by_sysid
     original_is_dispatching = sitl_bridge.is_dispatching
@@ -691,6 +753,32 @@ def test_send_live_drone_gotos_logs_skip_reasons_for_not_airborne(caplog):
 
     assert "goto_loop: 0/1 drones got goto" in caplog.text
     assert "blocked airborne=1" in caplog.text
+
+
+def test_get_states_by_sysid_triggers_reconnect_for_stale_links():
+    import app.sitl as sitl_module
+
+    class FakeDrone:
+        def is_connection_alive(self, _stale_after):
+            return False
+
+    bridge = sitl_module.SITLTelemetryBridge()
+    bridge.swarm.drones = [FakeDrone()]
+
+    reconnect_attempted = {"count": 0}
+
+    def fake_connect(*_args, **_kwargs):
+        reconnect_attempted["count"] += 1
+        raise RuntimeError("connection refused")
+
+    bridge.swarm.connect = fake_connect
+    bridge.swarm.reset_connections = lambda: setattr(bridge.swarm, "drones", [])
+
+    states = bridge.get_states_by_sysid()
+
+    assert states == {}
+    assert reconnect_attempted["count"] == 1
+    assert "connection refused" in (bridge._last_connect_error or "")
 
 
 def test_mission_drone_to_sysid_map_assigns_existing_and_fallback_sysids():

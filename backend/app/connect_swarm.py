@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import time
 import threading
+import logging
 from pymavlink import mavutil
-
+logger = logging.getLogger(__name__)
 
 
 ARM_CMD = mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM
@@ -33,6 +34,10 @@ class Drone:
         self.last_status = None
         self.last_ekf = None
         self.last_ack = None
+        self.last_message_at = time.time()
+        self.disconnected = False
+        self.last_error = None
+        self._install_eof_handler()
 
         self.state = {
             "index": self.index,
@@ -49,6 +54,21 @@ class Drone:
         }
 
     
+    def _install_eof_handler(self):
+        """Replace pymavlink's repeated 
+        EOF print with a one-shot disconnect signal. (Credit to GPT-5.4 for trick)"""
+        def _handle_eof():
+            self.disconnected = True
+            self.last_error = "EOF on TCP socket"
+            try:
+                if getattr(self.conn, "port", None) is not None:
+                    self.conn.port.close()
+            except Exception:
+                pass
+            logger.warning("Drone %s TCP connection closed; waiting for SITL to reconnect", self.sysid)
+            raise EOFError(self.last_error)
+
+        self.conn.handle_eof = _handle_eof
 
     def send_command(self, command, params=None, wait_ack=True, timeout=3):
         if params is None:
@@ -130,9 +150,16 @@ class Drone:
 
         # 1. Drain the OS buffer as fast as physically possible
         while True:
-            msg = self.conn.recv_match(blocking=False)
+            try:
+                msg = self.conn.recv_match(blocking=False)
+            except Exception as exc:
+                self.disconnected = True
+                self.last_error = str(exc)
+                break
             if msg is None:
                 break
+
+            self.last_message_at = time.time()
 
             msg_type = msg.get_type()
             
@@ -174,6 +201,9 @@ class Drone:
                         
                     elif msg_type == "EKF_STATUS_REPORT":
                         self.last_ekf = msg
+
+    def is_connection_alive(self, stale_after: float = 5.0):
+        return not self.disconnected and (time.time() - self.last_message_at) <= stale_after
 
     def is_ekf_gps_ready(self):
         #self.update()
@@ -246,6 +276,15 @@ class Swarm:
 
     def get_states(self):
         return [d.get_state() for d in self.drones]
+
+    def reset_connections(self):
+        for drone in self.drones:
+            try:
+                if hasattr(drone.conn, "close"):
+                    drone.conn.close()
+            except Exception:
+                pass
+        self.drones = []
 
     def connect(self, count, host="127.0.0.1", start_port=5762, port_step=10):
         connected_drones = []
