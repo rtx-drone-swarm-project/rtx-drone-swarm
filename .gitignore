@@ -1,0 +1,24 @@
+logs/
+__pycache__/
+.venv/
+venv/
+.env
+ardupilot/
+.DS_Store
+node_modules/
+.pytest_cache/
+.vscode/
+
+# Catch All Ignores
+_*
+.*
+*.log
+*.log.*
+*.tlog
+*.raw
+watch_*
+*.pyc
+
+# Allowlist
+!__init__.py
+!.github/
