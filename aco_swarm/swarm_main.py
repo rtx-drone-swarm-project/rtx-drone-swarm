@@ -204,48 +204,204 @@ def parse_args():
     return p.parse_args()
 
 
-# ── Lloyd helper ─────────────────────────────────────────────────────
+# ── Helper ─────────────────────────────────────────────────────
+def _state_writer_loop(agents, planner):
+    while True:
+        _write_state(agents, planner)
+        time.sleep(1)
+
+def _fly_to_spawn(agent, lat, lon, alt):
+    log.info(f"[Drone {agent.drone_id + 1}] → spawn ({lat:.5f},{lon:.5f})")
+
+    agent._send_until_reached(lat, lon, alt)
+
+def _positions_separated(agents, threshold_m=5):
+    for i in range(len(agents)):
+        for j in range(i + 1, len(agents)):
+            if agents[i].lat is None or agents[j].lat is None:
+                continue
+            d = haversine_m(
+                agents[i].lat, agents[i].lon,
+                agents[j].lat, agents[j].lon
+            )
+            if d < threshold_m:
+                return False
+    return True
+
+# def _lloyd_loop(planner, agents, interval=5, coverage_threshold=0.85):
+#     bootstrapped = False
+
+#     while True:
+#         time.sleep(interval)
+
+#         airborne = [a for a in agents if getattr(a, "airborne", False) and a.lat is not None]
+#         if len(airborne) < len(agents):
+#             log.info(f"Lloyd waiting — {len(airborne)}/{len(agents)} drones airborne")
+#             continue
+
+#         states = [
+#             DroneState(id=a.drone_id, lat=a.lat, lon=a.lon)
+#             for a in agents
+#         ]
+
+#         state_map = {s.id: s for s in states}
+#         for agent in agents:
+#             if agent.drone_id in state_map and agent.territory is not None:
+#                 state_map[agent.drone_id].territory = agent.territory
+
+#         # if not bootstrapped:
+#         #     lats = [a.lat for a in agents if a.lat is not None]
+#         #     lons = [a.lon for a in agents if a.lon is not None]
+#         #     distinct_lats = len(set(f"{l:.3f}" for l in lats))
+#         #     distinct_lons = len(set(f"{l:.3f}" for l in lons))
+#         #     if distinct_lats < 2 and distinct_lons < 2:
+#         #         log.info("Lloyd waiting — drone positions not yet distinct")
+#         #         continue
+
+#         #     log.info("Lloyd bootstrap — assigning initial territories to all drones")
+#         #     planner._run_lloyd(states)
+#         #     state_map = {s.id: s for s in states}
+#         #     for agent in agents:
+#         #         if agent.drone_id in state_map:
+#         #             agent.territory = state_map[agent.drone_id].territory
+#         #             ter_size = len(agent.territory) if agent.territory is not None else 0
+#         #             log.info(f"  D{agent.drone_id + 1}: {ter_size} cells assigned")
+#         #     bootstrapped = True
+#         #     continue
+#         if not bootstrapped:
+#             if not _positions_separated(agents):
+#                 log.info("Lloyd waiting — drones too close together")
+#                 continue
+
+#             log.info("Lloyd bootstrap — assigning initial territories to all drones")
+#             planner._run_lloyd(states)
+
+#             # --- NEW: TERRITORY BALANCING ---
+#             min_cells = 50
+
+#             all_points = np.vstack([
+#                 s.territory for s in states
+#                 if s.territory is not None and len(s.territory) > 0
+#             ])
+
+#             for s in states:
+#                 if s.territory is None or len(s.territory) < min_cells:
+#                     log.warning(f"[Lloyd] Drone {s.id} has too few cells ({len(s.territory) if s.territory is not None else 0}) — rebalancing")
+#                     if len(all_points) >= min_cells:
+#                         idx = np.random.choice(len(all_points), size=min_cells, replace=False)
+#                         s.territory = all_points[idx]
+
+#             # assign back to agents
+#             state_map = {s.id: s for s in states}
+#             for agent in agents:
+#                 if agent.drone_id in state_map:
+#                     agent.territory = state_map[agent.drone_id].territory
+#                     ter_size = len(agent.territory) if agent.territory is not None else 0
+#                     log.info(f"  D{agent.drone_id + 1}: {ter_size} cells assigned")
+
+#             bootstrapped = True
+#             continue
+
+#         coverages = {
+#             s.id: planner._territory_coverage(s)
+#             for s in states
+#             if s.territory is not None and len(s.territory) > 0
+#         }
+
+#         if not coverages:
+#             continue
+
+#         all_covered = all(c >= coverage_threshold for c in coverages.values())
+
+#         if not all_covered:
+#             log.info(
+#                 "Lloyd skipped — coverage: "
+#                 + " ".join(f"D{k+1}:{v:.0%}" for k, v in sorted(coverages.items()))
+#             )
+#             continue
+
+#         log.info("All territories covered — running Lloyd repartition")
+#         planner.lloyd_active = True
+#         planner._run_lloyd(states)
+#         planner.lloyd_active = False
+
+#         state_map = {s.id: s for s in states}
+#         for agent in agents:
+#             if agent.drone_id in state_map:
+#                 old = agent.territory
+#                 new = state_map[agent.drone_id].territory
+
+#                 if new is None or len(new) == 0:
+#                     continue
+
+#                 if old is None or len(old) == 0:
+#                     agent.territory = new
+#                 else:
+#                     alpha = 0.3
+#                     k = max(1, int(len(new) * alpha))
+
+#                     keep_old = old[np.random.choice(len(old), size=max(1, len(old)-k), replace=False)]
+#                     take_new = new[np.random.choice(len(new), size=k, replace=False)]
+
+#                     agent.territory = np.vstack([keep_old, take_new])
+
+#                 # agent.territory = state_map[agent.drone_id].territory
+
 def _lloyd_loop(planner, agents, interval=5, coverage_threshold=0.85):
     bootstrapped = False
 
     while True:
         time.sleep(interval)
 
-        airborne = [a for a in agents if getattr(a, "airborne", False) and a.lat is not None]
+        airborne = [
+            a for a in agents
+            if getattr(a, "airborne", False) and a.lat is not None
+        ]
+
         if len(airborne) < len(agents):
-            log.info(f"Lloyd waiting — {len(airborne)}/{len(agents)} drones airborne")
+            log.info(f"Lloyd waiting — {len(airborne)}/{len(agents)} airborne")
             continue
 
+        # ─────────────────────────────────────────────
+        # Build state list
+        # ─────────────────────────────────────────────
         states = [
             DroneState(id=a.drone_id, lat=a.lat, lon=a.lon)
             for a in agents
         ]
 
-        state_map = {s.id: s for s in states}
-        for agent in agents:
-            if agent.drone_id in state_map and agent.territory is not None:
-                state_map[agent.drone_id].territory = agent.territory
+        # preserve current territories as prior state
+        for s in states:
+            agent = agents[s.id]
+            if agent.territory is not None:
+                s.territory = agent.territory
 
+        # ─────────────────────────────────────────────
+        # BOOTSTRAP (run ONCE, clean and deterministic)
+        # ─────────────────────────────────────────────
         if not bootstrapped:
-            lats = [a.lat for a in agents if a.lat is not None]
-            lons = [a.lon for a in agents if a.lon is not None]
-            distinct_lats = len(set(f"{l:.3f}" for l in lats))
-            distinct_lons = len(set(f"{l:.3f}" for l in lons))
-            if distinct_lats < 2 and distinct_lons < 2:
-                log.info("Lloyd waiting — drone positions not yet distinct")
+
+            if not _positions_separated(agents):
+                log.info("Lloyd waiting — drones too close")
                 continue
 
-            log.info("Lloyd bootstrap — assigning initial territories to all drones")
+            log.info("Lloyd bootstrap — running initial Lloyd partition")
             planner._run_lloyd(states)
-            state_map = {s.id: s for s in states}
-            for agent in agents:
-                if agent.drone_id in state_map:
-                    agent.territory = state_map[agent.drone_id].territory
-                    ter_size = len(agent.territory) if agent.territory is not None else 0
-                    log.info(f"  D{agent.drone_id + 1}: {ter_size} cells assigned")
+
+            # assign directly (NO RANDOM REBALANCING HERE)
+            for s in states:
+                if s.territory is None or len(s.territory) == 0:
+                    continue
+                agents[s.id].territory = s.territory
+
+                log.info(f"  D{s.id + 1}: {len(s.territory)} cells")
+
             bootstrapped = True
             continue
 
+        # ─────────────────────────────────────────────
+        # COVERAGE CHECK
+        # ─────────────────────────────────────────────
         coverages = {
             s.id: planner._territory_coverage(s)
             for s in states
@@ -264,13 +420,43 @@ def _lloyd_loop(planner, agents, interval=5, coverage_threshold=0.85):
             )
             continue
 
-        log.info("All territories covered — running Lloyd repartition")
+        # ─────────────────────────────────────────────
+        # LOCK SWARM (prevents ACO conflict)
+        # ─────────────────────────────────────────────
+        planner.lloyd_active = True
         planner._run_lloyd(states)
-        state_map = {s.id: s for s in states}
-        for agent in agents:
-            if agent.drone_id in state_map:
-                agent.territory = state_map[agent.drone_id].territory
+        planner.lloyd_active = False
 
+        # ─────────────────────────────────────────────
+        # SMOOTH TERRITORY UPDATE (CORE FIX)
+        # ─────────────────────────────────────────────
+        for s in states:
+            agent = agents[s.id]
+
+            new = s.territory
+            old = agent.territory
+
+            if new is None or len(new) == 0:
+                continue
+
+            if old is None or len(old) == 0:
+                agent.territory = new
+                continue
+
+            # ── smoothing factor ──
+            alpha = 0.3
+            k = max(1, int(len(new) * alpha))
+
+            # safe sampling (avoid crash if small arrays)
+            old_idx = np.random.choice(len(old), size=min(len(old), len(old) - k), replace=False)
+            new_idx = np.random.choice(len(new), size=k, replace=False)
+
+            keep_old = old[old_idx]
+            take_new = new[new_idx]
+
+            agent.territory = np.vstack([keep_old, take_new])
+
+        log.info("Lloyd repartition complete ✓")
 
 # ── Main ─────────────────────────────────────────────────────────────
 def main():
@@ -363,6 +549,8 @@ def main():
     for agent in agents:
         agent.start()
         time.sleep(0.8)
+    
+    threading.Thread(target=_state_writer_loop, daemon=True).start()
 
     log.info("Waiting for all drones to reach altitude...")
     while not all(getattr(a, "airborne", False) for a in agents):
@@ -370,9 +558,6 @@ def main():
     log.info("All drones airborne — dispatching to spawn positions in parallel...")
 
     # Send all drones to spawn positions simultaneously in background threads
-    def _fly_to_spawn(agent, lat, lon, alt):
-        log.info(f"[Drone {agent.drone_id + 1}] → spawn ({lat:.5f},{lon:.5f})")
-        agent._send_until_reached(lat, lon, alt, timeout=90)
 
     for agent, (lat, lon) in zip(agents, positions):
         threading.Thread(
@@ -386,8 +571,10 @@ def main():
     deadline = time.time() + 90
     while time.time() < deadline:
         pos_data = [(a.drone_id, a.lat, a.lon) for a in agents if a.lat is not None]
-        unique_lats = len(set(f"{lat:.3f}" for _, lat, _ in pos_data))
-        unique_lons = len(set(f"{lon:.3f}" for _, _, lon in pos_data))
+        # unique_lats = len(set(f"{lat:.3f}" for _, lat, _ in pos_data))
+        # unique_lons = len(set(f"{lon:.3f}" for _, _, lon in pos_data))
+        unique_lats = len(set(f"{lat:.5f}" for _, lat, _ in pos_data))
+        unique_lons = len(set(f"{lon:.5f}" for _, _, lon in pos_data))
         log.info("  " + " ".join(f"D{d+1}=({la:.5f},{lo:.5f})" for d, la, lo in pos_data))
         log.info(f"  Distinct lat={unique_lats} lon={unique_lons} (need >=2 in either)")
         if unique_lats >= 2 or unique_lons >= 2:
@@ -427,7 +614,7 @@ def main():
 
         while True:
             time.sleep(2)
-            _write_state(agents, planner)
+            #_write_state(agents, planner)
             metrics.report()
 
             for agent in agents:

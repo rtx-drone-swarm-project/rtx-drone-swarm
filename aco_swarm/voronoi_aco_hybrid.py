@@ -60,6 +60,8 @@ class VoronoiACOPlanner:
         self.aco_radius = aco_radius
         self.alpha = alpha
         self._tick = 0
+        self.lloyd_active = False
+
 
     # ------------------------------------------------------------------ #
     #  Main entry point — call once per simulation tick per drone          #
@@ -105,33 +107,107 @@ class VoronoiACOPlanner:
     #  ACO waypoint — least-visited cell, constrained to Voronoi region   #
     # ------------------------------------------------------------------ #
 
-    def _aco_waypoint(self, drone: DroneState) -> Tuple[float, float]:
+    def _point_in_territory(self, state, lat, lon):
+        # simple nearest-neighbor validity check
+        if state.territory is None or len(state.territory) == 0:
+            return False
+        d = np.linalg.norm(state.territory - np.array([lat, lon]), axis=1)
+        return np.min(d) < 0.0005
+
+    def _aco_waypoint(self, drone: DroneState):
+        # 1. fallback if no territory
         if len(drone.territory) == 0:
             return self.pheromone.get_gradient(
                 drone.lat, drone.lon, radius=self.aco_radius
             )
 
+        # 2. filter VALID territory points FIRST
+        valid_points = [
+            p for p in drone.territory
+            if self._point_in_territory(drone, p[0], p[1])
+        ]
+
+        if len(valid_points) == 0:
+            idx = np.random.randint(len(drone.territory))
+            return tuple(drone.territory[idx])
+
+        # 3. ACO selection
         best_val = float("inf")
         candidates = []
 
-        for point in drone.territory:
+        for point in valid_points:
             pher = self.pheromone.get_value(point[0], point[1])
+
             if pher < best_val:
                 best_val = pher
                 candidates = [point]
             elif pher == best_val:
                 candidates.append(point)
 
-        aco_target = random.choice(candidates)
+        aco_target = np.array(random.choice(candidates))
 
-        if len(drone.territory) > 0 and self.alpha > 0:
-            centroid = drone.territory.mean(axis=0)
+        # 4. centroid bias
+        centroid = np.mean(drone.territory, axis=0)
+        aco_target = 0.8 * aco_target + 0.2 * centroid
+
+        # 5. final blending
+        if self.alpha > 0:
             blended = (1 - self.alpha) * aco_target + self.alpha * centroid
-            lat, lon = float(blended[0]), float(blended[1])
         else:
-            lat, lon = float(aco_target[0]), float(aco_target[1])
+            blended = aco_target
 
+        lat, lon = float(blended[0]), float(blended[1])
         return self.clamp_to_territory(drone, lat, lon)
+
+
+    # def _aco_waypoint(self, drone: DroneState) -> Tuple[float, float]:
+    #     if len(drone.territory) == 0:
+    #         return self.pheromone.get_gradient(
+    #             drone.lat, drone.lon, radius=self.aco_radius
+    #         )
+
+    #     best_val = float("inf")
+    #     candidates = []
+
+    #     for point in drone.territory:
+    #         pher = self.pheromone.get_value(point[0], point[1])
+    #         if pher < best_val:
+    #             best_val = pher
+    #             candidates = [point]
+    #         elif pher == best_val:
+    #             candidates.append(point)
+
+    #     aco_target = random.choice(candidates)
+
+    #     if len(drone.territory) > 0:
+    #         centroid = drone.territory.mean(axis=0)
+
+    #         aco_target = np.array(aco_target)
+
+    #         aco_target = np.array([
+    #             0.8 * aco_target[0] + 0.2 * centroid[0],
+    #             0.8 * aco_target[1] + 0.2 * centroid[1],
+    #         ])
+
+
+    #     if drone.territory is not None and len(drone.territory) > 0:
+    #         candidates = [
+    #             p for p in candidates
+    #             if self._point_in_territory(drone, p[0], p[1])
+    #         ]
+
+    #         if len(candidates) == 0:
+    #             idx = np.random.randint(len(drone.territory))
+    #             return tuple(drone.territory[idx])
+
+    #     if len(drone.territory) > 0 and self.alpha > 0:
+    #         centroid = drone.territory.mean(axis=0)
+    #         blended = (1 - self.alpha) * aco_target + self.alpha * centroid
+    #         lat, lon = float(blended[0]), float(blended[1])
+    #     else:
+    #         lat, lon = float(aco_target[0]), float(aco_target[1])
+
+    #     return self.clamp_to_territory(drone, lat, lon)
 
     def clamp_to_territory(self, drone: DroneState, lat: float, lon: float):
         """

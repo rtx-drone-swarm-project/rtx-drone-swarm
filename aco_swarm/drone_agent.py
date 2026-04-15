@@ -143,6 +143,15 @@ class DroneAgent:
             log.error(f"[Drone {self.drone_id + 1}] Fatal: {e}", exc_info=True)
 
     def _stigmergy_step(self):
+        if self.planner and getattr(self.planner, "lloyd_active", False):
+            return
+        
+        if self.territory is None or len(self.territory) == 0:
+            return
+        
+        if not self.airborne:
+            return
+
         prev_lat, prev_lon = self.lat, self.lon   # snapshot before goto
 
         if self.planner:
