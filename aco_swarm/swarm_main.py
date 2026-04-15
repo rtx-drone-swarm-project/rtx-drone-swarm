@@ -11,10 +11,11 @@ Architecture
 
 Start SITL manually before running this script:
 
-  # Terminal 1 — get home positions
+  # Terminal 1 — SITL
   cd ~/Desktop/ICS/180/rtx-drone-swarm/ardupilot/ArduCopter && python3 ../Tools/autotest/sim_vehicle.py -v ArduCopter --count 5 --no-mavproxy --speedup 1 --auto-sysid --custom-location=-35.363262,149.165237,0,0
-  # Terminal 3 — Swarm (MAVProxy map opens automatically)
-  python3 swarm_main.py --drones 15
+
+  # Terminal 2 — Swarm (MAVProxy map opens automatically)
+  python3 swarm_main.py --drones 5
 """
 
 import argparse
@@ -32,7 +33,7 @@ import numpy as np
 from typing import List
 
 from stigmergy_engine import InMemoryPheromoneGrid, GridConfig
-from drone_agent import DroneAgent
+from drone_agent import DroneAgent, haversine_m
 from voronoi_aco_hybrid import VoronoiACOPlanner, DroneState
 from metrics import MetricsTracker
 
@@ -49,9 +50,9 @@ SITL_TCP_BASE  = 5760
 SITL_PORT_STEP = 10
 AGENT_UDP_BASE = 14560
 MAVPROXY_WAIT  = 40
-SPAWN_RADIUS_M = 15.0
+SPAWN_RADIUS_M = 150.0
 STATE_FILE     = os.path.join(os.path.dirname(__file__), ".agent_state.npy")
-PATH_MAX_LEN   = 200   # max positions kept per drone trail
+PATH_MAX_LEN   = 200
 
 
 # ── Port helpers ─────────────────────────────────────────────────────
@@ -91,7 +92,7 @@ def launch_mavproxy(num_drones: int):
 
     cmd = " ".join(parts)
 
-    module_dir = os.path.dirname(os.path.abspath(__file__))  # resolves to aco_swarm/
+    module_dir = os.path.dirname(os.path.abspath(__file__))
     venv       = os.environ.get("VIRTUAL_ENV", "")
     activate   = f"source {venv}/bin/activate && " if venv else ""
     pythonpath = f"export PYTHONPATH={module_dir}:$PYTHONPATH && "
@@ -155,15 +156,10 @@ def connect_all(drone_list: List[DroneAgent]) -> List[DroneAgent]:
 
 # ── State writer (feeds MAVProxy Voronoi module) ─────────────────────
 def _write_state(agents: List[DroneAgent], planner: VoronoiACOPlanner):
-    """
-    Serialise current drone positions, territories, and flight paths
-    to .agent_state.npy so mavproxy_voronoi.py can read them.
-    """
     agent_data = []
     for a in agents:
         if a.lat is None:
             continue
-        # Accumulate flight path trail on the agent object
         if not hasattr(a, "_path"):
             a._path = []
         a._path.append([a.lat, a.lon])
@@ -187,7 +183,7 @@ def _write_state(agents: List[DroneAgent], planner: VoronoiACOPlanner):
 # ── CLI ──────────────────────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser(description="Stigmergy swarm — macOS SITL")
-    p.add_argument("--drones",       type=int,   default=15)
+    p.add_argument("--drones",       type=int,   default=5)
     p.add_argument("--duration",     type=float, default=0,
                    help="Seconds to run, 0 = forever (default: forever)")
     p.add_argument("--altitude",     type=float, default=10.0)
@@ -198,11 +194,13 @@ def parse_args():
     p.add_argument("--grid-rows",    type=int,   default=40)
     p.add_argument("--grid-cols",    type=int,   default=40)
     p.add_argument("--evap-rate",    type=float, default=0.97)
-    p.add_argument("--loop-hz",      type=float, default=0.5)
+    p.add_argument("--loop-hz",      type=float, default=5.0)
     p.add_argument("--print-homes",  action="store_true",
                    help="Print --home string for sim_vehicle.py and exit")
-    p.add_argument("--home-lat", type=float, default=-35.363262)
-    p.add_argument("--home-lon", type=float, default=149.165237)
+    p.add_argument("--home-lat",     type=float, default=-35.363262)
+    p.add_argument("--home-lon",     type=float, default=149.165237)
+    p.add_argument("--coverage-threshold", type=float, default=0.85,
+                   help="Coverage fraction required before Lloyd repartitions (default: 0.85)")
     return p.parse_args()
 
 
@@ -212,31 +210,42 @@ def _lloyd_loop(planner, agents, interval=5, coverage_threshold=0.85):
 
     while True:
         time.sleep(interval)
-        states = [
-            DroneState(id=a.drone_id, lat=a.lat, lon=a.lon)
-            for a in agents if a.lat is not None
-        ]
-        if not states:
+
+        airborne = [a for a in agents if getattr(a, "airborne", False) and a.lat is not None]
+        if len(airborne) < len(agents):
+            log.info(f"Lloyd waiting — {len(airborne)}/{len(agents)} drones airborne")
             continue
 
-        # Push current territories from live agents into throwaway states
+        states = [
+            DroneState(id=a.drone_id, lat=a.lat, lon=a.lon)
+            for a in agents
+        ]
+
         state_map = {s.id: s for s in states}
         for agent in agents:
             if agent.drone_id in state_map and agent.territory is not None:
                 state_map[agent.drone_id].territory = agent.territory
 
-        # First pass — run Lloyd immediately to assign initial territories
         if not bootstrapped:
-            log.info("Lloyd bootstrap — assigning initial territories")
+            lats = [a.lat for a in agents if a.lat is not None]
+            lons = [a.lon for a in agents if a.lon is not None]
+            distinct_lats = len(set(f"{l:.3f}" for l in lats))
+            distinct_lons = len(set(f"{l:.3f}" for l in lons))
+            if distinct_lats < 2 and distinct_lons < 2:
+                log.info("Lloyd waiting — drone positions not yet distinct")
+                continue
+
+            log.info("Lloyd bootstrap — assigning initial territories to all drones")
             planner._run_lloyd(states)
             state_map = {s.id: s for s in states}
             for agent in agents:
                 if agent.drone_id in state_map:
                     agent.territory = state_map[agent.drone_id].territory
+                    ter_size = len(agent.territory) if agent.territory is not None else 0
+                    log.info(f"  D{agent.drone_id + 1}: {ter_size} cells assigned")
             bootstrapped = True
             continue
 
-        # Subsequent passes — only repartition when coverage threshold met
         coverages = {
             s.id: planner._territory_coverage(s)
             for s in states
@@ -251,7 +260,7 @@ def _lloyd_loop(planner, agents, interval=5, coverage_threshold=0.85):
         if not all_covered:
             log.info(
                 "Lloyd skipped — coverage: "
-                + " ".join(f"D{k}:{v:.0%}" for k, v in sorted(coverages.items()))
+                + " ".join(f"D{k+1}:{v:.0%}" for k, v in sorted(coverages.items()))
             )
             continue
 
@@ -261,6 +270,8 @@ def _lloyd_loop(planner, agents, interval=5, coverage_threshold=0.85):
         for agent in agents:
             if agent.drone_id in state_map:
                 agent.territory = state_map[agent.drone_id].territory
+
+
 # ── Main ─────────────────────────────────────────────────────────────
 def main():
     args = parse_args()
@@ -280,7 +291,6 @@ def main():
         f"arc-gap≈{2 * math.pi * args.spawn_radius / args.drones:.1f}m"
     )
 
-    # Pheromone grid
     cfg = GridConfig(
         lat_min=home_lat - span, lat_max=home_lat + span,
         lon_min=home_lon - span, lon_max=home_lon + span,
@@ -292,7 +302,6 @@ def main():
     grid = InMemoryPheromoneGrid(cfg)
     grid.start_evaporation()
 
-    # ACO + Voronoi planner
     bounds = {
         "min_lat": cfg.lat_min, "max_lat": cfg.lat_max,
         "min_lon": cfg.lon_min, "max_lon": cfg.lon_max,
@@ -309,17 +318,14 @@ def main():
 
     log.info(f"Pheromone grid {cfg.rows}×{cfg.cols} | evap={cfg.evaporation_rate}")
 
-    # 1. Wait for SITL ports
     wait_for_ports(args.drones, timeout=300.0)
 
-    # 2. Launch MAVProxy
     if not args.no_map:
         launch_mavproxy(args.drones)
         log.info("Waiting 20s for MAVProxy to stabilise…")
         time.sleep(20)
         log.info("MAVProxy ready ✓")
 
-    # 3. Build agents
     drone_list = []
     for i, (lat, lon) in enumerate(positions):
         drone = DroneAgent(
@@ -335,25 +341,62 @@ def main():
         drone.start_lon = lon
         drone_list.append(drone)
 
-    # 4a. Connect
     agents = connect_all(drone_list)
     if not agents:
         log.error("No drones connected — exiting.")
         sys.exit(1)
 
-    # 4b. Lloyd background thread
+    time.sleep(3)
+    for agent in agents:
+        agent._update_position()
+        log.info(f"[Drone {agent.drone_id + 1}] SITL position: ({agent.lat}, {agent.lon})")
+
     threading.Thread(
-        target=_lloyd_loop, args=(planner, agents), daemon=True
+        target=_lloyd_loop,
+        args=(planner, agents),
+        kwargs={"coverage_threshold": args.coverage_threshold},
+        daemon=True,
     ).start()
     log.info("Lloyd re-partition thread started ✓")
 
-    # 5. Staggered takeoffs
     log.info("Starting agents…")
     for agent in agents:
         agent.start()
         time.sleep(0.8)
 
-    # 6. Shutdown handlers
+    log.info("Waiting for all drones to reach altitude...")
+    while not all(getattr(a, "airborne", False) for a in agents):
+        time.sleep(1)
+    log.info("All drones airborne — dispatching to spawn positions in parallel...")
+
+    # Send all drones to spawn positions simultaneously in background threads
+    def _fly_to_spawn(agent, lat, lon, alt):
+        log.info(f"[Drone {agent.drone_id + 1}] → spawn ({lat:.5f},{lon:.5f})")
+        agent._send_until_reached(lat, lon, alt, timeout=90)
+
+    for agent, (lat, lon) in zip(agents, positions):
+        threading.Thread(
+            target=_fly_to_spawn,
+            args=(agent, lat, lon, args.altitude),
+            daemon=True,
+        ).start()
+
+    # Wait until positions are distinct or timeout
+    log.info("Waiting for drones to spread to spawn positions...")
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        pos_data = [(a.drone_id, a.lat, a.lon) for a in agents if a.lat is not None]
+        unique_lats = len(set(f"{lat:.3f}" for _, lat, _ in pos_data))
+        unique_lons = len(set(f"{lon:.3f}" for _, _, lon in pos_data))
+        log.info("  " + " ".join(f"D{d+1}=({la:.5f},{lo:.5f})" for d, la, lo in pos_data))
+        log.info(f"  Distinct lat={unique_lats} lon={unique_lons} (need >=2 in either)")
+        if unique_lats >= 2 or unique_lons >= 2:
+            log.info("Drone positions distinct — Lloyd can bootstrap ✓")
+            break
+        time.sleep(5)
+    else:
+        log.warning("Drones didn't spread in 90s — Lloyd will bootstrap with current positions anyway")
+
     def _cleanup():
         log.info("Shutting down…")
         for a in agents:
@@ -368,9 +411,20 @@ def main():
     signal.signal(signal.SIGINT,  _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
-    # 7. Main loop — write state + check partitions
     def _main_loop():
         metrics = MetricsTracker(planner, agents)
+
+        log.info("Waiting for territory assignment...")
+        while True:
+            all_assigned = all(
+                a.territory is not None and len(a.territory) > 0
+                for a in agents
+            )
+            if all_assigned:
+                log.info("All territories assigned — metrics starting")
+                break
+            time.sleep(1)
+
         while True:
             time.sleep(2)
             _write_state(agents, planner)
@@ -386,10 +440,10 @@ def main():
                     nearest_idx = np.argmin(dists)
                     recover_lat = float(agent.territory[nearest_idx, 0])
                     recover_lon = float(agent.territory[nearest_idx, 1])
-                    log.warning(f"[Drone {agent.drone_id}] DRIFT CORRECTION "
+                    log.warning(f"[Drone {agent.drone_id + 1}] DRIFT CORRECTION "
                                 f"→ ({recover_lat:.5f},{recover_lon:.5f})")
                     agent._goto(recover_lat, recover_lon, agent.altitude)
-    
+
     if args.duration > 0:
         log.info(f"Running for {args.duration}s — Ctrl+C to stop early")
         deadline = time.time() + args.duration

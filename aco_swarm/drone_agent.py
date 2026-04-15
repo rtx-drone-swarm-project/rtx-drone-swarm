@@ -11,6 +11,9 @@ source_system = drone_id + 100 avoids clashing with MAVProxy (255).
 import time
 import threading
 import logging
+import numpy as np
+import math
+
 from typing import Optional
 
 from pymavlink import mavutil
@@ -39,7 +42,7 @@ class DroneAgent:
         connection: str,
         grid: InMemoryPheromoneGrid,
         altitude: float = 10.0,
-        loop_hz: float  = 0.5,
+        loop_hz: float  = 5.0,
         expected_sysid: int = None,
         planner=None,    
     ):
@@ -51,6 +54,7 @@ class DroneAgent:
         self.expected_sysid = expected_sysid if expected_sysid is not None else drone_id + 1
         self.start_lat      = None
         self.start_lon      = None
+        self.airborne = False
 
         self.master: Optional[mavutil.mavfile] = None
         self.lat:    Optional[float] = None
@@ -63,14 +67,14 @@ class DroneAgent:
     # ── Lifecycle ───────────────────────────────────────────────────
 
     def _wait_for_gps_lock(self, timeout=120):
-        log.info(f"[Drone {self.drone_id}] Waiting for GPS lock...")
+        log.info(f"[Drone {self.drone_id + 1}] Waiting for GPS lock...")
         start = time.time()
         while time.time() - start < timeout:
             msg = self.master.recv_match(type="GPS_RAW_INT", blocking=True, timeout=2)
             if msg and msg.get_srcSystem() == self.expected_sysid:
                 # fix_type: 0=no fix, 1=no fix, 2=2D, 3=3D
                 if msg.fix_type >= 3:
-                    log.info(f"[Drone {self.drone_id}] GPS lock OK (fix={msg.fix_type}, sats={msg.satellites_visible})")
+                    log.info(f"[Drone {self.drone_id + 1}] GPS lock OK (fix={msg.fix_type}, sats={msg.satellites_visible})")
                     return True
         return False
 
@@ -90,7 +94,7 @@ class DroneAgent:
     def start(self):
         self._running = True
         self._thread  = threading.Thread(
-            target=self._run, daemon=True, name=f"drone-{self.drone_id}"
+            target=self._run, daemon=True, name=f"drone-{self.drone_id + 1}"
         )
         self._thread.start()
 
@@ -107,15 +111,15 @@ class DroneAgent:
 
             # Wait for EKF/GPS first
             if not self._wait_for_position_estimate():
-                log.error(f"[Drone {self.drone_id}] No position estimate — aborting")
+                log.error(f"[Drone {self.drone_id + 1}] No position estimate — aborting")
                 return
 
             if not self._wait_for_ekf():
-                log.error(f"[Drone {self.drone_id}] EKF not ready — aborting")
+                log.error(f"[Drone {self.drone_id + 1}] EKF not ready — aborting")
                 return
 
             if not self._wait_for_gps_lock():
-                log.error(f"[Drone {self.drone_id}] No GPS lock — aborting")
+                log.error(f"[Drone {self.drone_id + 1}] No GPS lock — aborting")
                 return
 
             # Arm, but only continue if it worked
@@ -123,7 +127,8 @@ class DroneAgent:
                 return
 
             self._takeoff(self.altitude)
-            log.info(f"[Drone {self.drone_id}] Airborne ✓ — stigmergy loop started")
+            self.airborne = True  
+            log.info(f"[Drone {self.drone_id + 1}] Airborne ✓ — stigmergy loop started")
 
             while self._running:
                 t0 = time.time()
@@ -135,7 +140,7 @@ class DroneAgent:
                     time.sleep(sleep_for)
 
         except Exception as e:
-            log.error(f"[Drone {self.drone_id}] Fatal: {e}", exc_info=True)
+            log.error(f"[Drone {self.drone_id + 1}] Fatal: {e}", exc_info=True)
 
     def _stigmergy_step(self):
         prev_lat, prev_lon = self.lat, self.lon   # snapshot before goto
@@ -165,7 +170,7 @@ class DroneAgent:
             mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
             mode_id,
         )
-        log.info(f"[Drone {self.drone_id}] Mode → {mode}")
+        log.info(f"[Drone {self.drone_id + 1}] Mode → {mode}")
         time.sleep(1)
 
     def _wait_for_ekf(self, timeout=30):
@@ -175,12 +180,12 @@ class DroneAgent:
             if msg:
                 # bit 0 = attitude, bit 1 = velocity, bit 2 = position
                 if (msg.flags & 0b111) == 0b111:
-                    log.info(f"[Drone {self.drone_id}] EKF OK ✓")
+                    log.info(f"[Drone {self.drone_id + 1}] EKF OK ✓")
                     return True
         return False
 
     def _wait_for_position_estimate(self, timeout=60):
-        log.info(f"[Drone {self.drone_id}] Waiting for position…")
+        log.info(f"[Drone {self.drone_id+ 1}] Waiting for position…")
         start = time.time()
 
         while time.time() - start < timeout:
@@ -192,14 +197,14 @@ class DroneAgent:
                 if abs(lat) > 0.001 and abs(lon) > 0.001:
                     self.lat = lat
                     self.lon = lon
-                    log.info(f"[Drone {self.drone_id}] Position OK ✓")
+                    log.info(f"[Drone {self.drone_id+ 1}] Position OK ✓")
                     return True
             time.sleep(0.5)
 
         return False
 
     def _arm(self):
-        log.info(f"[Drone {self.drone_id}] Arming...")
+        log.info(f"[Drone {self.drone_id+ 1}] Arming...")
         self.master.arducopter_arm()
         start        = time.time()
         last_arm_cmd = time.time()          # ← was missing, caused UnboundLocalError
@@ -212,17 +217,17 @@ class DroneAgent:
                 continue
             if msg.get_type() == "HEARTBEAT" and msg.get_srcSystem() == self.expected_sysid:
                 if (msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED) != 0:
-                    log.info(f"[Drone {self.drone_id}] Armed ✓")
+                    log.info(f"[Drone {self.drone_id+ 1}] Armed ✓")
                     return True
             elif msg.get_type() == "STATUSTEXT" and msg.get_srcSystem() == self.expected_sysid:
-                log.info(f"[Drone {self.drone_id}] VEHICLE: {msg.text.strip()}")
+                log.info(f"[Drone {self.drone_id+ 1}] VEHICLE: {msg.text.strip()}")
                 if "PreArm" in msg.text or "prearm" in msg.text.lower():
-                    log.warning(f"[Drone {self.drone_id}] Pre-arm block: {msg.text.strip()}")
-        log.error(f"[Drone {self.drone_id}] Arming timed out")
+                    log.warning(f"[Drone {self.drone_id+ 1}] Pre-arm block: {msg.text.strip()}")
+        log.error(f"[Drone {self.drone_id+ 1}] Arming timed out")
         return False
 
     def _takeoff(self, alt: float):
-        log.info(f"[Drone {self.drone_id}] Taking off to {alt}m…")
+        log.info(f"[Drone {self.drone_id+ 1}] Taking off to {alt}m…")
         self.master.mav.command_long_send(
             self.master.target_system,
             self.master.target_component,
@@ -235,17 +240,28 @@ class DroneAgent:
                 type="GLOBAL_POSITION_INT", blocking=True, timeout=2
             )
             if msg and msg.relative_alt / 1000.0 >= alt * 0.90:
-                log.info(f"[Drone {self.drone_id}] Reached {msg.relative_alt/1000:.1f}m ✓")
+                log.info(f"[Drone {self.drone_id+ 1}] Reached {msg.relative_alt/1000:.1f}m ✓")
                 break
             time.sleep(0.5)
 
     def _goto(self, lat: float, lon: float, alt: float):
+        type_mask = (
+            mavutil.mavlink.POSITION_TARGET_TYPEMASK_VX_IGNORE |
+            mavutil.mavlink.POSITION_TARGET_TYPEMASK_VY_IGNORE |
+            mavutil.mavlink.POSITION_TARGET_TYPEMASK_VZ_IGNORE |
+            mavutil.mavlink.POSITION_TARGET_TYPEMASK_AX_IGNORE |
+            mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE |
+            mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE |
+            mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE |
+            mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
+        )
+
         self.master.mav.set_position_target_global_int_send(
             0,
             self.master.target_system,
             self.master.target_component,
             mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
-            0b0000111111111000,
+            type_mask,
             int(lat * 1e7),
             int(lon * 1e7),
             alt,
@@ -254,8 +270,36 @@ class DroneAgent:
             0, 0,
         )
 
+
     def _update_position(self):
         msg = self.master.recv_match(type="GLOBAL_POSITION_INT", blocking=False)
         if msg:
             self.lat = msg.lat / 1e7
             self.lon = msg.lon / 1e7
+
+    def _send_until_reached(self, lat, lon, alt, timeout=60):
+        start = time.time()
+
+        while time.time() - start < timeout:
+            self._goto(lat, lon, alt)
+            self._update_position()
+
+            if self.lat is not None:
+                dist = haversine_m(self.lat, self.lon, lat, lon)
+
+                if dist < 3.0:   # 3 meters tolerance (REALISTIC for SITL)
+                    log.info(f"[Drone {self.drone_id +1}] reached spawn ✓")
+                    return
+
+            time.sleep(0.2)
+
+        log.warning(f"[Drone {self.drone_id+1}] failed to reach spawn (timeout)")
+
+def haversine_m(lat1, lon1, lat2, lon2):
+        R = 6371000  # meters
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlambda = math.radians(lon2 - lon1)
+
+        a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+        return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))

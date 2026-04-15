@@ -12,6 +12,9 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend", "app"))
 
+import logging
+log = logging.getLogger(__name__)
+
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
@@ -32,7 +35,7 @@ class VoronoiACOPlanner:
     """
     Hybrid planner: Lloyd partitions space, ACO steers within each partition.
 
-    lloyd_interval  — how many ticks between Lloyd re-partitions
+    lloyd_interval  — how many ticks between Lloyd re-partitions (used by step())
     aco_radius      — pheromone gradient search radius (grid cells)
     alpha           — blend weight: 0 = pure ACO, 1 = pure Voronoi centroid
     """
@@ -42,14 +45,13 @@ class VoronoiACOPlanner:
         bounds: dict,
         grid_config: GridConfig,
         pheromone_grid=None,
-        n_grid: int = 15,
+        n_grid: int = 30,
         lloyd_interval: int = 10,
         aco_radius: int = 2,
-        alpha: float = 0.3,         # pull toward Voronoi centroid
+        alpha: float = 0.3,
     ):
         self.bounds = bounds
         self.grid_points = build_search_grid(bounds, n=n_grid)
-        # Use the shared grid if provided, otherwise create one
         self.pheromone = pheromone_grid if pheromone_grid is not None else InMemoryPheromoneGrid(grid_config)
         if pheromone_grid is None:
             self.pheromone.start_evaporation()
@@ -75,7 +77,6 @@ class VoronoiACOPlanner:
         waypoints = []
         for drone in drones:
             wp = self._aco_waypoint(drone)
-            # Deposit on current position before moving
             self.pheromone.deposit(drone.lat, drone.lon)
             waypoints.append(wp)
 
@@ -90,10 +91,15 @@ class VoronoiACOPlanner:
         new_centroids, labels = lloyd_step(self.grid_points, centroids)
 
         for i, drone in enumerate(drones):
-            drone.territory = self.grid_points[labels == i]
+            mask = labels == i
+            drone.territory = self.grid_points[mask]
+            if len(drone.territory) == 0:
+                log.warning(f"[Lloyd] Drone {drone.id} got 0 territory cells — assigning nearest points")
+                dists = np.linalg.norm(self.grid_points - np.array([drone.lat, drone.lon]), axis=1)
+                drone.territory = self.grid_points[np.argsort(dists)[:5]]
 
-    # REMOVED: the two lines that did drone.lat = new_centroids[i, 0]
-    # Drones steer toward their centroid naturally via alpha blending in _aco_waypoint.
+        # drone.lat/lon intentionally NOT updated here —
+        # alpha blending in _aco_waypoint steers toward centroid naturally.
 
     # ------------------------------------------------------------------ #
     #  ACO waypoint — least-visited cell, constrained to Voronoi region   #
@@ -125,7 +131,6 @@ class VoronoiACOPlanner:
         else:
             lat, lon = float(aco_target[0]), float(aco_target[1])
 
-        # Hard clamp — never leave territory
         return self.clamp_to_territory(drone, lat, lon)
 
     def clamp_to_territory(self, drone: DroneState, lat: float, lon: float):
@@ -141,17 +146,31 @@ class VoronoiACOPlanner:
         nearest_idx = np.argmin(dists)
         nearest = drone.territory[nearest_idx]
 
-        # Only snap if the point is farther than the grid cell spacing
         if dists[nearest_idx] > 0.001:   # ~100m in degrees
             return float(nearest[0]), float(nearest[1])
         return lat, lon
 
     def _territory_coverage(self, drone: DroneState) -> float:
-        """Returns fraction of territory cells that have been visited (pheromone > 0)."""
-        if len(drone.territory) == 0:
+        """
+        Fraction of territory cells visited, using a 3x3 neighborhood
+        around each territory point to account for coordinate mismatch
+        between drone GPS positions and Voronoi grid points.
+        """
+        if drone.territory is None or len(drone.territory) == 0:
             return 0.0
-        visited = sum(
-            1 for pt in drone.territory
-            if self.pheromone.get_value(pt[0], pt[1]) > 0
-        )
+        snap = self.pheromone.get_snapshot()
+        visited = 0
+        for pt in drone.territory:
+            row, col = self.pheromone.world_to_grid(pt[0], pt[1])
+            found = False
+            for dr in range(-1, 2):
+                if found:
+                    break
+                for dc in range(-1, 2):
+                    r = max(0, min(self.pheromone.config.rows - 1, row + dr))
+                    c = max(0, min(self.pheromone.config.cols - 1, col + dc))
+                    if snap[r, c] > 0:
+                        visited += 1
+                        found = True
+                        break
         return visited / len(drone.territory)

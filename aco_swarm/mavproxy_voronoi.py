@@ -48,6 +48,13 @@ class VoronoiModule(mp_module.MPModule):
             return
         self._last_poll = now
 
+        # Hide built-in velocity/heading vectors
+        map_module = self.module("map")
+        if map_module is not None:
+            for obj_key in list(map_module.map.objects.keys()):
+                if "arrow" in obj_key.lower() or "heading" in obj_key.lower() or "velocity" in obj_key.lower():
+                    map_module.map.remove_object(obj_key)
+
         if not os.path.exists(STATE_FILE):
             return
 
