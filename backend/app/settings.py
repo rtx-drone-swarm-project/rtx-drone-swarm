@@ -5,7 +5,7 @@ import os
 
 
 SWARM_COMMAND_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "swarm_command.py"
-START_SITL_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "start_sitl_swarm.sh"
+LAUNCH_SITL_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "launch_sitl.sh"
 
 DEFAULT_DISPATCH_HOST = "127.0.0.1"
 DEFAULT_DISPATCH_TIMEOUT_SECONDS = 15.0

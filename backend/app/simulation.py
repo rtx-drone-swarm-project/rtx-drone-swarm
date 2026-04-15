@@ -164,7 +164,7 @@ def _build_centroid_map(mission: dict) -> dict:
     return centroid_map
 
 
-def _rearm_live_drones_if_needed(mission: dict, live_drone_ids: set[str]) -> None:
+'''def _rearm_live_drones_if_needed(mission: dict, live_drone_ids: set[str]) -> None:
     """Periodically recover live drones back into GUIDED flight if they disarm.
 
     This is a lightweight safety net for live SITL drones. It only runs on a
@@ -230,7 +230,7 @@ def _rearm_live_drones_if_needed(mission: dict, live_drone_ids: set[str]) -> Non
                     0,
                     0,
                     DEFAULT_DISPATCH_ALT,
-                )
+                )'''
 
 
 def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map: dict) -> None:
@@ -246,11 +246,15 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map
 
     airborne_states = sitl_bridge.get_states_by_sysid()
     goto_sent = 0
+    skipped_not_dispatchable = 0
+    skipped_not_airborne = 0
+    skipped_no_destination = 0
     for drone in mission["drones"]:
         if str(drone.get("id")) not in live_drone_ids:
             continue
         sysid = drone.get("sysid")
         if not sysid or sitl_bridge.is_dispatching(sysid):
+            skipped_not_dispatchable += 1
             continue
         state = airborne_states.get(sysid, {})
         # Some paths keep altitude on the mission drone record rather than the
@@ -258,6 +262,7 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map
         # the drone is safely airborne.
         rel_alt = max(float(state.get("alt") or 0), float(drone.get("alt") or 0))
         if not state.get("armed") or rel_alt < 3.0:
+            skipped_not_airborne += 1
             continue
         target_id = drone.get("assigned_target_id")
         if target_id:
@@ -279,9 +284,19 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map
         if centroid is not None:
             sitl_bridge.send_goto(sysid, float(centroid[0]), float(centroid[1]), DEFAULT_DISPATCH_ALT)
             goto_sent += 1
+            continue
+        skipped_no_destination += 1
 
     if mission.get("elapsed_seconds", 0) % 10 == 0:
-        logger.info("goto_loop: %d/%d drones got goto, centroids=%d", goto_sent, len(live_drone_ids), len(centroid_map))
+        logger.info(
+            "goto_loop: %d/%d drones got goto, centroids=%d, blocked dispatching=%d, blocked airborne=%d, blocked destination=%d",
+            goto_sent,
+            len(live_drone_ids),
+            len(centroid_map),
+            skipped_not_dispatchable,
+            skipped_not_airborne,
+            skipped_no_destination,
+        )
 
 
 async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], centroid_map: dict, bounds: dict) -> None:
@@ -314,11 +329,16 @@ async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], centr
             d_lat = target["lat"] - drone["lat"]
             d_lon = target["lon"] - drone["lon"]
             dist = math.hypot(d_lat, d_lon)
-            if dist > TARGET_STOP_RADIUS and not has_live_telemetry:
-                drone["lat"] += (d_lat / dist) * SPEED
-                drone["lon"] += (d_lon / dist) * SPEED
-                drone["lat"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
-                drone["lon"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+
+            
+            if dist > TARGET_STOP_RADIUS:
+                
+                '''if not has_live_telemetry:
+                    drone["lat"] += (d_lat / dist) * SPEED
+                    drone["lon"] += (d_lon / dist) * SPEED 
+                    drone["lat"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)        #ONLY FOR USING MOCK DATA, NOT NEEDED?
+                    drone["lon"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)'''
+                    
                 continue
 
             if target.get("status") in ["detected", "wandering"]:
@@ -477,9 +497,9 @@ async def simulation_loop(mission_id: str):
         # Pull live SITL state into the mission before making any coverage or
         # targeting decisions for this tick.
         live_drone_ids = _sync_mission_drones_with_sitl(mission)
-        centroid_map = _build_centroid_map(mission)
+        centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
 
-        _rearm_live_drones_if_needed(mission, live_drone_ids)
+        #_rearm_live_drones_if_needed(mission, live_drone_ids)
         _send_live_drone_gotos(mission, live_drone_ids, centroid_map)
         await _update_drones_for_tick(mission, live_drone_ids, centroid_map, bounds)
         _update_targets_for_tick(mission, bounds)
