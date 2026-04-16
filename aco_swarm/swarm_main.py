@@ -54,6 +54,8 @@ SPAWN_RADIUS_M = 150.0
 STATE_FILE     = os.path.join(os.path.dirname(__file__), ".agent_state.npy")
 PATH_MAX_LEN   = 200
 
+SWARM_PHASE = "LLOYD"
+
 
 # ── Port helpers ─────────────────────────────────────────────────────
 def drone_port(i: int) -> int:
@@ -78,7 +80,6 @@ def circular_spawn(n: int, home_lat: float, home_lon: float, radius_m: float):
         dlon  = metres_to_deg_lon(radius_m * math.cos(angle), home_lat)
         positions.append((home_lat + dlat, home_lon + dlon))
     return positions
-
 
 # ── MAVProxy ─────────────────────────────────────────────────────────
 def launch_mavproxy(num_drones: int):
@@ -228,6 +229,34 @@ def _positions_separated(agents, threshold_m=5):
                 return False
     return True
 
+_spawn_stable_since = None
+
+def _reached_spawns(agents, targets, threshold=7.0, stable_time=3.0):
+    global _spawn_stable_since
+    now = time.time()
+
+    all_ok = True
+
+    for a, (lat, lon) in zip(agents, targets):
+        if a.lat is None or a.lon is None:
+            all_ok = False
+            break
+
+        if haversine_m(a.lat, a.lon, lat, lon) > threshold:
+            all_ok = False
+            break
+
+    if all_ok:
+        if _spawn_stable_since is None:
+            _spawn_stable_since = now
+            log.info("Spawn stability timer started")
+        elif now - _spawn_stable_since >= stable_time:
+            return True
+    else:
+        _spawn_stable_since = None
+
+    return False
+
 # def _lloyd_loop(planner, agents, interval=5, coverage_threshold=0.85):
 #     bootstrapped = False
 
@@ -347,116 +376,64 @@ def _positions_separated(agents, threshold_m=5):
 
 #                 # agent.territory = state_map[agent.drone_id].territory
 
-def _lloyd_loop(planner, agents, interval=5, coverage_threshold=0.85):
+def _lloyd_loop(planner, agents, positions, interval=5, coverage_threshold=0.85):
+    """
+    Runs ONLY during LLOYD phase.
+    After bootstrap, hands control to ACO/stigmergy.
+    """
+
     bootstrapped = False
 
     while True:
         time.sleep(interval)
 
-        airborne = [
-            a for a in agents
-            if getattr(a, "airborne", False) and a.lat is not None
-        ]
-
-        if len(airborne) < len(agents):
-            log.info(f"Lloyd waiting — {len(airborne)}/{len(agents)} airborne")
+        # ── HARD PHASE GATE ───────────────────────────────
+        if getattr(planner, "phase", "LLOYD") != "LLOYD":
             continue
 
-        # ─────────────────────────────────────────────
-        # Build state list
-        # ─────────────────────────────────────────────
+        airborne = [a for a in agents if getattr(a, "airborne", False) and a.lat is not None]
+
+
+        if len(airborne) < len(agents):
+            log.info("Lloyd waiting — drones not airborne")
+            continue
+
         states = [
             DroneState(id=a.drone_id, lat=a.lat, lon=a.lon)
             for a in agents
         ]
 
-        # preserve current territories as prior state
         for s in states:
             agent = agents[s.id]
             if agent.territory is not None:
                 s.territory = agent.territory
 
-        # ─────────────────────────────────────────────
-        # BOOTSTRAP (run ONCE, clean and deterministic)
-        # ─────────────────────────────────────────────
+        # ── BOOTSTRAP ───────────────────────────────────
         if not bootstrapped:
-
-            if not _positions_separated(agents):
-                log.info("Lloyd waiting — drones too close")
+            # spawn already validated in main thread
+            if not all(a.lat is not None for a in agents):
                 continue
 
-            log.info("Lloyd bootstrap — running initial Lloyd partition")
+
+            log.info("Lloyd bootstrap — running initial partition")
             planner._run_lloyd(states)
 
-            # assign directly (NO RANDOM REBALANCING HERE)
             for s in states:
-                if s.territory is None or len(s.territory) == 0:
-                    continue
-                agents[s.id].territory = s.territory
-
-                log.info(f"  D{s.id + 1}: {len(s.territory)} cells")
+                if s.territory is not None and len(s.territory) > 0:
+                    agents[s.id].territory = s.territory
+                    log.info(f"  D{s.id+1}: {len(s.territory)} cells")
 
             bootstrapped = True
+
+            # ── SWITCH TO ACO MODE ───────────────────────
+            planner.phase = "ACO"
+            log.info("Swarm phase switched → ACO/STIGMERGY ACTIVE")
+
             continue
 
-        # ─────────────────────────────────────────────
-        # COVERAGE CHECK
-        # ─────────────────────────────────────────────
-        coverages = {
-            s.id: planner._territory_coverage(s)
-            for s in states
-            if s.territory is not None and len(s.territory) > 0
-        }
+        # (LLOYD DISABLED AFTER BOOTSTRAP)
+        continue
 
-        if not coverages:
-            continue
-
-        all_covered = all(c >= coverage_threshold for c in coverages.values())
-
-        if not all_covered:
-            log.info(
-                "Lloyd skipped — coverage: "
-                + " ".join(f"D{k+1}:{v:.0%}" for k, v in sorted(coverages.items()))
-            )
-            continue
-
-        # ─────────────────────────────────────────────
-        # LOCK SWARM (prevents ACO conflict)
-        # ─────────────────────────────────────────────
-        planner.lloyd_active = True
-        planner._run_lloyd(states)
-        planner.lloyd_active = False
-
-        # ─────────────────────────────────────────────
-        # SMOOTH TERRITORY UPDATE (CORE FIX)
-        # ─────────────────────────────────────────────
-        for s in states:
-            agent = agents[s.id]
-
-            new = s.territory
-            old = agent.territory
-
-            if new is None or len(new) == 0:
-                continue
-
-            if old is None or len(old) == 0:
-                agent.territory = new
-                continue
-
-            # ── smoothing factor ──
-            alpha = 0.3
-            k = max(1, int(len(new) * alpha))
-
-            # safe sampling (avoid crash if small arrays)
-            old_idx = np.random.choice(len(old), size=min(len(old), len(old) - k), replace=False)
-            new_idx = np.random.choice(len(new), size=k, replace=False)
-
-            keep_old = old[old_idx]
-            take_new = new[new_idx]
-
-            agent.territory = np.vstack([keep_old, take_new])
-
-        log.info("Lloyd repartition complete ✓")
 
 # ── Main ─────────────────────────────────────────────────────────────
 def main():
@@ -501,6 +478,7 @@ def main():
         aco_radius=2,
         alpha=0.3,
     )
+    planner.phase = "LLOYD"
 
     log.info(f"Pheromone grid {cfg.rows}×{cfg.cols} | evap={cfg.evaporation_rate}")
 
@@ -537,12 +515,15 @@ def main():
         agent._update_position()
         log.info(f"[Drone {agent.drone_id + 1}] SITL position: ({agent.lat}, {agent.lon})")
 
+    time.sleep(2)  # let final MAVLink updates settle
+
     threading.Thread(
         target=_lloyd_loop,
-        args=(planner, agents),
+        args=(planner, agents, positions),
         kwargs={"coverage_threshold": args.coverage_threshold},
         daemon=True,
     ).start()
+
     log.info("Lloyd re-partition thread started ✓")
 
     log.info("Starting agents…")
@@ -550,7 +531,13 @@ def main():
         agent.start()
         time.sleep(0.8)
     
-    threading.Thread(target=_state_writer_loop, daemon=True).start()
+    threading.Thread(
+    target=_state_writer_loop,
+    args=(agents, planner),
+    daemon=True
+    ).start()
+
+
 
     log.info("Waiting for all drones to reach altitude...")
     while not all(getattr(a, "airborne", False) for a in agents):
@@ -567,22 +554,33 @@ def main():
         ).start()
 
     # Wait until positions are distinct or timeout
-    log.info("Waiting for drones to spread to spawn positions...")
-    deadline = time.time() + 90
-    while time.time() < deadline:
-        pos_data = [(a.drone_id, a.lat, a.lon) for a in agents if a.lat is not None]
-        # unique_lats = len(set(f"{lat:.3f}" for _, lat, _ in pos_data))
-        # unique_lons = len(set(f"{lon:.3f}" for _, _, lon in pos_data))
-        unique_lats = len(set(f"{lat:.5f}" for _, lat, _ in pos_data))
-        unique_lons = len(set(f"{lon:.5f}" for _, _, lon in pos_data))
-        log.info("  " + " ".join(f"D{d+1}=({la:.5f},{lo:.5f})" for d, la, lo in pos_data))
-        log.info(f"  Distinct lat={unique_lats} lon={unique_lons} (need >=2 in either)")
-        if unique_lats >= 2 or unique_lons >= 2:
-            log.info("Drone positions distinct — Lloyd can bootstrap ✓")
+    log.info("Waiting for drones to reach spawn positions...")
+
+    spawn_ok = False
+    spawn_deadline = time.time() + 120  # or configurable timeout
+
+    while time.time() < spawn_deadline:
+        if any(a.lat is None for a in agents):
+            time.sleep(2)
+            continue
+
+        all_reached = all(
+            haversine_m(a.lat, a.lon, lat, lon) < 3.0
+            for a, (lat, lon) in zip(agents, positions)
+        )
+
+        if all_reached:
+            log.info("All drones reached spawn — Lloyd can bootstrap ✓")
+            spawn_ok = True
             break
-        time.sleep(5)
-    else:
-        log.warning("Drones didn't spread in 90s — Lloyd will bootstrap with current positions anyway")
+
+        time.sleep(2)
+
+
+    if not spawn_ok:
+        log.warning("Forcing Lloyd bootstrap")
+
+
 
     def _cleanup():
         log.info("Shutting down…")
@@ -633,8 +631,8 @@ def main():
 
     if args.duration > 0:
         log.info(f"Running for {args.duration}s — Ctrl+C to stop early")
-        deadline = time.time() + args.duration
-        while time.time() < deadline:
+        run_deadline = time.time() + args.duration
+        while time.time() < run_deadline:
             _write_state(agents, planner)
             time.sleep(2)
         _cleanup()

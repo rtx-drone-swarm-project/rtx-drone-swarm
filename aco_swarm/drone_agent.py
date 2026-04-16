@@ -63,6 +63,8 @@ class DroneAgent:
         self._thread: Optional[threading.Thread] = None
         self.planner = planner
         self.territory = None   
+        self.reached_spawn_time = None
+
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
@@ -127,6 +129,8 @@ class DroneAgent:
                 return
 
             self._takeoff(self.altitude)
+            #self.altitude >= self.target_altitude * 0.9
+
             self.airborne = True  
             log.info(f"[Drone {self.drone_id + 1}] Airborne ✓ — stigmergy loop started")
 
@@ -143,7 +147,10 @@ class DroneAgent:
             log.error(f"[Drone {self.drone_id + 1}] Fatal: {e}", exc_info=True)
 
     def _stigmergy_step(self):
-        if self.planner and getattr(self.planner, "lloyd_active", False):
+        if self.planner is None:
+            return
+
+        if getattr(self.planner, "phase", "LLOYD") != "ACO":
             return
         
         if self.territory is None or len(self.territory) == 0:
@@ -303,6 +310,7 @@ class DroneAgent:
             time.sleep(0.2)
 
         log.warning(f"[Drone {self.drone_id+1}] failed to reach spawn (timeout)")
+
 
 def haversine_m(lat1, lon1, lat2, lon2):
         R = 6371000  # meters
