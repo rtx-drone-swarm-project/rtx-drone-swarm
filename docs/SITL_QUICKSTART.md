@@ -7,13 +7,8 @@ This guide contains the detailed setup and runbook notes for ArduPilot SITL. Use
 The primary demo path for this repo is:
 
 1. Build ArduPilot SITL on the host machine.
-2. Start the swarm from the repo root:
-
-```bash
-./scripts/launch_sitl.sh
-```
-
-3. Start the frontend and backend:
+2. Copy `.env.example` to `.env`.
+3. Start the app stack, including SITL:
 
 ```bash
 docker compose up --build
@@ -38,7 +33,7 @@ Expected result:
 
 ## Recommended Startup
 
-Use `launch_sitl.sh` as the main swarm launcher. Docker currently builds and runs the frontend and backend application stack, while SITL itself still runs on the host machine.
+Use Docker Compose as the default local startup path. Compose now starts a dedicated `sitl` service that runs `scripts/launch_sitl.sh` inside a container and mounts your host ArduPilot checkout at runtime. Configure host-specific values such as `ARDUPILOT_PATH` in a repo-local `.env` file.
 
 ## macOS Setup
 
@@ -229,7 +224,7 @@ Use this when you want the simplest setup for telemetry debugging.
 1. Start SITL:
 
 ```bash
-./scripts/launch_sitl.sh 15
+./scripts/launch_sitl.sh
 ```
 
 2. Start the backend:
@@ -253,20 +248,20 @@ curl http://localhost:8000/health
 curl http://localhost:8000/sitl/status
 ```
 
-### Host SITL + Docker backend
+### Docker Compose SITL + Docker backend
 
-Use this when SITL runs directly on the machine but the backend stays in a container. The backend uses direct TCP SITL ports `5762`, `5772`, `5782`, and so on, exposed by `sim_vehicle.py`.
+This is the default containerized flow. Compose starts a separate `sitl` service, and the backend reaches it over the internal Docker network using the hostname `sitl`.
 
-1. Start the backend container:
+1. Create `.env` and set `ARDUPILOT_PATH`:
 
 ```bash
-docker compose up --build -d backend
+cp .env.example .env
 ```
 
-2. Start SITL on the host with the default target:
+2. Start the stack:
 
 ```bash
-./scripts/launch_sitl.sh 15
+docker compose up --build
 ```
 
 3. Verify telemetry:
@@ -285,8 +280,9 @@ If SITL and the backend run on different machines, set `SITL_HOST` for the backe
 
 ## Troubleshooting
 
-- If `launch_sitl.sh` says ArduPilot is missing, set `ARDUPILOT_PATH` or clone ArduPilot into `~/ardupilot`.
-- If `/sitl/status` shows `connected_count: 0`, confirm SITL is still running and that TCP ports `5762`, `5772`, `5782`, and so on are reachable from the backend.
+- If `launch_sitl.sh` says ArduPilot is missing, check `ARDUPILOT_PATH` in `.env` or clone ArduPilot locally first.
+- If `/sitl/status` shows `connected_count: 0`, confirm SITL is still running and that TCP ports `5760`, `5770`, `5780`, and so on are reachable from the backend.
 - If Docker is part of your flow, make sure Docker Desktop is running before `docker compose up --build`.
+- If the `sitl` service exits immediately, confirm `ARDUPILOT_PATH` in `.env` points to a valid local ArduPilot checkout that has already been built for SITL.
 - If you changed a Dockerfile and want fresh images without starting containers yet, run `docker compose build`.
 - If port `8000` or `5173` is already in use, adjust the host port mappings in `docker-compose.yml`.
