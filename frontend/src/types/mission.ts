@@ -17,7 +17,6 @@ export type TelemetryDrone = {
   alt?: number | string | null;
   heading?: number | string | null;
   groundspeed?: number | string | null;
-  battery_remaining?: number | null;
   telemetry_source?: string | null;
   mode?: string | null;
   armed?: boolean | null;
@@ -61,7 +60,6 @@ export type ValidDrone = {
   alt?: number;
   heading?: number;
   groundspeed?: number;
-  battery_remaining?: number | null;
   telemetry_source?: string | null;
   mode?: string | null;
   armed?: boolean | null;
@@ -82,7 +80,6 @@ export type MissionDroneInput = {
   target_lat?: number;
   target_lon?: number;
   role?: string | null;
-  battery_remaining?: number | null;
 };
 
 export type MissionCreateRequest = {

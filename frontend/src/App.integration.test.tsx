@@ -66,7 +66,6 @@ describe("App integration", () => {
           alt: 120,
           heading: 42,
           groundspeed: 14.5,
-          battery_remaining: 87,
           target_lat: 33.515,
           target_lon: -117.205,
           role: "finder",
@@ -98,7 +97,6 @@ describe("App integration", () => {
         alt: 120,
         heading: 42,
         groundspeed: 14.5,
-        battery_remaining: 87,
         target_lat: 33.515,
         target_lon: -117.205,
         role: "finder"

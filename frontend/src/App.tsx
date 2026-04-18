@@ -57,14 +57,6 @@ export default function App() {
     setAlerts((prev) => [message, ...prev].slice(0, 10));
   }, []);
 
-  const averageBattery = useMemo(() => {
-    const values = telemetry
-      .map((drone) => drone.battery_remaining)
-      .filter((value): value is number => typeof value === "number" && value >= 0);
-    if (!values.length) return "--";
-    return `${Math.round(values.reduce((a, b) => a + b, 0) / values.length)}%`;
-  }, [telemetry]);
-
   const telemetryMode = useMemo(() => {
     const sources = telemetry
       .map((drone) => drone.telemetry_source)
@@ -88,7 +80,6 @@ export default function App() {
             sysid: typeof drone.sysid === "number" ? drone.sysid : null,
             lat: latNum,
             lon: lonNum,
-            battery_remaining: drone.battery_remaining,
             telemetry_source: typeof drone.telemetry_source === "string" ? drone.telemetry_source : null,
             mode: typeof drone.mode === "string" ? drone.mode : null,
             armed: typeof drone.armed === "boolean" ? drone.armed : null,
@@ -318,7 +309,6 @@ export default function App() {
             validDroneCount={validDroneCount}
             missionActive={missionActive}
             searchStatus={searchStatus}
-            averageBattery={averageBattery}
             lostHikerCount={lostHikerCount}
             telemetryMode={telemetryMode}
           />

@@ -44,7 +44,6 @@ function toMissionDroneInput(drone: ValidDrone): MissionDroneInput {
   if (isFiniteNumber(drone.groundspeed)) payload.groundspeed = drone.groundspeed;
   if (isFiniteNumber(drone.target_lat)) payload.target_lat = drone.target_lat;
   if (isFiniteNumber(drone.target_lon)) payload.target_lon = drone.target_lon;
-  if (isFiniteNumber(drone.battery_remaining)) payload.battery_remaining = drone.battery_remaining;
   if (hasText(drone.role)) payload.role = drone.role;
 
   return payload;

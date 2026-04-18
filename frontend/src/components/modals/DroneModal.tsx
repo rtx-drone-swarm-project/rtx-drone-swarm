@@ -15,11 +15,6 @@ function formatMetric(value: number | null | undefined, unit: string, digits = 0
   return formatted === "--" ? formatted : `${formatted} ${unit}`;
 }
 
-function formatBattery(value?: number | null) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
-  return `${Math.round(value)}%`;
-}
-
 function formatDroneStatus(drone: NonNullable<SelectedDrone>) {
   if (typeof drone.mode === "string" && drone.mode.trim().length > 0) return drone.mode;
   if (drone.armed === true) return "ARMED";
@@ -74,10 +69,6 @@ export default function DroneModal({ drone, onClose }: DroneModalProps) {
           <div>
             <label>Speed</label>
             <strong>{formatMetric(drone.groundspeed, "m/s", 1)}</strong>
-          </div>
-          <div>
-            <label>Battery</label>
-            <strong>{formatBattery(drone.battery_remaining)}</strong>
           </div>
           <div>
             <label>Status</label>

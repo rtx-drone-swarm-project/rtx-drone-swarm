@@ -61,8 +61,8 @@ export function makeDroneIcon(label: string, role?: string | null, heading?: num
   return L.divIcon({
     className: "drone-label-marker",
     html: `
-      <div class="drone-icon-wrap" style="transform: rotate(${rotation}deg);">
-        <svg width="40" height="40" viewBox="0 0 40 40" class="drone-icon-svg">
+      <div class="drone-icon-wrap" style="--drone-rotation: ${rotation}deg;">
+        <svg width="40" height="40" viewBox="0 0 40 40" class="drone-icon-svg" aria-hidden="true">
           <polygon points="20,8 28,32 20,28 12,32" fill="${fillColor}" stroke="white" stroke-width="2" />
           <line x1="12" y1="18" x2="6" y2="18" stroke="white" stroke-width="2" />
           <line x1="28" y1="18" x2="34" y2="18" stroke="white" stroke-width="2" />

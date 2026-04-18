@@ -657,16 +657,22 @@ body,
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: transform 0.15s ease;
+}
+
+.drone-icon-wrap {
+  transform: rotate(var(--drone-rotation, 0deg));
+  transform-origin: center;
+  transition: transform 0.35s linear;
 }
 
 .drone-icon-svg,
 .target-icon-svg {
   filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.4));
+  transition: transform 0.15s ease;
 }
 
-.drone-icon-wrap:hover,
-.target-icon-wrap:hover {
+.drone-icon-wrap:hover .drone-icon-svg,
+.target-icon-wrap:hover .target-icon-svg {
   transform: scale(1.18);
 }
 
