@@ -85,16 +85,27 @@ export default function App() {
 
           const normalizedDrone: ValidDrone = {
             id: drone.id ?? "unknown",
+            sysid: typeof drone.sysid === "number" ? drone.sysid : null,
             lat: latNum,
             lon: lonNum,
             battery_remaining: drone.battery_remaining,
+            telemetry_source: typeof drone.telemetry_source === "string" ? drone.telemetry_source : null,
+            mode: typeof drone.mode === "string" ? drone.mode : null,
+            armed: typeof drone.armed === "boolean" ? drone.armed : null,
+            status: typeof drone.status === "string" ? drone.status : null,
             role: typeof drone.role === "string" ? drone.role : null
           };
 
           const altNum = Number(drone.alt);
           const headingNum = Number(drone.heading);
+          const groundspeedNum = Number(drone.groundspeed);
+          const targetLatNum = Number(drone.target_lat);
+          const targetLonNum = Number(drone.target_lon);
           if (Number.isFinite(altNum)) normalizedDrone.alt = altNum;
           if (Number.isFinite(headingNum)) normalizedDrone.heading = headingNum;
+          if (Number.isFinite(groundspeedNum)) normalizedDrone.groundspeed = groundspeedNum;
+          if (Number.isFinite(targetLatNum)) normalizedDrone.target_lat = targetLatNum;
+          if (Number.isFinite(targetLonNum)) normalizedDrone.target_lon = targetLonNum;
 
           return normalizedDrone;
         })
