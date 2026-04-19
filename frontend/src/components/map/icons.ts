@@ -14,9 +14,9 @@ export function makeTargetCircleIcon(status?: string | null) {
   const normalizedStatus = typeof status === "string" ? status.toLowerCase() : "";
   const isFound = normalizedStatus === "found";
   const isConfirming = normalizedStatus === "confirming";
-  const fillColor = isFound ? "#34d399" : isConfirming ? "#f59e0b" : "#ef4444";
+  const fillColor = isFound ? "#a855f7" : isConfirming ? "#f59e0b" : "#ef4444";
   const accentMarkup = isFound
-    ? '<circle cx="24" cy="8" r="4" fill="#10b981" stroke="white" stroke-width="2"/><text x="24" y="11" text-anchor="middle" fill="white" font-size="8" font-weight="bold">&#10003;</text>'
+    ? '<circle cx="24" cy="8" r="4" fill="#7c3aed" stroke="white" stroke-width="2"/><text x="24" y="11" text-anchor="middle" fill="white" font-size="8" font-weight="bold">&#10003;</text>'
     : "";
 
   return L.divIcon({
@@ -54,25 +54,34 @@ export function makeTargetTriangleIcon() {
 
 export function makeDroneIcon(label: string, role?: string | null, heading?: number) {
   const normalizedRole = typeof role === "string" ? role.toLowerCase() : "";
-  const fillColor = normalizedRole === "finder" ? "#f97316" : normalizedRole === "confirmer" ? "#0ea5e9" : "#22c55e";
   const safeLabel = escapeHtml(label);
   const rotation = Number.isFinite(heading) ? heading : 0;
+  const accentColor = normalizedRole === "finder" ? "#3b82f6" : normalizedRole === "confirmer" ? "#f59e0b" : "#34d399";
+  const accentClass =
+    normalizedRole === "finder"
+      ? "role-finder"
+      : normalizedRole === "confirmer"
+        ? "role-confirmer"
+        : "role-default";
 
   return L.divIcon({
     className: "drone-label-marker",
     html: `
-      <div class="drone-icon-wrap" style="--drone-rotation: ${rotation}deg;">
-        <svg width="40" height="40" viewBox="0 0 40 40" class="drone-icon-svg" aria-hidden="true">
-          <polygon points="20,8 28,32 20,28 12,32" fill="${fillColor}" stroke="white" stroke-width="2" />
-          <line x1="12" y1="18" x2="6" y2="18" stroke="white" stroke-width="2" />
-          <line x1="28" y1="18" x2="34" y2="18" stroke="white" stroke-width="2" />
-          <circle cx="6" cy="18" r="3" fill="${fillColor}" stroke="white" stroke-width="1.5" />
-          <circle cx="34" cy="18" r="3" fill="${fillColor}" stroke="white" stroke-width="1.5" />
-          <text x="20" y="23" text-anchor="middle" fill="white" font-size="10" font-weight="700">${safeLabel}</text>
-        </svg>
+      <div class="drone-marker-shell ${accentClass}" style="--drone-rotation: ${rotation}deg; --drone-accent: ${accentColor};">
+        <div class="drone-hover-label">${safeLabel}</div>
+        <div class="drone-icon-wrap">
+          <svg width="36" height="36" viewBox="0 0 36 36" class="drone-icon-svg" aria-hidden="true">
+            <polygon points="18,4 25,26 18,21 11,26" fill="#31c46d" stroke="white" stroke-width="2.35" />
+            <line x1="11" y1="14" x2="5" y2="14" stroke="white" stroke-width="2.2" stroke-linecap="round" />
+            <line x1="25" y1="14" x2="31" y2="14" stroke="white" stroke-width="2.2" stroke-linecap="round" />
+            <circle cx="5" cy="14" r="3.15" fill="var(--drone-accent)" stroke="white" stroke-width="1.8" />
+            <circle cx="31" cy="14" r="3.15" fill="var(--drone-accent)" stroke="white" stroke-width="1.8" />
+            <path d="M 16.5 8.5 L 18 6 L 19.5 8.5" fill="none" stroke="white" stroke-width="1.7" stroke-linecap="round" />
+          </svg>
+        </div>
       </div>
     `,
-    iconSize: [40, 40],
-    iconAnchor: [20, 20]
+    iconSize: [44, 52],
+    iconAnchor: [22, 18]
   });
 }

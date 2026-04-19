@@ -383,40 +383,92 @@ body,
 .legend-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: #e2e8f0;
 }
 
 .legend-dot {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 999px;
-  border: 1px solid #fff;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgb(15 23 42 / 0.4);
 }
 
-.legend-dot.drone {
-  background: #1fd266;
+.legend-chip {
+  position: relative;
+  width: 22px;
+  height: 18px;
+  display: inline-block;
+}
+
+.legend-chip.drone {
+  border-radius: 999px;
+  --legend-drone-accent: #34d399;
+}
+
+.legend-chip.drone.finder {
+  --legend-drone-accent: #3b82f6;
+}
+
+.legend-chip.drone.confirmer {
+  --legend-drone-accent: #f59e0b;
+}
+
+.legend-chip.drone::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 1px;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 13px solid #31c46d;
+  filter: drop-shadow(0 1px 1px rgb(255 255 255 / 0.85));
+}
+
+.legend-chip.drone::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  width: 16px;
+  height: 3px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--legend-drone-accent, #34d399) 0 28%, #fff 28% 72%, var(--legend-drone-accent, #34d399) 72% 100%);
+  box-shadow: 0 0 0 1px rgb(15 23 42 / 0.18);
 }
 
 .legend-dot.target {
   background: #ef4444;
 }
 
-.legend-dot.finder {
-  background: #f97316;
+.legend-dot.confirming {
+  background: #f59e0b;
 }
 
-.legend-dot.confirmer {
-  background: #0ea5e9;
+.legend-dot.found {
+  background: #a855f7;
+  position: relative;
 }
 
-.legend-triangle {
-  width: 0;
+.legend-dot.found::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 999px;
+  border: 2px solid rgb(255 255 255 / 0.92);
+}
+
+.legend-boundary {
+  width: 36px;
   height: 0;
-  border-left: 8px solid transparent;
-  border-right: 8px solid transparent;
-  border-bottom: 14px solid #ef4444;
-  filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);
+  border-top: 3px dashed #3b82f6;
+  filter: drop-shadow(0 1px 2px rgb(59 130 246 / 0.25));
 }
 
 .legend-help {
@@ -436,6 +488,13 @@ body,
   margin: 0;
   padding-left: 16px;
   color: #cbd5e1;
+}
+
+.legend-note {
+  margin: 8px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .found-hiker-list {
@@ -651,12 +710,41 @@ body,
   border: none !important;
 }
 
+.drone-marker-shell,
 .drone-icon-wrap,
 .target-icon-wrap {
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+
+.drone-marker-shell {
+  position: relative;
+  width: 44px;
+  height: 52px;
+  pointer-events: auto;
+}
+
+.drone-hover-label {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 2px);
+  transform: translate(-50%, 6px);
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1.5px solid rgb(255 255 255 / 0.96);
+  background: linear-gradient(180deg, rgb(44 197 108 / 0.98), rgb(22 163 74 / 0.98));
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: 0 6px 16px rgb(15 23 42 / 0.24);
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
 .drone-icon-wrap {
@@ -671,9 +759,24 @@ body,
   transition: transform 0.15s ease;
 }
 
+.drone-marker-shell:hover .drone-hover-label {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 .drone-icon-wrap:hover .drone-icon-svg,
 .target-icon-wrap:hover .target-icon-svg {
-  transform: scale(1.18);
+  transform: scale(1.12);
+}
+
+.drone-marker-shell.role-finder .drone-hover-label,
+.drone-marker-shell.role-finder .drone-icon-svg polygon {
+  filter: saturate(1.03);
+}
+
+.drone-marker-shell.role-confirmer .drone-hover-label,
+.drone-marker-shell.role-confirmer .drone-icon-svg polygon {
+  filter: saturate(0.98);
 }
 
 .target-label-marker {
