@@ -23,6 +23,7 @@ from pymavlink import mavutil
 
 from app.missions import _sync_mission_drones_with_sitl, missions_db
 from app.settings import DEFAULT_DISPATCH_ALT, SLEEP_BETWEEN_DISPATCH_SECONDS
+from app.recall import run_direct_recall, check_recall_completion
 from app.sitl import sitl_bridge
 #from app.voronoi import lloyd_step
 from app.ws import manager
@@ -345,11 +346,9 @@ async def _finalize_mission_progress(mission: dict) -> bool:
 
     all_targets_found = found_count == total_targets
     if all_targets_found:
-        mission["status"] = "complete"
         mission["progress"] = 100.0
 
     return all_targets_found
-
 
 async def _broadcast_mission_tick(mission_id: str, mission: dict) -> None:
     """Broadcast per-tick telemetry, progress, and target status updates."""
@@ -361,6 +360,7 @@ async def _broadcast_mission_tick(mission_id: str, mission: dict) -> None:
                 "type": "mission_status",
                 "mission_id": mission_id,
                 "status": mission.get("status", "running"),
+                "phase": mission["phase"],
                 "progress": mission["progress"],
                 "targets": mission["targets"],
             }
@@ -379,36 +379,63 @@ async def simulation_loop(mission_id: str):
     mission = missions_db[mission_id]
     mission.setdefault("_found_target_ids", [])
     mission.setdefault("elapsed_seconds", 0)
-
+    mission.setdefault("phase", "search")
+    mission.setdefault("_recall_sent", False)
 
     while mission["status"] == "running":
-        mission["elapsed_seconds"] = mission.get("elapsed_seconds", 0) + 1
-        bounds = mission["bounds"]
+        if mission.get("phase") == "search":
+            mission["elapsed_seconds"] = mission.get("elapsed_seconds", 0) + 1
+            bounds = mission["bounds"]
 
-        # Pull live SITL state into the mission before making any coverage or
-        # targeting decisions for this tick.
-        live_drone_ids = _sync_mission_drones_with_sitl(mission)
+            # Pull live SITL state into the mission before making any coverage or
+            # targeting decisions for this tick.
+            live_drone_ids = _sync_mission_drones_with_sitl(mission)
 
-        free_drones = [
-            d for d in mission["drones"]
-            if not d.get("assigned_target_id") and d.get("role") not in ["finder", "confirmer"]
-        ]
+            free_drones = [
+                d for d in mission["drones"]
+                if not d.get("assigned_target_id") and d.get("role") not in ["finder", "confirmer"]
+            ]
 
-        #centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
+            #centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
+            # Pull live SITL state into the mission before making any coverage or
+            # targeting decisions for this tick.
+            live_drone_ids = _sync_mission_drones_with_sitl(mission)
+            centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
 
-        algorithm_name = mission.get("algorithm", "voronoi")
-        active_strategy = get_algorithm(algorithm_name)
-        waypoints_map = await asyncio.to_thread(active_strategy.get_target_waypoints, mission, free_drones)
+            algorithm_name = mission.get("algorithm", "voronoi")
+            active_strategy = get_algorithm(algorithm_name)
+            waypoints_map = await asyncio.to_thread(active_strategy.get_target_waypoints, mission, free_drones)
 
-        _send_live_drone_gotos(mission, live_drone_ids, waypoints_map)
-        await _update_drones_for_tick(mission, live_drone_ids, waypoints_map, bounds)
-        _update_targets_for_tick(mission, bounds)
-        all_targets_found = await _finalize_mission_progress(mission)
+            _send_live_drone_gotos(mission, live_drone_ids, waypoints_map)
+            await _update_drones_for_tick(mission, live_drone_ids, waypoints_map, bounds)
+            _update_targets_for_tick(mission, bounds)
+            all_targets_found = await _finalize_mission_progress(mission)
+            #_rearm_live_drones_if_needed(mission, live_drone_ids)
+            _send_live_drone_gotos(mission, live_drone_ids, centroid_map)
+            await _update_drones_for_tick(mission, live_drone_ids, centroid_map, bounds)
+            _update_targets_for_tick(mission, bounds)
+            
+            all_targets_found = await _finalize_mission_progress(mission)
+            if all_targets_found:
+                print("mission phase set to post_search")
+                mission["phase"] = "post_search"
+
+        elif mission.get("phase") == "post_search":
+            pass       
+        
+        elif mission.get("phase") == "recall":
+            if not mission.get("_recall_sent"):
+                recall_results = run_direct_recall(mission)
+                logger.info("Recall results: %s", recall_results)
+                mission["_recall_sent"] = True
+
+            all_drones_recall_completed = check_recall_completion()
+            if all_drones_recall_completed:
+                mission["status"] = "complete"
+                await _broadcast_mission_tick(mission_id, mission)
+                break
+
         await _broadcast_mission_tick(mission_id, mission)
-
-        if all_targets_found:
-            break
-
         await asyncio.sleep(SLEEP_BETWEEN_DISPATCH_SECONDS)
         if mission["status"] != "running":
             break

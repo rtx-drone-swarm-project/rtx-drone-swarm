@@ -114,6 +114,13 @@ class Drone:
 
         self.conn.mav.set_mode_send(self.sysid, mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED, mode_map[mode_name])
 
+    def is_mode(self, mode_name):
+        mode_map = self.conn.mode_mapping()
+        if mode_name not in mode_map:
+            raise ValueError(f"Mode {mode_name} not supported")
+
+        return self.get_state()["mode"] == mode_map[mode_name]
+
     def arm(self, timeout = 5):
         self.conn.mav.command_long_send(self.sysid, self.comp, ARM_CMD, 0, 1, 0, 0, 0, 0, 0, 0)
         result = self.wait_ack(ARM_CMD, timeout=timeout)

@@ -3,7 +3,7 @@ import { getApiBase, getApiPort } from "./api/runtime";
 import TopBar from "./components/layout/TopBar";
 import MapPanel from "./components/map/MapPanel";
 import DroneModal from "./components/modals/DroneModal";
-import HikerSummaryModal from "./components/modals/HikerSummaryModal";
+import SearchSummaryModal from "./components/modals/SearchSummaryModal";
 import AlertsPanel from "./components/panels/AlertsPanel";
 import ActionsPanel from "./components/panels/ActionsPanel";
 import FoundHikersPanel from "./components/panels/FoundHikersPanel";
@@ -39,6 +39,7 @@ export default function App() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [searchStatus, setSearchStatus] = useState("idle");
   const [progress, setProgress] = useState(0);
+  const [missionPhase, setMissionPhase] = useState<"search" | "post_search" | "recall" | null>(null);
   const [targets, setTargets] = useState<Target[]>([]);
   const [foundHikers, setFoundHikers] = useState<FoundHiker[]>([]);
   const [missionLocked, setMissionLocked] = useState(false);
@@ -50,7 +51,7 @@ export default function App() {
   const [selectedBounds, setSelectedBounds] = useState<Bounds | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [selectedDrone, setSelectedDrone] = useState<SelectedDrone>(null);
-  const [hikerSummaryOpen, setHikerSummaryOpen] = useState(false);
+  const [searchSummaryOpen, setSearchSummaryOpen] = useState(false);
   const [completedTargets, setCompletedTargets] = useState<Target[]>([]);
   const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<AlgorithmOption>("default");
@@ -179,6 +180,10 @@ export default function App() {
 
   const onMissionStatus = useCallback(
     (message: MissionStatusMessage) => {
+      if (message.phase) {
+        setMissionPhase(message.phase);
+      }
+
       const statusText = normalizeMissionStatus(typeof message.status === "string" ? message.status : "idle");
       setSearchStatus(statusText);
       if (typeof message.progress === "number") setProgress(statusText === "complete" ? 100 : message.progress);
@@ -229,7 +234,7 @@ export default function App() {
     onTargetFound
   });
 
-  const { startMission, stopMission, resetMissionLock } = useMissionActions({
+  const { startMission, stopMission, resetMissionLock, recallDrones, resetDrones } = useMissionActions({
     apiBase,
     missionLocked,
     selectedBounds,
@@ -244,28 +249,22 @@ export default function App() {
     setElapsedSeconds,
     setMissionLocked,
     setFoundHikers,
-    setHikerSummaryOpen,
+    setSearchSummaryOpen,
     setCompletedTargets,
     setSummaryMissionId,
     setHikerLabelById
   });
 
   useEffect(() => {
-    if (!mission || !targets.length) return;
+  if (!mission || !targets.length) return;
+  const allFound = targets.every(t => t.status === "found");
+  if (!allFound) return;
+  if (summaryMissionId === mission.id) return;
 
-    const allFound = targets.every((target) => target.status === "found");
-    if (!allFound) return;
-
-    if (summaryMissionId === mission.id) return;
-
-    setProgress(100);
-    setSearchStatus("complete");
-    setMissionLocked(true);
-    setElapsedSeconds(0);
-    setCompletedTargets(targets);
-    setSummaryMissionId(mission.id);
-    setHikerSummaryOpen(true);
-  }, [mission, summaryMissionId, targets]);
+  setCompletedTargets(targets);
+  setSummaryMissionId(mission.id);
+  setSearchSummaryOpen(true);
+  }, [mission, targets, missionPhase]);
 
   useEffect(() => {
     if (!targets.length) return;
@@ -400,11 +399,13 @@ export default function App() {
       </main>
 
       <DroneModal drone={selectedDrone} onClose={() => setSelectedDrone(null)} />
-      <HikerSummaryModal
-        isOpen={hikerSummaryOpen}
-        onClose={() => setHikerSummaryOpen(false)}
+      <SearchSummaryModal
+        isOpen={searchSummaryOpen}
+        onClose={() => setSearchSummaryOpen(false)}
         targets={completedTargetsSorted}
         getHikerLabel={getHikerLabel}
+        onRecall={recallDrones}
+        onReset={resetDrones}
       />
     </div>
   );

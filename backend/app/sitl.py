@@ -187,13 +187,26 @@ class SITLTelemetryBridge:
                 return {"drone_id": drone_id, "sysid": sysid, "success": False, "message": "Not connected"}
 
             # Standardize mode
-            if drone.state["mode"] != "GUIDED":
+            if not drone.is_mode("GUIDED"):
                 drone.set_mode("GUIDED")
+                if not _wait_for_condition(
+                    lambda: drone.is_mode("GUIDED"),
+                    timeout=10.0
+                ):
+                    return {
+                        "drone_id": drone_id,
+                        "sysid": sysid,
+                        "success": False,
+                        "message": "Failed to enter GUIDED mode before arming",
+                    }
             
             # Check if it needs to arm and takeoff
-            if not drone.state["armed"]:
+            if not drone.get_state()["armed"]:
                 drone.arm()
-                if not _wait_for_condition(lambda: bool(drone.get_state()["armed"]), timeout=10.0):
+                if not _wait_for_condition(
+                    lambda: drone.get_state()["armed"],
+                    timeout=10.0
+                ):
                     return {
                         "drone_id": drone_id,
                         "sysid": sysid,
@@ -201,7 +214,7 @@ class SITLTelemetryBridge:
                         "message": "Arm command ACKed but drone never reported armed state",
                     }
                 
-            if drone.state["rel_alt"] < alt - 2:
+            if drone.get_state()["rel_alt"] < alt - 2:
                 drone.takeoff(alt)
                 if not _wait_for_condition(
                     lambda: float(drone.get_state()["rel_alt"]) >= min(alt - 2.0, 3.0),
@@ -224,6 +237,32 @@ class SITLTelemetryBridge:
         finally:
             self._dispatching_sysids.discard(sysid)
 
+    def recall_drone(self, sysid: int, drone_id: Optional[str] = None) -> dict:
+        try:
+            drone = self._get_drone(sysid)
+            if not drone:
+                return {"drone_id": drone_id, "sysid": sysid, "success": False, "message": "Not connected"}
+
+            if not drone.is_mode("RTL"):
+                drone.set_mode("RTL")
+            
+            def _is_rtl_or_disarmed():
+                return drone.is_mode("RTL") or not drone.get_state()["armed"]
+
+            if not _wait_for_condition(lambda: _is_rtl_or_disarmed, timeout=10.0):
+                return {
+                    "drone_id": drone_id,
+                    "sysid": sysid,
+                    "success": False,
+                    "message": "Drone never reported state switched to RTL mode",
+                }
+
+            return {"drone_id": drone_id, "sysid": sysid, "success": True, "message": "Recall initiated via Swarm logic"}
+        
+        except Exception as exc:
+            logger.error(f"Recall failed for sysid {sysid}: {exc}")
+            return {"drone_id": drone_id, "sysid": sysid, "success": False, "message": str(exc)}
+
     def send_goto(self, sysid: int, lat: float, lon: float, alt: float) -> None:
         """Lightweight goto wrapper for the simulation loop."""
         drone = self._get_drone(sysid)
@@ -243,9 +282,32 @@ class SITLTelemetryBridge:
             time.sleep(2)
             drone.takeoff(takeoff_alt) '''
 
+    def send_mode(self, sysid: int, mode: str) -> None:
+        drone = self._get_drone(sysid)
+        if drone:
+            state = drone.get_state()
+            print("rel_alt:", state["rel_alt"])
+            print("armed:", state["armed"])
+            print("mode:", state["mode"])
+            
+            drone.set_mode(mode)
+
 
 from app.ws import manager
 from app.missions import missions_db # Assuming this is where you track active missions
+
+def wait_for_armed(drone, timeout=10.0):
+    start = time.time()
+    seen_armed = False
+
+    while time.time() - start < timeout:
+        state = drone.get_state()
+        if state["armed"]:
+            seen_armed = True
+            return True
+        time.sleep(0.2)
+
+    return seen_armed
 
 def _any_mission_running() -> bool:
     """Helper to check if simulation.py is currently handling telemetry."""

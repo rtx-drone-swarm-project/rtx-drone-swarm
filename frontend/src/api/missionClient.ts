@@ -13,6 +13,8 @@ export type MissionApiClient = {
   startMission: (missionId: string | number, algorithm?: string) => Promise<MissionRecord>;
   stopMission: (missionId: string | number) => Promise<MissionRecord>;
   deleteMission: (missionId: string | number) => Promise<void>;
+  recallMission: (missionId: string | number) => Promise<MissionRecord>;
+  resetMission: (missionId: string | number) => Promise<MissionRecord>;
 };
 
 export function createMissionClient(apiBase: string): MissionApiClient {
@@ -45,6 +47,16 @@ export function createMissionClient(apiBase: string): MissionApiClient {
     deleteMission: (missionId) =>
       requestJson<void>(`${apiBase}/missions/${missionId}`, {
         method: "DELETE"
-      })
+      }),
+
+    recallMission: (missionId) =>
+      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/recall`, {
+        method: "POST"
+      }),
+
+    resetMission: (missionId) =>
+      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/reset`, {
+        method: "POST"
+      }),
   };
 }

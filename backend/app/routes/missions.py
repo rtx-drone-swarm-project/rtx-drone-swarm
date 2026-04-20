@@ -88,6 +88,7 @@ async def _background_dispatch(mission: dict, mission_id: str, assignments: List
             "type": "mission_status",
             "mission_id": mission_id,
             "status": mission.get("status", "running"),
+            "phase": mission.get("phase"),
             "dispatch_results": results,
         }
     )
@@ -149,6 +150,7 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
             "type": "mission_status",
             "mission_id": mission_id,
             "status": "running",
+            "phase": mission.get("phase"),
             "progress": mission["progress"],
             "targets": targets,
         }
@@ -206,6 +208,7 @@ async def stop_mission(mission_id: str):
             "type": "mission_status",
             "mission_id": mission_id,
             "status": "stopped",
+            "phase": mission.get("phase"),
             "progress": mission["progress"],
         }
     )
@@ -216,7 +219,7 @@ async def stop_mission(mission_id: str):
 
 @router.delete("/missions/{mission_id}")
 async def delete_mission(mission_id: str):
-    """Delete a mission record and notify connected clients that it is gone."""
+    """Delete a mission record and broadcast that it is gone."""
     if mission_id not in missions_db:
         raise HTTPException(status_code=404, detail="Mission not found")
     mission = missions_db.pop(mission_id)
@@ -227,7 +230,39 @@ async def delete_mission(mission_id: str):
             "type": "mission_status",
             "mission_id": mission_id,
             "status": "deleted",
+            "phase": mission.get("phase"),
             "progress": 0.0,
         }
     )
     return {"ok": True, "mission_id": mission_id}
+
+@router.post("/missions/{mission_id}/recall")
+async def recall_mission(mission_id: str):
+    """Recall a mission and broadcast that recall has been initiated."""
+    if mission_id not in missions_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = missions_db[mission_id]
+    # Prevent invalid transitions
+    if mission.get("phase") != "post_search":
+        raise HTTPException(status_code=400, detail="Mission is not running")
+
+    # If already recalling, do nothing
+    if mission.get("phase") == "recall":
+        return {"message": "Recall already in progress"}
+
+    # Transition to recall phase
+    mission["phase"] = "recall"
+    mission["recall_sent"] = False
+
+    await manager.broadcast(
+        {
+            "type": "mission_status",
+            "mission_id": mission_id,
+            "status": "recall",
+            "phase": mission.get("phase"),
+            "progress": mission["progress"],
+        }
+    )
+
+    return mission

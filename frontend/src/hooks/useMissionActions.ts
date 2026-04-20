@@ -18,7 +18,7 @@ type UseMissionActionsArgs = {
   setElapsedSeconds: (value: number) => void;
   setMissionLocked: (value: boolean) => void;
   setFoundHikers: (value: FoundHiker[]) => void;
-  setHikerSummaryOpen: (value: boolean) => void;
+  setSearchSummaryOpen: (value: boolean) => void;
   setCompletedTargets: (value: Target[]) => void;
   setSummaryMissionId: (value: string | number | null) => void;
   setHikerLabelById: (value: Record<string, number>) => void;
@@ -65,7 +65,7 @@ export default function useMissionActions({
   setElapsedSeconds,
   setMissionLocked,
   setFoundHikers,
-  setHikerSummaryOpen,
+  setSearchSummaryOpen,
   setCompletedTargets,
   setSummaryMissionId,
   setHikerLabelById
@@ -99,7 +99,7 @@ export default function useMissionActions({
     setElapsedSeconds(0);
     setMissionLocked(false);
     setFoundHikers([]);
-    setHikerSummaryOpen(false);
+    setSearchSummaryOpen(false);
     setCompletedTargets([]);
     setSummaryMissionId(null);
     setHikerLabelById({});
@@ -159,7 +159,7 @@ export default function useMissionActions({
     setTargets([]);
     setFoundHikers([]);
     setElapsedSeconds(0);
-    setHikerSummaryOpen(false);
+    setSearchSummaryOpen(false);
     setCompletedTargets([]);
     setSummaryMissionId(null);
     setHikerLabelById({});
@@ -172,9 +172,21 @@ export default function useMissionActions({
     }
   };
 
+  const recallDrones = async () => {
+    if (!mission?.id) return;
+    await missionClient.recallMission(mission.id);
+  };
+
+  const resetDrones = async () => {
+    if (!mission?.id) return;
+    await missionClient.resetMission(mission.id);
+  };
+
   return {
     startMission,
     stopMission,
-    resetMissionLock
+    resetMissionLock,
+    recallDrones,
+    resetDrones,
   };
 }
