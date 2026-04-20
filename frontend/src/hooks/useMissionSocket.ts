@@ -10,7 +10,6 @@ import type {
 type UseMissionSocketArgs = {
   apiPort: string;
   onConnectedChange: (connected: boolean) => void;
-  onAlert: (message: string) => void;
   onTelemetry: (message: TelemetryMessage) => void;
   onMissionStatus: (message: MissionStatusMessage) => void;
   onMissionProgress: (message: MissionProgressMessage) => void;
@@ -24,7 +23,6 @@ function isMessageWithType(payload: unknown): payload is { type: string } {
 export default function useMissionSocket({
   apiPort,
   onConnectedChange,
-  onAlert,
   onTelemetry,
   onMissionStatus,
   onMissionProgress,
@@ -35,14 +33,14 @@ export default function useMissionSocket({
 
     ws.onopen = () => {
       onConnectedChange(true);
-      onAlert("WebSocket connected.");
     };
 
-    ws.onerror = () => onAlert("WebSocket error.");
+    ws.onerror = () => {
+      console.warn("WebSocket error.");
+    };
 
     ws.onclose = () => {
       onConnectedChange(false);
-      onAlert("WebSocket disconnected.");
     };
 
     ws.onmessage = (event) => {
@@ -69,18 +67,10 @@ export default function useMissionSocket({
           onTargetFound(payload as TargetFoundMessage);
         }
       } catch {
-        onAlert("Failed to parse websocket payload.");
+        console.warn("Failed to parse websocket payload.");
       }
     };
 
     return () => ws.close();
-  }, [
-    apiPort,
-    onAlert,
-    onConnectedChange,
-    onMissionProgress,
-    onMissionStatus,
-    onTargetFound,
-    onTelemetry
-  ]);
+  }, [apiPort, onConnectedChange, onMissionProgress, onMissionStatus, onTargetFound, onTelemetry]);
 }

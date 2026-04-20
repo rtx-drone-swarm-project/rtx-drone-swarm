@@ -123,6 +123,8 @@ describe("App integration", () => {
       expect(screen.getByText("Mission Complete")).toBeTruthy();
       expect(screen.getByText("Mission Complete - Hikers Found")).toBeTruthy();
       expect(screen.getByText("Found Hikers (2)")).toBeTruthy();
+      expect(screen.getAllByText("Hiker 1").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Hiker 2").length).toBeGreaterThan(0);
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Reset Mission" }));

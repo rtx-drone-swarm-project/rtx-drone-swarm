@@ -10,10 +10,11 @@ function escapeHtml(value: string) {
   });
 }
 
-export function makeTargetCircleIcon(status?: string | null) {
+export function makeTargetCircleIcon(label: string, status?: string | null) {
   const normalizedStatus = typeof status === "string" ? status.toLowerCase() : "";
   const isFound = normalizedStatus === "found";
   const isConfirming = normalizedStatus === "confirming";
+  const safeLabel = escapeHtml(label);
   const fillColor = isFound ? "#a855f7" : isConfirming ? "#f59e0b" : "#ef4444";
   const accentMarkup = isFound
     ? '<circle cx="24" cy="8" r="4" fill="#7c3aed" stroke="white" stroke-width="2"/><text x="24" y="11" text-anchor="middle" fill="white" font-size="8" font-weight="bold">&#10003;</text>'
@@ -22,25 +23,28 @@ export function makeTargetCircleIcon(status?: string | null) {
   return L.divIcon({
     className: "target-label-marker",
     html: `
-      <div class="target-icon-wrap">
-        <svg width="32" height="32" viewBox="0 0 32 32" class="target-icon-svg">
-          <circle cx="16" cy="10" r="5" fill="${fillColor}" stroke="white" stroke-width="2" />
-          <path
-            d="M 16 15 L 16 24 M 11 19 L 21 19 M 16 24 L 12 28 M 16 24 L 20 28"
-            stroke="${fillColor}"
-            stroke-width="3"
-            stroke-linecap="round"
-            fill="none"
-          />
-          <path
-            d="M 16 15 L 16 24 M 11 19 L 21 19 M 16 24 L 12 28 M 16 24 L 20 28"
-            stroke="white"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            fill="none"
-          />
-          ${accentMarkup}
-        </svg>
+      <div class="target-marker-shell" style="--marker-label-bg-start: ${fillColor}; --marker-label-bg-end: ${fillColor};">
+        <div class="map-hover-label">${safeLabel}</div>
+        <div class="target-icon-wrap">
+          <svg width="32" height="32" viewBox="0 0 32 32" class="target-icon-svg">
+            <circle cx="16" cy="10" r="5" fill="${fillColor}" stroke="white" stroke-width="2" />
+            <path
+              d="M 16 15 L 16 24 M 11 19 L 21 19 M 16 24 L 12 28 M 16 24 L 20 28"
+              stroke="${fillColor}"
+              stroke-width="3"
+              stroke-linecap="round"
+              fill="none"
+            />
+            <path
+              d="M 16 15 L 16 24 M 11 19 L 21 19 M 16 24 L 12 28 M 16 24 L 20 28"
+              stroke="white"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              fill="none"
+            />
+            ${accentMarkup}
+          </svg>
+        </div>
       </div>
     `,
     iconSize: [32, 32],
@@ -49,7 +53,7 @@ export function makeTargetCircleIcon(status?: string | null) {
 }
 
 export function makeTargetTriangleIcon() {
-  return makeTargetCircleIcon("found");
+  return makeTargetCircleIcon("Hiker", "found");
 }
 
 export function makeDroneIcon(label: string, role?: string | null, heading?: number) {
@@ -67,8 +71,8 @@ export function makeDroneIcon(label: string, role?: string | null, heading?: num
   return L.divIcon({
     className: "drone-label-marker",
     html: `
-      <div class="drone-marker-shell ${accentClass}" style="--drone-rotation: ${rotation}deg; --drone-accent: ${accentColor};">
-        <div class="drone-hover-label">${safeLabel}</div>
+      <div class="drone-marker-shell ${accentClass}" style="--drone-rotation: ${rotation}deg; --drone-accent: ${accentColor}; --marker-label-bg-start: ${accentColor}; --marker-label-bg-end: ${accentColor};">
+        <div class="map-hover-label">${safeLabel}</div>
         <div class="drone-icon-wrap">
           <svg width="36" height="36" viewBox="0 0 36 36" class="drone-icon-svg" aria-hidden="true">
             <polygon points="18,4 25,26 18,21 11,26" fill="#31c46d" stroke="white" stroke-width="2.35" />

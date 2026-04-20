@@ -20,7 +20,7 @@ type UseMissionActionsArgs = {
   setHikerSummaryOpen: (value: boolean) => void;
   setCompletedTargets: (value: Target[]) => void;
   setSummaryMissionId: (value: string | number | null) => void;
-  pushAlert: (message: string) => void;
+  setHikerLabelById: (value: Record<string, number>) => void;
 };
 
 function isFiniteNumber(value: unknown): value is number {
@@ -66,25 +66,22 @@ export default function useMissionActions({
   setHikerSummaryOpen,
   setCompletedTargets,
   setSummaryMissionId,
-  pushAlert
+  setHikerLabelById
 }: UseMissionActionsArgs) {
   const missionClient = useMemo(() => createMissionClient(apiBase), [apiBase]);
 
   const startMission = async () => {
     if (missionLocked) {
-      pushAlert("Mission is locked after completion. Reset mission to start another.");
       return;
     }
 
     if (!selectedBounds) {
-      pushAlert("Click the map first to place a marker and auto-select 100km^2.");
       return;
     }
 
     let missionDrones: MissionDroneInput[] = validDrones.map(toMissionDroneInput);
 
     if (validDroneCount === 0) {
-      pushAlert("No live drones from telemetry. Generating mock drones...");
       missionDrones = Array.from({ length: 15 }).map((_, i) =>
         toMissionDroneInput({
           id: `mock-drone-${i}`,
@@ -96,7 +93,6 @@ export default function useMissionActions({
       );
     }
 
-    pushAlert("Starting mission...");
     setSearchStatus("running");
     setElapsedSeconds(0);
     setMissionLocked(false);
@@ -104,6 +100,7 @@ export default function useMissionActions({
     setHikerSummaryOpen(false);
     setCompletedTargets([]);
     setSummaryMissionId(null);
+    setHikerLabelById({});
 
     try {
       const created = await missionClient.createMission({
@@ -127,16 +124,14 @@ export default function useMissionActions({
       setSearchStatus(normalizeMissionStatus(started.status ?? "running"));
       setProgress(started.progress ?? 0);
       if (Array.isArray(started.targets)) setTargets(started.targets);
-      pushAlert(`Mission started (${started.id}).`);
     } catch (err) {
       setSearchStatus("idle");
-      pushAlert(`Start failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`Start failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
   const stopMission = async () => {
     if (!mission?.id) {
-      pushAlert("No active mission to stop.");
       return;
     }
 
@@ -145,9 +140,8 @@ export default function useMissionActions({
       setMission(stopped);
       setSearchStatus(normalizeMissionStatus(stopped.status ?? "idle"));
       setProgress(0);
-      pushAlert(`Mission stopped (${stopped.id}).`);
     } catch (err) {
-      pushAlert(`Stop failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`Stop failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -163,6 +157,7 @@ export default function useMissionActions({
     setHikerSummaryOpen(false);
     setCompletedTargets([]);
     setSummaryMissionId(null);
+    setHikerLabelById({});
     if (missionId) {
       try {
         await missionClient.deleteMission(missionId);
@@ -170,7 +165,6 @@ export default function useMissionActions({
         // Mission may already be gone (404); ignore silently
       }
     }
-    pushAlert("Mission reset. Ready for a new mission.");
   };
 
   return {

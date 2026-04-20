@@ -132,24 +132,6 @@ body,
   gap: 8px;
 }
 
-.alert-log-scroll {
-  display: grid;
-  gap: 6px;
-  max-height: 116px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgb(100 116 139 / 0.5) transparent;
-}
-
-.alert-log-scroll::-webkit-scrollbar {
-  width: 4px;
-}
-
-.alert-log-scroll::-webkit-scrollbar-thumb {
-  background: rgb(100 116 139 / 0.5);
-  border-radius: 4px;
-}
-
 .alert-chip {
   padding: 8px 10px;
   border-radius: 8px;
@@ -227,14 +209,6 @@ body,
   color: #fca5a5;
   border-color: rgb(239 68 68 / 0.45);
   background: rgb(127 29 29 / 0.35);
-}
-
-.alert-log {
-  padding: 7px 10px;
-  border: 1px solid rgb(148 163 184 / 0.24);
-  border-radius: 8px;
-  color: #cbd5e1;
-  background: rgb(15 23 42 / 0.4);
 }
 
 .kv-grid {
@@ -726,7 +700,14 @@ body,
   pointer-events: auto;
 }
 
-.drone-hover-label {
+.target-marker-shell {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  pointer-events: auto;
+}
+
+.map-hover-label {
   position: absolute;
   left: 50%;
   bottom: calc(100% - 2px);
@@ -734,7 +715,11 @@ body,
   padding: 4px 8px;
   border-radius: 999px;
   border: 1.5px solid rgb(255 255 255 / 0.96);
-  background: linear-gradient(180deg, rgb(44 197 108 / 0.98), rgb(22 163 74 / 0.98));
+  background: linear-gradient(
+    180deg,
+    var(--marker-label-bg-start, rgb(44 197 108 / 0.98)),
+    var(--marker-label-bg-end, rgb(22 163 74 / 0.98))
+  );
   color: #fff;
   font-size: 12px;
   font-weight: 700;
@@ -759,7 +744,8 @@ body,
   transition: transform 0.15s ease;
 }
 
-.drone-marker-shell:hover .drone-hover-label {
+.drone-marker-shell:hover .map-hover-label,
+.target-marker-shell:hover .map-hover-label {
   opacity: 1;
   transform: translate(-50%, 0);
 }
@@ -769,12 +755,12 @@ body,
   transform: scale(1.12);
 }
 
-.drone-marker-shell.role-finder .drone-hover-label,
+.drone-marker-shell.role-finder .map-hover-label,
 .drone-marker-shell.role-finder .drone-icon-svg polygon {
   filter: saturate(1.03);
 }
 
-.drone-marker-shell.role-confirmer .drone-hover-label,
+.drone-marker-shell.role-confirmer .map-hover-label,
 .drone-marker-shell.role-confirmer .drone-icon-svg polygon {
   filter: saturate(0.98);
 }
