@@ -7,10 +7,14 @@ from functools import partial
 # update function for animation
 def update(frame):
     global centroids
+    global old_centroids
     global pheromone_matrix
     
-    centroids, labels, pheromone_matrix = lloyd_step_aco(X, centroids, pheromone_matrix) # calls lloyd step to update centroids and labels
+    new_centroids, labels, pheromone_matrix = lloyd_step_aco(X, centroids, old_centroids, pheromone_matrix) # calls lloyd step to update centroids and labels
 
+    old_centroids = centroids
+    centroids = new_centroids
+    
     scatter.set_array(labels) # updates scatter and centroids
     centroid_plot.set_offsets(centroids)
     time.sleep(0.3) # small delay for better visualization
@@ -121,6 +125,7 @@ if __name__ == "__main__":
     # create initial centroids outside the subregion
     np.random.seed(42)
     centroids = generate_random_centroids(k=15, full_width=100, full_height=100, sub_x_min=sub_x_min, sub_x_max=sub_x_max, sub_y_min=sub_y_min, sub_y_max=sub_y_max)
+    old_centroids = centroids
     pheromone_matrix = np.ones((len(X), len(centroids))) # initialize pheromone matrix for ACO
 
     fig, ax, scatter, centroid_plot = plot_setup(full_X, X, sub_x_min, sub_x_max, sub_y_min, sub_y_max, centroids)
