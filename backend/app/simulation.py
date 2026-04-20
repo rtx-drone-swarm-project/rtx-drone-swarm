@@ -24,8 +24,9 @@ from pymavlink import mavutil
 from app.missions import _sync_mission_drones_with_sitl, missions_db
 from app.settings import DEFAULT_DISPATCH_ALT, SLEEP_BETWEEN_DISPATCH_SECONDS
 from app.sitl import sitl_bridge
-from app.voronoi import lloyd_step
+#from app.voronoi import lloyd_step
 from app.ws import manager
+from app.algorithms import get_algorithm
 
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ def _assign_confirmation_drone(mission: dict, target: dict, finder_drone: dict) 
     return confirmer
 
 
-def _build_centroid_map(mission: dict) -> dict:
+'''def _build_centroid_map(mission: dict) -> dict:
     """Compute the next Lloyd centroid for each free-searching drone.
 
     Drones already assigned to a target are excluded. For drones still en route
@@ -161,7 +162,7 @@ def _build_centroid_map(mission: dict) -> dict:
     new_centroids, _ = lloyd_step(grid_np, positions)
     for drone, centroid in zip(free_drones, new_centroids):
         centroid_map[drone["id"]] = centroid
-    return centroid_map
+    return centroid_map'''
 
 
 '''def _rearm_live_drones_if_needed(mission: dict, live_drone_ids: set[str]) -> None:
@@ -233,7 +234,7 @@ def _build_centroid_map(mission: dict) -> dict:
                 )'''
 
 
-def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map: dict) -> None:
+def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], waypoint_map: dict) -> None:
     """Send goto commands to live drones toward targets, queued points, or centroids.
 
     Priority order is:
@@ -280,9 +281,9 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map
             sitl_bridge.send_goto(sysid, tlat, tlon, DEFAULT_DISPATCH_ALT)
             goto_sent += 1
             continue
-        centroid = centroid_map.get(drone["id"])
-        if centroid is not None:
-            sitl_bridge.send_goto(sysid, float(centroid[0]), float(centroid[1]), DEFAULT_DISPATCH_ALT)
+        waypoint = waypoint_map.get(drone["id"])
+        if waypoint is not None:
+            sitl_bridge.send_goto(sysid, float(waypoint[0]), float(waypoint[1]), DEFAULT_DISPATCH_ALT)
             goto_sent += 1
             continue
         skipped_no_destination += 1
@@ -292,14 +293,14 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map
             "goto_loop: %d/%d drones got goto, centroids=%d, blocked dispatching=%d, blocked airborne=%d, blocked destination=%d",
             goto_sent,
             len(live_drone_ids),
-            len(centroid_map),
+            len(waypoint_map),
             skipped_not_dispatchable,
             skipped_not_airborne,
             skipped_no_destination,
         )
 
 
-async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], centroid_map: dict, bounds: dict) -> None:
+async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], waypoint_map: dict, bounds: dict) -> None:
     """Advance drone state for one simulation tick using live or simulated movement.
 
     Live drones keep their position from SITL telemetry and mainly receive role
@@ -376,11 +377,11 @@ async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], centr
 
         if drone.get("role") not in ["finder", "confirmer"]:
             drone["role"] = None
-        centroid = centroid_map.get(drone["id"])
-        if centroid is not None and not has_live_telemetry:
+        waypoint = waypoint_map.get(drone["id"])
+        if waypoint is not None and not has_live_telemetry:
             # Free simulated drones drift toward their latest coverage centroid.
-            d_lat = centroid[0] - drone["lat"]
-            d_lon = centroid[1] - drone["lon"]
+            d_lat = waypoint[0] - drone["lat"]
+            d_lon = waypoint[1] - drone["lon"]
             dist = math.hypot(d_lat, d_lon)
             if dist > TARGET_STOP_RADIUS:
                 drone["lat"] += (d_lat / dist) * SPEED
@@ -490,6 +491,7 @@ async def simulation_loop(mission_id: str):
     mission.setdefault("_found_target_ids", [])
     mission.setdefault("elapsed_seconds", 0)
 
+
     while mission["status"] == "running":
         mission["elapsed_seconds"] = mission.get("elapsed_seconds", 0) + 1
         bounds = mission["bounds"]
@@ -497,11 +499,20 @@ async def simulation_loop(mission_id: str):
         # Pull live SITL state into the mission before making any coverage or
         # targeting decisions for this tick.
         live_drone_ids = _sync_mission_drones_with_sitl(mission)
-        centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
 
-        #_rearm_live_drones_if_needed(mission, live_drone_ids)
-        _send_live_drone_gotos(mission, live_drone_ids, centroid_map)
-        await _update_drones_for_tick(mission, live_drone_ids, centroid_map, bounds)
+        free_drones = [
+            d for d in mission["drones"]
+            if not d.get("assigned_target_id") and d.get("role") not in ["finder", "confirmer"]
+        ]
+
+        #centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
+
+        algorithm_name = mission.get("algorithm", "voronoi")
+        active_strategy = get_algorithm(algorithm_name)
+        waypoints_map = await asyncio.to_thread(active_strategy.get_target_waypoints, mission, free_drones)
+
+        _send_live_drone_gotos(mission, live_drone_ids, waypoints_map)
+        await _update_drones_for_tick(mission, live_drone_ids, waypoints_map, bounds)
         _update_targets_for_tick(mission, bounds)
         all_targets_found = await _finalize_mission_progress(mission)
         await _broadcast_mission_tick(mission_id, mission)

@@ -6,8 +6,8 @@
 
 set -e
 COUNT="${1:-15}"
-ARDUPILOT_PATH="${ARDUPILOT_PATH:-$HOME/ardupilot}"
-PARAM_FILE="${2:-$PWD/scripts/sitl_params.param}"
+ARDUPILOT_PATH="${ARDUPILOT_PATH:-$HOME/drone_project/ardupilot}"
+PARAM_FILE="${2:-$PWD/sitl_params.param}"
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 LOG_BASE="$(cd "$(dirname "$0")/.." && pwd)/logs"
 mkdir -p "$LOG_BASE/sitl" "$LOG_BASE/swarm" "$LOG_BASE/cloud"
