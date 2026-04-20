@@ -20,17 +20,34 @@ def compute_pheromone_field(full_X, X, pheromone_matrix):
 
     return field
 
+def update_coverage(centroids, X, coverage_grid, radius=5):
+    """
+    Marks grid cells as covered if they are within sensor radius
+    of any centroid (drone position).
+    """
+    for c in centroids:
+        dists = np.linalg.norm(X - c, axis=1)
+        coverage_grid[dists <= radius] = 1
+
+    return coverage_grid
+
+def compute_coverage_stat(coverage_grid):
+    return np.sum(coverage_grid) / len(coverage_grid)
+
 # update function for animation
 def update(frame):
-    global centroids
-    global old_centroids
-    global pheromone_matrix
+    global centroids, old_centroids, pheromone_matrix, coverage_grid
     
     new_centroids, labels, pheromone_matrix = lloyd_step_aco(X, centroids, old_centroids, pheromone_matrix) # calls lloyd step to update centroids and labels
 
     old_centroids = centroids
     centroids = new_centroids
     
+    coverage_grid = update_coverage(centroids, X, coverage_grid, radius=5)
+    coverage_stat = compute_coverage_stat(coverage_grid)
+
+    print(f"Coverage: {coverage_stat:.3f}")
+
     # scatter.set_array(labels) # updates scatter and centroids
     centroid_plot.set_offsets(centroids)
     field = pheromone_matrix.sum(axis=1)
@@ -154,7 +171,7 @@ def run_final(X, centroids, n_iters=100, alpha=0.2, epsilon=0.1, centroid_plot=N
     plt.show()
 
 if __name__ == "__main__":
-    X, full_X, sub_x_min, sub_x_max, sub_y_min, sub_y_max = grid_setup()
+    X, full_X, sub_x_min, sub_x_max, sub_y_min, sub_y_max = grid_setup(sub_x_min=10, sub_x_max=90, sub_y_min=10, sub_y_max=90)
 
     # create initial centroids outside the subregion
     np.random.seed(42)
@@ -163,6 +180,7 @@ if __name__ == "__main__":
     pheromone_matrix = np.ones((len(X), len(centroids))) # initialize pheromone matrix for ACO
 
     fig, ax, scatter, centroid_plot, pheromone_scatter = plot_setup(full_X, X, sub_x_min, sub_x_max, sub_y_min, sub_y_max, centroids)
+    coverage_grid = np.zeros(len(X), dtype=np.uint8)
 
     run_animated(n_iters=100, fig=fig)
 
