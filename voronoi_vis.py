@@ -4,6 +4,22 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from functools import partial
 
+def compute_pheromone_field(full_X, X, pheromone_matrix):
+    # collapse centroid dimension → scalar per point
+    intensity = pheromone_matrix.sum(axis=1)
+
+    # normalize
+    intensity = intensity / (intensity.max() + 1e-8)
+
+    # map only where X exists
+    field = np.zeros(len(full_X))
+
+    # assume X is subset of full_X in same order mask
+    field_indices = np.arange(len(full_X))[:len(X)]
+    field[field_indices] = intensity
+
+    return field
+
 # update function for animation
 def update(frame):
     global centroids
@@ -15,10 +31,19 @@ def update(frame):
     old_centroids = centroids
     centroids = new_centroids
     
-    scatter.set_array(labels) # updates scatter and centroids
+    # scatter.set_array(labels) # updates scatter and centroids
     centroid_plot.set_offsets(centroids)
+    field = pheromone_matrix.sum(axis=1)
+    field = field / (field.max() + 1e-8)
+
+    pheromone_scatter.set_array(
+        np.pad(field, (0, len(full_X) - len(field)), mode='constant')
+    )
+    pheromone_scatter.set_alpha(0.7)
+
+
     time.sleep(0.3) # small delay for better visualization
-    return scatter, centroid_plot # returns updated scatter and centroid plot for animation
+    return scatter, centroid_plot, pheromone_scatter # returns updated scatter and centroid plot for animation
 
 def grid_setup(full_width=100, full_height=100, sub_x_min=50, sub_x_max=90, sub_y_min=50, sub_y_max=90):
     # generate full map
@@ -62,6 +87,15 @@ def plot_setup(full_X, X, sub_x_min, sub_x_max, sub_y_min, sub_y_max, centroids,
 
     scatter.set_cmap('tab20') # set colormap for clusters
 
+    pheromone_scatter = ax.scatter(
+        X[:, 0],
+        X[:, 1],
+        c='white',
+        s=5,
+        alpha=0.0,
+        cmap='inferno'
+    )
+
     centroid_plot = ax.scatter(centroids[:, 0], # plot centroids
                             centroids[:, 1],
                             c='black',
@@ -82,7 +116,7 @@ def plot_setup(full_X, X, sub_x_min, sub_x_max, sub_y_min, sub_y_max, centroids,
     ax.set_aspect('equal', adjustable='box')
     ax.set_title("Lloyd's Algorithm")
 
-    return fig, ax, scatter, centroid_plot
+    return fig, ax, scatter, centroid_plot, pheromone_scatter
 
 def run_animated(n_iters=100, fig=None):
     ani = FuncAnimation(fig, update, frames=n_iters, interval=200, repeat=False) # over time animation
@@ -128,7 +162,7 @@ if __name__ == "__main__":
     old_centroids = centroids
     pheromone_matrix = np.ones((len(X), len(centroids))) # initialize pheromone matrix for ACO
 
-    fig, ax, scatter, centroid_plot = plot_setup(full_X, X, sub_x_min, sub_x_max, sub_y_min, sub_y_max, centroids)
+    fig, ax, scatter, centroid_plot, pheromone_scatter = plot_setup(full_X, X, sub_x_min, sub_x_max, sub_y_min, sub_y_max, centroids)
 
     run_animated(n_iters=100, fig=fig)
 

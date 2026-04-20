@@ -38,7 +38,7 @@ def lloyd_step(X, centroids):
     
     return new_centroids, labels
 
-def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=1):
+def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5):
     k = len(centroids)
 
     distances = np.linalg.norm(X[:, np.newaxis] - centroids, axis=2)
