@@ -25,6 +25,7 @@ def lloyd_step(grid_points: np.ndarray, centroids: np.ndarray):
 class VoronoiCoverage(BaseSearchAlgorithm):
     def initialize(self, mission: dict) -> None:
         """Run once when the mission starts to generate the search grid."""
+        pass
 
     def get_target_waypoints(self, mission: dict, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
         """Run every simulation tick to get the next Voronoi centroid."""
