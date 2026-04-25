@@ -4,7 +4,7 @@ import logging
 import sys
 from typing import List, Optional
 
-from app.missions import _coerce_sysid
+from app.missions import Mission, _coerce_sysid
 from app.sitl import sitl_bridge
 
 
@@ -17,12 +17,12 @@ def check_recall_completion() -> bool:
         for s in states.values()
     )
 
-def run_direct_recall(mission: dict) -> List[dict]:
+def run_direct_recall(mission: Mission) -> List[dict]:
     """Recall drones directly through the in-process SITL bridge."""
     logger.info("Recall invoked. Executing swarm mode set to RTL")
 
     results = []
-    for drone in mission.get("drones", []):
+    for drone in getattr(mission, "drones", []):
         drone_id = drone.get("id")
         sysid = _coerce_sysid(drone.get("sysid"))
 

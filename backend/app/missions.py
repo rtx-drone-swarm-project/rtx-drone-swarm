@@ -18,9 +18,38 @@ from app.settings import (
     LAUNCH_SITL_SCRIPT,
 )
 from app.voronoi import build_search_grid
+from app.models import MissionCreate
 
 
-missions_db: Dict[str, dict] = {}
+mission_db: Dict[str, dict] = {}
+
+class Mission:
+    id: str
+    name: str
+    status: "idle" or "running" or "complete"
+    phase: "search" or "post_search" or "recall" or None
+    progress: float
+    elapsed_seconds: int
+    algorithm: str
+    bounds: dict[str, float]
+    drones: list[dict]
+    hikers: list[dict]
+    targets: list[dict]
+    algorithm: str
+
+    def __init__(self, mission_id: str, mission_data: MissionCreate):
+        self.id = mission_id
+        self.name = mission_data.name
+        self.status = "idle"
+        self.phase = None
+        self.progress = 0.0
+        self.elapsed_seconds = 0
+        self.algorithm = getattr(mission_data, "algorithm", "voronoi")
+        self.bounds = mission_data.bounds.model_dump()
+        self.drones = [d.model_dump() for d in mission_data.drones]
+        self.hikers = [m.model_dump() for m in mission_data.hikers] if mission_data.hikers else []
+        self.targets = []
+        self.algorithm = getattr(mission_data, "algorithm", "voronoi")
 
 
 def _coerce_sysid(value: object) -> Optional[int]:
@@ -109,10 +138,10 @@ def _normalize_script_results(raw_results: object, expected_assignments: List[di
     return normalized
 
 
-def _mission_drone_to_sysid_map(mission: dict) -> Dict[str, int]:
+def _mission_drone_to_sysid_map(mission: Mission) -> Dict[str, int]:
     """Infer or persist a mission's drone-id to MAVLink sysid mapping."""
     mapping: Dict[str, int] = {}
-    for index, drone in enumerate(mission.get("drones", []), start=1):
+    for index, drone in enumerate(getattr(mission, "drones", []), start=1):
         drone_id = drone.get("id")
         if drone_id is None:
             continue
@@ -122,14 +151,14 @@ def _mission_drone_to_sysid_map(mission: dict) -> Dict[str, int]:
     return mapping
 
 
-def _sync_mission_drones_with_sitl(mission: dict) -> set[str]:
+def _sync_mission_drones_with_sitl(mission: Mission) -> set[str]:
     """Overlay live SITL telemetry onto mission drones and return live drone ids."""
     from app.sitl import sitl_bridge
 
     live_states = sitl_bridge.get_states_by_sysid()
     live_drone_ids = set()
 
-    for index, drone in enumerate(mission.get("drones", []), start=1):
+    for index, drone in enumerate(getattr(mission, "drones", []), start=1):
         sysid = _coerce_sysid(drone.get("sysid")) or index
         drone["sysid"] = sysid
         live_state = live_states.get(sysid)
@@ -158,10 +187,10 @@ def _sync_mission_drones_with_sitl(mission: dict) -> set[str]:
     return live_drone_ids
 
 
-def _build_start_dispatch_assignments(mission: dict) -> List[dict]:
+def _build_start_dispatch_assignments(mission: Mission) -> List[dict]:
     """Create startup dispatch commands from any pre-assigned drone target coordinates."""
     assignments = []
-    for index, drone in enumerate(mission.get("drones", []), start=1):
+    for index, drone in enumerate(getattr(mission, "drones", []), start=1):
         target_lat = drone.get("target_lat")
         target_lon = drone.get("target_lon")
         if target_lat is None or target_lon is None:
@@ -203,10 +232,10 @@ def _generate_coverage_points(bounds: dict, drone_count: int) -> List[Tuple[floa
     return [(float(grid_points[idx][0]), float(grid_points[idx][1])) for idx in selected_indexes]
 
 
-def _assign_start_area_targets(mission: dict) -> List[dict]:
+def _assign_start_area_targets(mission: Mission) -> List[dict]:
     """Assign each mission drone an initial coverage point and matching dispatch row."""
-    drones = mission.get("drones", [])
-    points = _generate_coverage_points(mission["bounds"], len(drones))
+    drones = getattr(mission, "drones", [])
+    points = _generate_coverage_points(mission.bounds, len(drones))
     assignments: List[dict] = []
 
     for index, (drone, point) in enumerate(zip(drones, points), start=1):
@@ -230,7 +259,7 @@ def _assign_start_area_targets(mission: dict) -> List[dict]:
     return assignments
 
 
-async def _ensure_sitl_running_for_mission(mission: dict) -> Optional[str]:
+async def _ensure_sitl_running_for_mission(mission: Mission) -> Optional[str]:
     """Optionally auto-start SITL near the mission center when no bridge data exists."""
     from app.sitl import sitl_bridge
 
@@ -241,7 +270,7 @@ async def _ensure_sitl_running_for_mission(mission: dict) -> Optional[str]:
     if not LAUNCH_SITL_SCRIPT.exists():
         return f"SITL launch script not found: {LAUNCH_SITL_SCRIPT}"
 
-    bounds = mission["bounds"]
+    bounds = mission.bounds
     center_lat, center_lon = _mission_bounds_center(bounds)
     home = f"{center_lat:.7f},{center_lon:.7f},{DEFAULT_SITL_HOME_ALT:.1f},0"
     env = os.environ.copy()
@@ -253,7 +282,7 @@ async def _ensure_sitl_running_for_mission(mission: dict) -> Optional[str]:
     try:
         await asyncio.create_subprocess_exec(
             str(LAUNCH_SITL_SCRIPT),
-            str(max(len(mission.get("drones", [])), 1)),
+            str(max(len(getattr(mission, "drones", [])), 1)),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
             env=env,
@@ -264,7 +293,7 @@ async def _ensure_sitl_running_for_mission(mission: dict) -> Optional[str]:
     return f"Starting SITL near mission center {center_lat:.5f}, {center_lon:.5f}"
 
 
-def _prepare_dispatch_assignments(request, mission: dict) -> Tuple[List[dict], List[dict]]:
+def _prepare_dispatch_assignments(request, mission: Mission) -> Tuple[List[dict], List[dict]]:
     """Resolve request assignments into valid dispatch rows plus preflight failures."""
     mission_sysid_map = _mission_drone_to_sysid_map(mission)
     valid_assignments: List[dict] = []

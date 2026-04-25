@@ -1,7 +1,7 @@
 import asyncio
 from fastapi.testclient import TestClient
 from app import app
-from app.main import missions_db, simulation_loop, manager, _sync_mission_drones_with_sitl, sitl_bridge
+from app.main import mission_db, simulation_loop, manager, _sync_mission_drones_with_sitl, sitl_bridge
 import app.main as main_module
 import app.routes.missions as missions_routes
 import app.simulation as simulation_module
@@ -189,7 +189,7 @@ def test_stop_mission():
 
 def test_simulation_emits_target_found_and_completes_mission():
     mission_id = "sim-target-found"
-    missions_db[mission_id] = {
+    mission_db[mission_id] = {
         "id": mission_id,
         "name": "Simulation Event Test",
         "status": "running",
@@ -230,12 +230,12 @@ def test_simulation_emits_target_found_and_completes_mission():
     manager.broadcast = fake_broadcast
     try:
         asyncio.run(simulation_loop(mission_id))
-        mission = missions_db[mission_id]
-        assert mission["status"] == "complete"
-        assert mission["progress"] == 100.0
+        mission = mission_db[mission_id]
+        assert mission.status == "complete"
+        assert mission.progress == 100.0
     finally:
         manager.broadcast = original_broadcast
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
     target_found_messages = [m for m in captured if m.get("type") == "target_found"]
     assert len(target_found_messages) == 1
@@ -249,7 +249,7 @@ def test_simulation_emits_target_found_and_completes_mission():
 
 def test_simulation_progress_only_advances_when_targets_are_found():
     mission_id = "sim-progress-from-found-targets"
-    missions_db[mission_id] = {
+    mission_db[mission_id] = {
         "id": mission_id,
         "name": "Progress From Found Targets Test",
         "status": "running",
@@ -281,14 +281,14 @@ def test_simulation_progress_only_advances_when_targets_are_found():
     original_broadcast = manager.broadcast
     manager.broadcast = no_op_broadcast
     try:
-        mission = missions_db[mission_id]
+        mission = mission_db[mission_id]
         all_targets_found = asyncio.run(simulation_module._finalize_mission_progress(mission))
         assert all_targets_found is False
-        assert mission["status"] == "running"
-        assert mission["progress"] == 50.0
+        assert mission.status == "running"
+        assert mission.progress == 50.0
     finally:
         manager.broadcast = original_broadcast
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
 
 def test_target_detection_uses_expanded_radius_before_icons_overlap():
@@ -333,7 +333,7 @@ def test_target_detection_uses_expanded_radius_before_icons_overlap():
 
 def test_simulation_completes_when_all_targets_are_found():
     mission_id = "sim-complete-all-targets-found"
-    missions_db[mission_id] = {
+    mission_db[mission_id] = {
         "id": mission_id,
         "name": "All Targets Found Completion Test",
         "status": "running",
@@ -365,19 +365,19 @@ def test_simulation_completes_when_all_targets_are_found():
     original_broadcast = manager.broadcast
     manager.broadcast = no_op_broadcast
     try:
-        mission = missions_db[mission_id]
+        mission = mission_db[mission_id]
         all_targets_found = asyncio.run(simulation_module._finalize_mission_progress(mission))
         assert all_targets_found is True
-        assert mission["status"] == "complete"
-        assert mission["progress"] == 100.0
+        assert mission.status == "complete"
+        assert mission.progress == 100.0
     finally:
         manager.broadcast = original_broadcast
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
 
 def test_simulation_uses_voronoi_centroid_for_unassigned_simulated_drones():
     mission_id = "sim-voronoi-motion"
-    missions_db[mission_id] = {
+    mission_db[mission_id] = {
         "id": mission_id,
         "name": "Voronoi Motion Test",
         "status": "running",
@@ -403,7 +403,7 @@ def test_simulation_uses_voronoi_centroid_for_unassigned_simulated_drones():
 
     async def stop_after_first_telemetry(message):
         if message.get("type") == "telemetry":
-            missions_db[mission_id]["status"] = "stopped"
+            mission_db[mission_id]["status"] = "stopped"
 
     original_broadcast = manager.broadcast
     original_get_states = sitl_bridge.get_states_by_sysid
@@ -412,11 +412,11 @@ def test_simulation_uses_voronoi_centroid_for_unassigned_simulated_drones():
 
     try:
         asyncio.run(simulation_loop(mission_id))
-        drone = missions_db[mission_id]["drones"][0]
+        drone = mission_db[mission_id]["drones"][0]
     finally:
         manager.broadcast = original_broadcast
         sitl_bridge.get_states_by_sysid = original_get_states
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
     assert drone["telemetry_source"] == "simulated"
     assert drone["lat"] > 0.1
@@ -510,7 +510,7 @@ def test_sync_mission_drones_with_sitl_uses_live_positions():
         sitl_bridge.get_states_by_sysid = original_get_states
 
     assert live_drone_ids == {"drone-1"}
-    drone = mission["drones"][0]
+    drone = mission.drones[0]
     assert drone["sysid"] == 1
     assert drone["lat"] == 34.123456
     assert drone["lon"] == -117.654321
@@ -837,7 +837,7 @@ def test_mission_drone_to_sysid_map_assigns_existing_and_fallback_sysids():
         "drone-b": 2,
         "drone-c": 3,
     }
-    assert mission["drones"][1]["sysid"] == 2
+    assert mission.drones[1]["sysid"] == 2
 
 
 def test_normalize_script_results_matches_expected_assignments_by_sysid_and_drone_id():

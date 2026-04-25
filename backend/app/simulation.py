@@ -21,7 +21,7 @@ from typing import Optional
 import numpy as np
 from pymavlink import mavutil
 
-from app.missions import _sync_mission_drones_with_sitl, missions_db
+from app.missions import Mission, _sync_mission_drones_with_sitl, mission_db
 from app.settings import DEFAULT_DISPATCH_ALT, SLEEP_BETWEEN_DISPATCH_SECONDS
 from app.recall import run_direct_recall, check_recall_completion
 from app.sitl import sitl_bridge
@@ -43,16 +43,16 @@ DETECTION_RADIUS = 0.002
 TARGET_STOP_RADIUS = 0.00055
 
 
-async def _emit_target_found(mission: dict, target: dict, drone_id: Optional[str] = None):
+async def _emit_target_found(mission: Mission, target: dict, drone_id: Optional[str] = None):
     """Broadcast a target-found event once per target id.
 
     Missions can reach the same "found" state through multiple branches, so this
     helper deduplicates the event before notifying connected clients.
     """
-    found_ids = mission.setdefault("_found_target_ids", [])
-    if target["id"] in found_ids:
-        return
-    found_ids.append(target["id"])
+    # found_ids = mission.setdefault("found_target_ids", [])
+    # if target["id"] in found_ids:
+    #     return
+    # found_ids.append(target["id"])
     await manager.broadcast(
         {
             "type": "target_found",
@@ -60,7 +60,7 @@ async def _emit_target_found(mission: dict, target: dict, drone_id: Optional[str
             "drone_id": drone_id,
             "lat": target["lat"],
             "lon": target["lon"],
-            "found_at": mission.get("elapsed_seconds", 0),
+            "found_at": getattr(mission, "elapsed_seconds", 0),
         }
     )
 
@@ -86,19 +86,19 @@ def _bounce_entity(entity: dict, bounds: dict, vx: float, vy: float) -> None:
         entity["vy"] = -abs(vy)
 
 
-def _find_target(mission: dict, target_id: str) -> Optional[dict]:
+def _find_target(mission: Mission, target_id: str) -> Optional[dict]:
     """Return the mission target with the requested id, if it exists."""
-    return next((t for t in mission.get("targets", []) if t["id"] == target_id), None)
+    return next((t for t in getattr(mission, "targets", []) if t["id"] == target_id), None)
 
 
-def _find_drone(mission: dict, drone_id: Optional[str]) -> Optional[dict]:
+def _find_drone(mission: Mission, drone_id: Optional[str]) -> Optional[dict]:
     """Return the mission drone with the requested id, if it exists."""
     if not drone_id:
         return None
-    return next((d for d in mission["drones"] if d["id"] == drone_id), None)
+    return next((d for d in mission.drones if d["id"] == drone_id), None)
 
 
-def _assign_confirmation_drone(mission: dict, target: dict, finder_drone: dict) -> Optional[dict]:
+def _assign_confirmation_drone(mission: Mission, target: dict, finder_drone: dict) -> Optional[dict]:
     """Pick the closest available second drone to confirm a newly detected target.
 
     The first drone to reach a target becomes the finder. If another free drone
@@ -109,7 +109,7 @@ def _assign_confirmation_drone(mission: dict, target: dict, finder_drone: dict) 
     finder_pos_lon = finder_drone["lon"]
     candidates = [
         d
-        for d in mission["drones"]
+        for d in mission.drones
         if d["id"] != finder_drone["id"] and not d.get("assigned_target_id")
     ]
     if not candidates:
@@ -124,7 +124,7 @@ def _assign_confirmation_drone(mission: dict, target: dict, finder_drone: dict) 
     target["status"] = "confirming"
     return confirmer
 
-def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], waypoint_map: dict) -> None:
+def _send_live_drone_gotos(mission: Mission, live_drone_ids: set[str], waypoint_map: dict) -> None:
     """Send goto commands to live drones toward targets, queued points, or centroids.
 
     Priority order is:
@@ -140,7 +140,7 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], waypoint_map
     skipped_not_dispatchable = 0
     skipped_not_airborne = 0
     skipped_no_destination = 0
-    for drone in mission["drones"]:
+    for drone in mission.drones:
         if str(drone.get("id")) not in live_drone_ids:
             continue
         sysid = drone.get("sysid")
@@ -178,7 +178,7 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], waypoint_map
             continue
         skipped_no_destination += 1
 
-    if mission.get("elapsed_seconds", 0) % 10 == 0:
+    if getattr(mission, "elapsed_seconds", 0) % 10 == 0:
         logger.info(
             "goto_loop: %d/%d drones got goto, centroids=%d, blocked dispatching=%d, blocked airborne=%d, blocked destination=%d",
             goto_sent,
@@ -190,7 +190,7 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], waypoint_map
         )
 
 
-async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], waypoint_map: dict, bounds: dict) -> None:
+async def _update_drones_for_tick(mission: Mission, live_drone_ids: set[str], waypoint_map: dict, bounds: dict) -> None:
     """Advance drone state for one simulation tick using live or simulated movement.
 
     Live drones keep their position from SITL telemetry and mainly receive role
@@ -198,10 +198,10 @@ async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], waypo
     state either toward an assigned target, toward a centroid, or with simple
     bounded wandering when they have no coverage point yet.
     """
-    for drone in mission["drones"]:
+    for drone in mission.drones:
         has_live_telemetry = str(drone.get("id")) in live_drone_ids
         target_id = drone.get("assigned_target_id")
-        if target_id and "targets" in mission:
+        if target_id and mission.targets:
             target = _find_target(mission, target_id)
             if not target:
                 drone["assigned_target_id"] = None
@@ -290,17 +290,17 @@ async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], waypo
             _bounce_entity(drone, bounds, drone["vx"], drone["vy"])
 
 
-def _update_targets_for_tick(mission: dict, bounds: dict) -> None:
+def _update_targets_for_tick(mission: Mission, bounds: dict) -> None:
     """Move wandering targets and assign a nearby drone when one detects them.
 
     Only targets still in the wandering state move on their own. Detection is a
     nearest-drone check against the current mission drone positions, whether
     those positions are live SITL telemetry or simulated motion.
     """
-    if "targets" not in mission:
+    if not mission.targets:
         return
 
-    for target in mission["targets"]:
+    for target in mission.targets:
         if target.get("status", "wandering") != "wandering":
             continue
         if "vx" not in target:
@@ -313,7 +313,7 @@ def _update_targets_for_tick(mission: dict, bounds: dict) -> None:
 
         nearest_drone = None
         min_dist = float("inf")
-        for drone in mission["drones"]:
+        for drone in mission.drones:
             dist = math.hypot(drone["lat"] - target["lat"], drone["lon"] - target["lon"])
             if dist < min_dist:
                 min_dist = dist
@@ -328,41 +328,41 @@ def _update_targets_for_tick(mission: dict, bounds: dict) -> None:
             nearest_drone["role"] = None
 
 
-async def _finalize_mission_progress(mission: dict) -> bool:
+async def _finalize_mission_progress(mission: Mission) -> bool:
     """Advance mission progress and complete the mission when all targets are found.
 
     Progress is derived strictly from target state rather than elapsed time, so
     the frontend progress bar only advances when a target transitions to
     ``found``.
     """
-    targets = mission.get("targets", [])
+    targets = getattr(mission, "targets", [])
     if not targets:
-        mission["progress"] = 0.0
+        mission.progress = 0.0
         return False
 
     found_count = sum(1 for target in targets if target.get("status") == "found")
     total_targets = len(targets)
-    mission["progress"] = round((found_count / total_targets) * 100.0, 1)
+    mission.progress = round((found_count / total_targets) * 100.0, 1)
 
     all_targets_found = found_count == total_targets
     if all_targets_found:
-        mission["progress"] = 100.0
+        mission.progress = 100.0
 
     return all_targets_found
 
-async def _broadcast_mission_tick(mission_id: str, mission: dict) -> None:
+async def _broadcast_mission_tick(mission_id: str, mission: Mission) -> None:
     """Broadcast per-tick telemetry, progress, and target status updates."""
-    await manager.broadcast({"type": "telemetry", "drones": mission["drones"]})
-    await manager.broadcast({"type": "mission_progress", "progress": mission["progress"]})
-    if "targets" in mission:
+    await manager.broadcast({"type": "telemetry", "drones": mission.drones})
+    await manager.broadcast({"type": "mission_progress", "progress": mission.progress})
+    if mission.targets:
         await manager.broadcast(
             {
                 "type": "mission_status",
                 "mission_id": mission_id,
-                "status": mission.get("status", "running"),
-                "phase": mission["phase"],
-                "progress": mission["progress"],
-                "targets": mission["targets"],
+                "status": getattr(mission, "status", "running"),
+                "phase": mission.phase,
+                "progress": mission.progress,
+                "targets": mission.targets,
             }
         )
 
@@ -373,19 +373,20 @@ async def simulation_loop(mission_id: str):
     Each iteration performs one full mission update cycle, then sleeps for the
     configured tick interval in `settings.py`.
     """
-    if mission_id not in missions_db:
+    if mission_id not in mission_db:
         return
 
-    mission = missions_db[mission_id]
-    mission.setdefault("_found_target_ids", [])
-    mission.setdefault("elapsed_seconds", 0)
-    mission.setdefault("phase", "search")
-    mission.setdefault("_recall_sent", False)
+    mission = mission_db[mission_id]
+    # mission["found_target_ids"] = []
+    mission.elapsed_seconds = 0
+    mission.phase = "search"
+    recall_sent = False
+    grid = build_search_grid(mission.bounds, n=15).tolist()
 
-    while mission["status"] == "running":
-        if mission.get("phase") == "search":
-            mission["elapsed_seconds"] = mission.get("elapsed_seconds", 0) + 1
-            bounds = mission["bounds"]
+    while mission.status == "running":
+        if mission.phase == "search":
+            mission.elapsed_seconds = getattr(mission, "elapsed_seconds", 0) + 1
+            bounds = mission.bounds
 
             # Pull live SITL state into the mission before making any coverage or
             # targeting decisions for this tick.
@@ -409,29 +410,24 @@ async def simulation_loop(mission_id: str):
             _send_live_drone_gotos(mission, live_drone_ids, waypoints_map)
             await _update_drones_for_tick(mission, live_drone_ids, waypoints_map, bounds)
             _update_targets_for_tick(mission, bounds)
-            all_targets_found = await _finalize_mission_progress(mission)
-            #_rearm_live_drones_if_needed(mission, live_drone_ids)
-            _send_live_drone_gotos(mission, live_drone_ids, centroid_map)
-            await _update_drones_for_tick(mission, live_drone_ids, centroid_map, bounds)
-            _update_targets_for_tick(mission, bounds)
             
             all_targets_found = await _finalize_mission_progress(mission)
             if all_targets_found:
                 print("mission phase set to post_search")
-                mission["phase"] = "post_search"
+                mission.phase = "post_search"
 
-        elif mission.get("phase") == "post_search":
+        elif mission.phase == "post_search":
             pass       
         
-        elif mission.get("phase") == "recall":
-            if not mission.get("_recall_sent"):
+        elif mission.phase == "recall":
+            if not recall_sent:
                 recall_results = run_direct_recall(mission)
                 logger.info("Recall results: %s", recall_results)
-                mission["_recall_sent"] = True
+                recall_sent = True
 
             all_drones_recall_completed = check_recall_completion()
             if all_drones_recall_completed:
-                mission["status"] = "complete"
+                mission.status = "complete"
                 await _broadcast_mission_tick(mission_id, mission)
                 break
 

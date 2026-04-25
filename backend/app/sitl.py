@@ -294,7 +294,7 @@ class SITLTelemetryBridge:
 
 
 from app.ws import manager
-from app.missions import missions_db # Assuming this is where you track active missions
+from app.missions import mission_db # Assuming this is where you track active missions
 
 def wait_for_armed(drone, timeout=10.0):
     start = time.time()
@@ -311,8 +311,8 @@ def wait_for_armed(drone, timeout=10.0):
 
 def _any_mission_running() -> bool:
     """Helper to check if simulation.py is currently handling telemetry."""
-    for mission in missions_db.values():
-        if mission.get("status") == "running":
+    for mission in mission_db.values():
+        if mission.status == "running":
             return True
     return False
 

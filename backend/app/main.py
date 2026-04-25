@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.dispatch import run_direct_dispatch, run_dispatch_script
 from app.missions import (
-    missions_db,
+    mission_db,
     _mission_drone_to_sysid_map,
     _normalize_script_results,
     _sync_mission_drones_with_sitl,
