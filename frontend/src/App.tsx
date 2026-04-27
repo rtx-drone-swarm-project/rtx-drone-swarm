@@ -23,6 +23,7 @@ import type {
 } from "./types/mission";
 import type { MissionProgressMessage, MissionStatusMessage, TargetFoundMessage, TelemetryMessage } from "./types/ws";
 import { normalizeMissionStatus } from "./utils/format";
+import { customAreaBounds } from "./utils/geo";
 import { parseCoordinate } from "./utils/validate";
 
 const DEFAULT_CENTER: [number, number] = [33.5, -117.2];
@@ -313,6 +314,19 @@ export default function App() {
     []
   );
 
+  const onSetSearchArea = useCallback((sideKm: number) => {
+    const latValue = parseCoordinate(lat, -90, 90);
+    const lonValue = parseCoordinate(lon, -180, 180);
+    if (latValue == null || lonValue == null) {
+      setIsValidCoord(false);
+      return;
+    }
+    setIsValidCoord(true);
+    const bounds = customAreaBounds(latValue, lonValue, sideKm / 2);
+    setSelectedBounds(bounds);
+    setMapCenter([latValue, lonValue]);
+  }, [lat, lon]);
+
   const normalizedSearchStatus = normalizeMissionStatus(searchStatus);
   const missionActive = normalizedSearchStatus === "running";
   const missionComplete = normalizedSearchStatus === "complete";
@@ -360,8 +374,10 @@ export default function App() {
             lat={lat}
             lon={lon}
             isValidCoord={isValidCoord}
+            missionActive={missionActive}
             onLatitudeChange={onLatitudeChange}
             onLongitudeChange={onLongitudeChange}
+            onSetSearchArea={onSetSearchArea}
           />
           <ActionsPanel
             selectedBounds={selectedBounds}

@@ -1,4 +1,6 @@
-# Scripts (e.g. swarm_command.py). Backend has its own in backend/requirements.txt,
+# Repo-level Python dependencies for helper scripts and shared tests.
+# Backend service dependencies live in backend/requirements.txt.
+# SITL container helpers live in sitl/Dockerfile; frontend deps live in frontend/package.json.
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 pymavlink==2.4.49
