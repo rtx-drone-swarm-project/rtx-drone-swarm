@@ -19,112 +19,162 @@ def _resolve_state_file() -> str:
     pypath = os.environ.get("PYTHONPATH", "")
     for entry in pypath.split(":"):
         entry = entry.strip()
-        if not entry:
-            continue
-        if os.path.exists(os.path.join(entry, "mavproxy_voronoi.py")):
+        if entry and os.path.exists(os.path.join(entry, "mavproxy_voronoi.py")):
             return os.path.join(entry, ".agent_state.npy")
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), ".agent_state.npy")
 
 
 COLORS = [
-    (230, 25,  75),
-    (60,  180, 75),
-    (67,  99,  216),
-    (245, 130, 49),
-    (145, 30,  180),
-    (66,  212, 244),
-    (240, 50,  230),
-    (191, 239, 69),
-    (250, 190, 212),
-    (70,  153, 144),
-    (220, 190, 255),
-    (154, 99,  36),
+    (230, 25,  75),   # red
+    (60,  180, 75),   # green
+    (67,  99,  216),  # blue
+    (245, 130, 49),   # orange
+    (145, 30,  180),  # purple
+    (66,  212, 244),  # cyan
+    (240, 50,  230),  # magenta
+    (191, 239, 69),   # lime
+    (250, 190, 212),  # pink
+    (70,  153, 144),  # teal
+    (220, 190, 255),  # lavender
+    (154, 99,  36),   # brown
 ]
+
+# How many seconds of no file updates before we clear all overlays.
+# swarm_main deletes the file on startup, so this also clears stale data
+# from a previous run while the new swarm is initialising.
+STALE_THRESHOLD_S = 8.0
 
 
 class VoronoiModule(mp_module.MPModule):
     def __init__(self, mpstate):
         super().__init__(mpstate, "voronoi", "Voronoi partition overlay")
-        self._last_mtime    = 0
         self._poll_interval = 2.0
         self._last_poll     = 0
+        self._last_mtime    = 0
+        self._last_seen     = 0.0   # wall-clock time of last successful read
         self._state_file    = None
-        self._draw_count    = 0   # total successful polygon draws
-        self._diag_ticks    = 0   # counts idle_task calls for periodic diag
+        self._tick          = 0
+        self._cleared       = False  # True after we've wiped stale overlays
         print("[voronoi] loaded ✓")
 
     def _get_state_file(self) -> str:
         if self._state_file is None:
             self._state_file = _resolve_state_file()
-            print(f"[voronoi] STATE_FILE resolved → {self._state_file}")
+            print(f"[voronoi] STATE_FILE → {self._state_file}")
         return self._state_file
 
+    def _get_map(self):
+        """Return map module if fully initialised, else None."""
+        m = self.module("map")
+        if m is None or not hasattr(m, "map"):
+            return None
+        return m
+
+    def _clear_overlays(self, map_module):
+        """Remove all voronoi overlay objects."""
+        try:
+            keys = list(map_module.map.objects.keys())
+            for k in keys:
+                if k.startswith("voronoi_"):
+                    map_module.map.remove_object(k)
+        except Exception:
+            pass
+
+    def _suppress_arrows(self, map_module):
+        """Remove MAVProxy's built-in heading/velocity arrows."""
+        try:
+            for k in list(map_module.map.objects.keys()):
+                if any(x in k.lower() for x in ("arrow", "heading", "velocity")):
+                    map_module.map.remove_object(k)
+        except Exception:
+            pass
+
+    def _add_object(self, map_module, obj_id, obj_type, *args, **kwargs):
+        """
+        Try adding a SlipPolygon or SlipLabel with layer= kwarg first,
+        then fall back without it for older MAVProxy versions.
+        """
+        for try_kwargs in [kwargs, {k: v for k, v in kwargs.items() if k != "layer"}]:
+            try:
+                if obj_type == "polygon":
+                    map_module.map.add_object(
+                        mp_slipmap.SlipPolygon(obj_id, *args, **try_kwargs))
+                else:
+                    map_module.map.add_object(
+                        mp_slipmap.SlipLabel(obj_id, *args, **try_kwargs))
+                return True
+            except TypeError:
+                continue
+            except Exception as e:
+                print(f"[voronoi] add_object {obj_id} error: {e}")
+                return False
+        return False
+
+    # ── Main loop ─────────────────────────────────────────────────────
     def idle_task(self):
+        try:
+            self._idle_inner()
+        except Exception as e:
+            print(f"[voronoi] idle_task error: {type(e).__name__}: {e}")
+
+    def _idle_inner(self):
         now = time.time()
         if now - self._last_poll < self._poll_interval:
             return
         self._last_poll = now
-        self._diag_ticks += 1
+        self._tick += 1
 
         state_file = self._get_state_file()
+        map_module = self._get_map()
 
-        # ── Suppress heading/velocity arrows ─────────────────────────
-        map_module = self.module("map")
+        # ── Suppress MAVProxy arrows (best-effort) ────────────────────
         if map_module is not None:
-            for obj_key in list(map_module.map.objects.keys()):
-                if any(k in obj_key.lower() for k in ("arrow", "heading", "velocity")):
-                    map_module.map.remove_object(obj_key)
+            self._suppress_arrows(map_module)
 
-        # ── Every 10 ticks (~20s) print a heartbeat ───────────────────
-        if self._diag_ticks % 10 == 1:
-            exists = os.path.exists(state_file)
-            print(f"[voronoi] tick={self._diag_ticks} file_exists={exists} "
-                  f"draws_so_far={self._draw_count}")
-
+        # ── Handle missing/stale file ─────────────────────────────────
         if not os.path.exists(state_file):
+            if map_module is not None and not self._cleared:
+                self._clear_overlays(map_module)
+                self._cleared = True
+                print("[voronoi] state file absent — overlays cleared")
             return
 
         mtime = os.path.getmtime(state_file)
+
+        # Clear stale overlays if file hasn't updated for STALE_THRESHOLD_S
+        # (covers the window between swarm_main deleting the old file and
+        # writing the first new one — mtime doesn't change in that gap)
+        if self._last_seen > 0 and (now - self._last_seen) > STALE_THRESHOLD_S:
+            if map_module is not None and not self._cleared:
+                self._clear_overlays(map_module)
+                self._cleared = True
+                print("[voronoi] stale state — overlays cleared")
+
         if mtime == self._last_mtime:
             return
         self._last_mtime = mtime
+        self._last_seen  = now
+        self._cleared    = False   # new data — allow drawing again
 
-        # ── Load state ────────────────────────────────────────────────
+        # ── Load ──────────────────────────────────────────────────────
         try:
-            raw   = np.load(state_file, allow_pickle=True)
-            state = raw.item()
+            state  = np.load(state_file, allow_pickle=True).item()
+            agents = state.get("agents", [])
         except Exception as e:
             print(f"[voronoi] load error: {e}")
             return
 
-        agents = state.get("agents", [])
-        if self._diag_ticks <= 3 or self._diag_ticks % 10 == 1:
-            print(f"[voronoi] loaded state: {len(agents)} agents")
-            for a in agents:
-                print(f"  drone {a['id']}: "
-                      f"territory={len(a.get('territory',[]))} pts, "
-                      f"path={len(a.get('path',[]))} pts")
-
-        map_module = self.module("map")
         if map_module is None:
-            print("[voronoi] WARNING: map module is None — cannot draw")
             return
 
-        # ── Check map object ──────────────────────────────────────────
-        if not hasattr(map_module, "map"):
-            print(f"[voronoi] WARNING: map_module has no .map attr. "
-                  f"attrs={[x for x in dir(map_module) if not x.startswith('_')]}")
-            return
-
-        tick_draws = 0
-
+        # ── Draw each drone's territory and trail ─────────────────────
         for a in agents:
             drone_id  = a["id"]
             territory = a.get("territory", [])
             path      = a.get("path", [])
             color     = COLORS[drone_id % len(COLORS)]
 
-            # ── Voronoi zone polygon ───────────────────────────────────
+            # Zone polygon
             if len(territory) >= 3:
                 pts = np.array(territory)
                 try:
@@ -132,65 +182,25 @@ class VoronoiModule(mp_module.MPModule):
                     verts   = pts[hull.vertices]
                     verts   = np.vstack([verts, verts[0]])
                     polygon = [(float(p[0]), float(p[1])) for p in verts]
-                except Exception as e:
-                    if self._diag_ticks <= 3:
-                        print(f"[voronoi] ConvexHull failed drone {drone_id}: {e}")
+                except Exception:
                     polygon = [(float(p[0]), float(p[1])) for p in pts]
 
-                try:
-                    map_module.map.add_object(
-                        mp_slipmap.SlipPolygon(
-                            f"voronoi_zone_{drone_id}",
-                            polygon,
-                            layer="voronoi",
-                            linewidth=2,
-                            colour=color,
-                        )
-                    )
-                    tick_draws += 1
-                except Exception as e:
-                    print(f"[voronoi] add_object (polygon) failed drone {drone_id}: {e}")
+                self._add_object(map_module,
+                    f"voronoi_zone_{drone_id}", "polygon",
+                    polygon, layer="voronoi", linewidth=2, colour=color)
 
-                # Label at centroid
-                centroid_lat = float(pts[:, 0].mean())
-                centroid_lon = float(pts[:, 1].mean())
-                try:
-                    map_module.map.add_object(
-                        mp_slipmap.SlipLabel(
-                            f"voronoi_label_{drone_id}",
-                            (centroid_lat, centroid_lon),
-                            f"D{drone_id}",
-                            layer="voronoi",
-                            colour=color,
-                        )
-                    )
-                except Exception as e:
-                    print(f"[voronoi] add_object (label) failed drone {drone_id}: {e}")
+                cx = float(pts[:, 0].mean())
+                cy = float(pts[:, 1].mean())
+                self._add_object(map_module,
+                    f"voronoi_label_{drone_id}", "label",
+                    (cx, cy), f"D{drone_id}", layer="voronoi", colour=color)
 
-            elif len(territory) > 0 and self._diag_ticks <= 3:
-                print(f"[voronoi] drone {drone_id} only {len(territory)} territory pts — skipping polygon")
-
-            # ── Flight trail ──────────────────────────────────────────
+            # Flight trail
             if len(path) >= 2:
                 trail = [(float(p[0]), float(p[1])) for p in path]
-                try:
-                    map_module.map.add_object(
-                        mp_slipmap.SlipPolygon(
-                            f"voronoi_trail_{drone_id}",
-                            trail,
-                            layer="voronoi",
-                            linewidth=1,
-                            colour=color,
-                        )
-                    )
-                    tick_draws += 1
-                except Exception as e:
-                    print(f"[voronoi] add_object (trail) failed drone {drone_id}: {e}")
-
-        self._draw_count += tick_draws
-        if tick_draws > 0 and self._diag_ticks <= 5:
-            print(f"[voronoi] drew {tick_draws} objects this tick "
-                  f"(total={self._draw_count})")
+                self._add_object(map_module,
+                    f"voronoi_trail_{drone_id}", "polygon",
+                    trail, layer="voronoi", linewidth=1, colour=color)
 
 
 def init(mpstate):

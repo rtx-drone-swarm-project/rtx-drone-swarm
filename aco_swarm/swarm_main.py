@@ -400,6 +400,14 @@ def main():
         f"arc-gap≈{2 * math.pi * args.spawn_radius / args.drones:.1f}m"
     )
 
+    # Delete stale state file so MAVProxy doesn't show previous run's data
+    for _stale in (STATE_FILE, STATE_FILE[:-4] + ".tmp.npy"):
+        try:
+            os.remove(_stale)
+            log.info(f"Removed stale state file: {_stale}")
+        except FileNotFoundError:
+            pass
+
     # ── Pheromone grid ────────────────────────────────────────────────
     cfg = GridConfig(
         lat_min=home_lat - span, lat_max=home_lat + span,
