@@ -123,7 +123,7 @@ def _assign_confirmation_drone(mission: dict, target: dict, finder_drone: dict) 
     target["status"] = "confirming"
     return confirmer
 
-def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map: dict) -> None:
+def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], waypoint_map: dict) -> None:
     """Send goto commands to live drones toward targets, queued points, or centroids.
 
     Priority order is:
