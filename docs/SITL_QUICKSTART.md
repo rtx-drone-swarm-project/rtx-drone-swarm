@@ -35,6 +35,95 @@ Expected result:
 
 Use Docker Compose as the default local startup path. Compose now starts a dedicated `sitl` service that runs `scripts/launch_sitl.sh` inside a container and mounts your host ArduPilot checkout at runtime. Configure host-specific values such as `ARDUPILOT_PATH` in a repo-local `.env` file.
 
+## General Prerequisites
+
+- Docker Engine 24+ with the Docker Compose V2 plugin (`docker compose`), or Docker Desktop 4+ on macOS/Windows.
+- A full ArduPilot checkout on the host machine. The SITL Docker image does not bundle ArduPilot; Compose bind-mounts your host `ARDUPILOT_PATH` into the container at `/ardupilot`.
+- `ARDUPILOT_PATH` must point to the ArduPilot repository root, not `ArduCopter` or another subdirectory. The path is valid when this command succeeds:
+
+```bash
+test -f "$ARDUPILOT_PATH/Tools/autotest/sim_vehicle.py"
+```
+
+For native host runs without Docker, install the platform-specific packages below plus the SITL Python helpers (`MAVProxy`, `empy==3.3.4`, `future`, and `pyserial`) in the Python environment used to run ArduPilot.
+
+## Ubuntu / Linux Setup
+
+Official reference: [ArduPilot Linux setup](https://ardupilot.org/dev/docs/building-setup-linux.html)
+
+### 1. Install host packages
+
+```bash
+sudo apt update
+sudo apt install -y git build-essential python3-pip
+```
+
+### 2. Clone this repo
+
+```bash
+git clone https://github.com/rtx-drone-swarm-project/rtx-drone-swarm.git
+cd rtx-drone-swarm
+```
+
+### 3. Clone ArduPilot
+
+```bash
+cd ~
+git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git
+cd ardupilot
+git submodule update --init --recursive
+```
+
+### 4. Install ArduPilot dependencies
+
+```bash
+Tools/environment_install/install-prereqs-ubuntu.sh -y
+source ~/.profile
+```
+
+### 5. Install native SITL helpers and repo dependencies
+
+```bash
+python3 -m pip install MAVProxy empy==3.3.4 future pyserial
+cd ~/rtx-drone-swarm
+python3 -m pip install -r requirements.txt
+python3 -m pip install -r backend/requirements.txt
+```
+
+On Ubuntu releases that block system-wide Python installs, use a virtual environment or append `--break-system-packages` to the `python3 -m pip install ...` commands.
+
+### 6. Build SITL
+
+```bash
+cd ~/ardupilot
+./waf configure --board sitl
+./waf copter
+```
+
+### 7. Configure this repo
+
+```bash
+cd ~/rtx-drone-swarm
+cp .env.example .env
+```
+
+Set `ARDUPILOT_PATH` in `.env` to your ArduPilot checkout, for example:
+
+```bash
+ARDUPILOT_PATH=/home/your-user/ardupilot
+```
+
+Verify it points to the ArduPilot root:
+
+```bash
+set -a
+source .env
+set +a
+test -f "$ARDUPILOT_PATH/Tools/autotest/sim_vehicle.py"
+```
+
+You can now run the default Docker Compose flow or use the host-only run mode below.
+
 ## macOS Setup
 
 Official references:
@@ -80,7 +169,7 @@ Manual fallback:
 ```bash
 brew update
 brew install genromfs gcc-arm-none-eabi gawk
-pip3 install pyserial future empy
+pip3 install pyserial future empy==3.3.4
 ```
 
 ### 5. Build SITL
@@ -94,7 +183,7 @@ pip3 install pyserial future empy
 
 ```bash
 brew install readline
-pip3 install MAVProxy future pyserial empy
+pip3 install MAVProxy future pyserial empy==3.3.4
 cd <repo-root>
 pip3 install -r requirements.txt
 pip3 install -r backend/requirements.txt
@@ -144,34 +233,44 @@ wsl --install -d Ubuntu
 
 ```bash
 sudo apt-get update
-sudo apt-get install git
-sudo apt-get install gitk git-gui
+sudo apt-get install -y git gitk git-gui build-essential python3-pip
 ```
 
-### 3. Clone ArduPilot
+### 3. Clone this repo
 
 ```bash
-git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git
-cd ardupilot
+git clone https://github.com/rtx-drone-swarm-project/rtx-drone-swarm.git
+cd rtx-drone-swarm
 ```
 
-### 4. Install ArduPilot dependencies
+### 4. Clone ArduPilot
+
+```bash
+cd ~
+git clone --recurse-submodules https://github.com/ArduPilot/ardupilot.git
+cd ardupilot
+git submodule update --init --recursive
+```
+
+### 5. Install ArduPilot dependencies
 
 ```bash
 Tools/environment_install/install-prereqs-ubuntu.sh -y
 source ~/.profile
 ```
 
-### 5. Install MAVProxy and repo dependencies
+### 6. Install MAVProxy and repo dependencies
 
 ```bash
-pip install MAVProxy future gnureadline
-cd <repo-root>
-pip install -r requirements.txt
-pip install -r backend/requirements.txt
+python3 -m pip install MAVProxy empy==3.3.4 future gnureadline pyserial
+cd ~/rtx-drone-swarm
+python3 -m pip install -r requirements.txt
+python3 -m pip install -r backend/requirements.txt
 ```
 
-### 6. Test single-vehicle SITL
+On Ubuntu releases that block system-wide Python installs, use a virtual environment or append `--break-system-packages` to the `python3 -m pip install ...` commands.
+
+### 7. Test single-vehicle SITL
 
 ```bash
 cd ~/ardupilot/ArduCopter
@@ -219,9 +318,18 @@ python3 scripts/swarm_command.py hover
 
 ### Host SITL + host backend
 
-Use this when you want the simplest setup for telemetry debugging.
+Use this when you want to run the system without Docker or when you want the simplest setup for telemetry debugging. This path uses three terminal windows.
 
-1. Start SITL:
+1a. Verify `ARDUPILOT_PATH` points to the ArduPilot repo root:
+
+```bash
+set -a
+source .env
+set +a
+test -f "$ARDUPILOT_PATH/Tools/autotest/sim_vehicle.py"
+```
+
+1b. Start SITL:
 
 ```bash
 ./scripts/launch_sitl.sh
@@ -233,7 +341,7 @@ Use this when you want the simplest setup for telemetry debugging.
 PYTHONPATH=backend uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-3. Optionally start the frontend separately:
+3. Start the frontend separately:
 
 ```bash
 cd frontend
@@ -281,8 +389,11 @@ If SITL and the backend run on different machines, set `SITL_HOST` for the backe
 ## Troubleshooting
 
 - If `launch_sitl.sh` says ArduPilot is missing, check `ARDUPILOT_PATH` in `.env` or clone ArduPilot locally first.
+- If the `sitl` service reports `./Tools/autotest/sim_vehicle.py: No such file or directory`, confirm `ARDUPILOT_PATH` points to the ArduPilot repo root and that `test -f "$ARDUPILOT_PATH/Tools/autotest/sim_vehicle.py"` succeeds on the host.
+- If native `launch_sitl.sh` reports `[Errno 2] No such file or directory: 'mavproxy.py'`, install MAVProxy in the Python environment used by ArduPilot: `python3 -m pip install MAVProxy`.
 - If `/sitl/status` shows `connected_count: 0`, confirm SITL is still running and that TCP ports `5760`, `5770`, `5780`, and so on are reachable from the backend.
-- If Docker is part of your flow, make sure Docker Desktop is running before `docker compose up --build`.
+- If Docker is part of your flow, make sure Docker Engine or Docker Desktop is running before `docker compose up --build`, and confirm `docker compose version` works.
 - If the `sitl` service exits immediately, confirm `ARDUPILOT_PATH` in `.env` points to a valid local ArduPilot checkout that has already been built for SITL.
+- If you recently pulled repo changes, rerun `docker compose up --build` so stale images do not keep older startup behavior.
 - If you changed a Dockerfile and want fresh images without starting containers yet, run `docker compose build`.
 - If port `8000` or `5173` is already in use, adjust the host port mappings in `docker-compose.yml`.
