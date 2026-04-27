@@ -26,8 +26,7 @@ mission_db: Dict[str, dict] = {}
 class Mission:
     id: str
     name: str
-    status: "idle" or "running" or "complete"
-    phase: "search" or "post_search" or "recall" or None
+    status: "idle" or "searching" or "search_complete" or "recalling" or "paused" or "mission_complete"
     progress: float
     elapsed_seconds: int
     algorithm: str
@@ -41,7 +40,6 @@ class Mission:
         self.id = mission_id
         self.name = mission_data.name
         self.status = "idle"
-        self.phase = None
         self.progress = 0.0
         self.elapsed_seconds = 0
         self.algorithm = getattr(mission_data, "algorithm", "voronoi")

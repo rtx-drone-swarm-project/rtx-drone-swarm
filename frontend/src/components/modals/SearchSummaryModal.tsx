@@ -45,11 +45,8 @@ export default function SearchSummaryModal({ isOpen, onClose, targets, getHikerL
         </div>
 
         <div className="search-summary-footer">
-          <button type="button" onClick={() => { onRecall(); onClose(); }}>Recall Drones</button>
-          <button type="button" onClick={() => { onReset(); onClose(); }}>Reset Simulation</button>
-          <button type="button" className="action-btn start" onClick={onClose}>
-            Close
-          </button>
+          <button type="button" className="action-btn start" onClick={() => { onRecall(); onClose(); }}>Recall Drones</button>
+          <button type="button" className="action-btn start" onClick={() => { onReset(); onClose(); }}>Reset Simulation</button>
         </div>
       </div>
     </div>

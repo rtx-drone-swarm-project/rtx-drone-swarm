@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { createMissionClient } from "../api/missionClient";
 import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionState, Target, ValidDrone } from "../types/mission";
-import { normalizeMissionStatus } from "../utils/format";
 
 type UseMissionActionsArgs = {
   apiBase: string;
@@ -12,7 +11,7 @@ type UseMissionActionsArgs = {
   validDroneCount: number;
   mission: MissionState;
   setMission: (value: MissionState) => void;
-  setSearchStatus: (value: string) => void;
+  setMissionStatus: (value: string) => void;
   setProgress: (value: number) => void;
   setTargets: (value: Target[]) => void;
   setElapsedSeconds: (value: number) => void;
@@ -59,7 +58,7 @@ export default function useMissionActions({
   validDroneCount,
   mission,
   setMission,
-  setSearchStatus,
+  setMissionStatus,
   setProgress,
   setTargets,
   setElapsedSeconds,
@@ -95,7 +94,7 @@ export default function useMissionActions({
       );
     }
 
-    setSearchStatus("running");
+    setMissionStatus("searching");
     setElapsedSeconds(0);
     setMissionLocked(false);
     setFoundHikers([]);
@@ -126,11 +125,11 @@ export default function useMissionActions({
         selectedAlgorithm !== "default" ? selectedAlgorithm : undefined
       );
       setMission(started);
-      setSearchStatus(normalizeMissionStatus(started.status ?? "running"));
+      setMissionStatus("searching");
       setProgress(started.progress ?? 0);
       if (Array.isArray(started.targets)) setTargets(started.targets);
     } catch (err) {
-      setSearchStatus("idle");
+      setMissionStatus("idle");
       console.warn(`Start failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
@@ -143,7 +142,7 @@ export default function useMissionActions({
     try {
       const stopped = await missionClient.stopMission(mission.id);
       setMission(stopped);
-      setSearchStatus(normalizeMissionStatus(stopped.status ?? "idle"));
+      setMissionStatus("paused");
       setProgress(0);
     } catch (err) {
       console.warn(`Stop failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -154,7 +153,7 @@ export default function useMissionActions({
     const missionId = mission?.id;
     setMissionLocked(false);
     setMission(null);
-    setSearchStatus("idle");
+    setMissionStatus("idle");
     setProgress(0);
     setTargets([]);
     setFoundHikers([]);

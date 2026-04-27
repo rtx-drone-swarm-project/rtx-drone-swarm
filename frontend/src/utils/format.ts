@@ -1,5 +1,3 @@
-import type { MissionStatus } from "../types/mission";
-
 export function formatElapsed(seconds: number): string {
   const sec = Math.max(0, Math.floor(seconds));
   const mm = String(Math.floor(sec / 60)).padStart(2, "0");
@@ -14,18 +12,11 @@ export function formatSeconds(seconds: number | undefined): string {
   return `${mm}:${ss}`;
 }
 
-export function normalizeMissionStatus(status: string): MissionStatus {
-  const s = status.trim().toLowerCase();
-  if (s === "in_progress") return "running";
-  if (s === "completed") return "complete";
-  if (s === "running" || s === "stopped" || s === "complete") return s;
-  return "idle";
-}
-
 export function statusLabel(status: string): string {
-  const normalized = normalizeMissionStatus(status);
-  if (normalized === "running") return "Mission in progress";
-  if (normalized === "stopped") return "Mission stopped";
-  if (normalized === "complete") return "Mission completed";
-  return "Idle";
+  if (status === "searching") return "Searching";
+  else if (status === "search_complete") return "Search completed";
+  else if (status === "paused") return "Paused";
+  else if (status === "recalling") return "Recalling";
+  else if (status === "mission_complete") return "Mission completed";
+  else return "Idle";
 }

@@ -63,7 +63,7 @@ async def _background_dispatch(mission: Mission, mission_id: str, assignments: L
             )
             for assignment in assignments
         ]
-    # mission["dispatch_results"] = results
+        
     success_count = sum(1 for row in results if row.get("success"))
     logger.info(
         "_background_dispatch mission %s: %d/%d drones dispatched successfully",
@@ -78,8 +78,7 @@ async def _background_dispatch(mission: Mission, mission_id: str, assignments: L
         {
             "type": "mission_status",
             "mission_id": mission_id,
-            "status": getattr(mission, "status", "running"),
-            "phase": mission.phase,
+            "status": mission.status,
             "dispatch_results": results,
         }
     )
@@ -95,7 +94,7 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
     if mission.status != "idle":
         raise HTTPException(status_code=400, detail="Only 'idle' missions can be started")
 
-    mission.status = "running"
+    mission.status = "searching"
     mission.elapsed_seconds = 0
 
     if start_data:
@@ -135,8 +134,7 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
         {
             "type": "mission_status",
             "mission_id": mission_id,
-            "status": "running",
-            "phase": mission.phase,
+            "status": mission.status,
             "progress": mission.progress,
             "targets": targets,
         }
@@ -182,18 +180,16 @@ async def stop_mission(mission_id: str):
         raise HTTPException(status_code=404, detail="Mission not found")
 
     mission = mission_db[mission_id]
-    if mission.status not in ["running", "idle"]:
-        raise HTTPException(status_code=400, detail="Mission is already stopped or complete")
+    if mission.status in ["idle", "search_complete", "mission_complete"]:
+        raise HTTPException(status_code=400, detail="Drones are not in motion")
 
-    mission.status = "stopped"
-    mission.progress = 0.0
+    mission.status = "paused"
 
     await manager.broadcast(
         {
             "type": "mission_status",
             "mission_id": mission_id,
-            "status": "stopped",
-            "phase": mission.phase,
+            "status": mission.status,
             "progress": mission.progress,
         }
     )
@@ -208,17 +204,17 @@ async def delete_mission(mission_id: str):
     if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
     mission = mission_db.pop(mission_id)
-    if mission.status == "running":
-        mission.status = "stopped"
+    mission.status = "idle"
+
     await manager.broadcast(
         {
             "type": "mission_status",
             "mission_id": mission_id,
-            "status": "deleted",
-            "phase": mission.phase,
+            "status": mission.status,
             "progress": 0.0,
         }
     )
+
     return {"ok": True, "mission_id": mission_id}
 
 @router.post("/missions/{mission_id}/recall")
@@ -229,22 +225,20 @@ async def recall_mission(mission_id: str):
 
     mission = mission_db[mission_id]
     # Prevent invalid transitions
-    if mission.phase != "post_search":
+    if mission.status != "search_complete":
         raise HTTPException(status_code=400, detail="Mission is not running")
 
     # If already recalling, do nothing
-    if mission.phase == "recall":
+    if mission.status == "recalling":
         return {"message": "Recall already in progress"}
 
-    # Transition to recall phase
-    mission.phase = "recall"
+    mission.status = "recalling"
 
     await manager.broadcast(
         {
             "type": "mission_status",
             "mission_id": mission_id,
-            "status": "recall",
-            "phase": mission.phase,
+            "status": mission.status,
             "progress": mission.progress,
         }
     )

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import math
 import time
 import threading
 import logging
@@ -27,6 +28,8 @@ class Drone:
 
         self.target_alt = None
         self.target_location = {"lat": None, "lon": None, "alt": None}
+        self.home_location = {"lat": None, "lon": None, "alt": None}
+        self.recall_phase = None
 
         self.last_hb = None
         self.last_hud = None
@@ -107,6 +110,13 @@ class Drone:
         if self.target_alt is None: return True
         return abs(self.state["rel_alt"] - self.target_alt) < margin
 
+    def set_home_location(self):
+        with self._lock:
+            self.home_location["lat"] = self.state.get("lat")
+            self.home_location["lon"] = self.state.get("lon")
+            self.home_location["alt"] = self.state.get("rel_alt")
+            return self.home_location.copy()
+
     def set_mode(self, mode_name):
         mode_map = self.conn.mode_mapping()
         if mode_name not in mode_map:
@@ -126,6 +136,13 @@ class Drone:
         result = self.wait_ack(ARM_CMD, timeout=timeout)
         if result not in ACCEPTED_ACK_RESULTS:
             raise RuntimeError(f"Drone {self.sysid}: arm rejected with ACK result {result}")
+        return result
+
+    def disarm(self, timeout = 5):
+        self.conn.mav.command_long_send(self.sysid, self.comp, ARM_CMD, 0, 0, 0, 0, 0, 0, 0, 0)
+        result = self.wait_ack(ARM_CMD, timeout=timeout)
+        if result not in ACCEPTED_ACK_RESULTS:
+            raise RuntimeError(f"Drone {self.sysid}: disarm rejected with ACK result {result}")
         return result
 
     def takeoff(self, altitude, timeout = 5):
@@ -187,29 +204,31 @@ class Drone:
 
                 # Apply freshest Telemetry
                 for msg_type, msg in latest_telemetry.items():
-                    if msg_type == "HEARTBEAT":
-                        self.last_hb = msg
-                        self.state["armed"] = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
-                        self.state["mode"] = msg.custom_mode if msg else None
-                        
-                    elif msg_type == "VFR_HUD":
-                        self.last_hud = msg
-                        self.state["throttle"] = msg.throttle
-                        self.state["altitude"] = msg.alt
-                        self.state["groundspeed"] = msg.groundspeed
-                        self.state["heading"] = float(msg.heading)
-                        
-                    elif msg_type == "GLOBAL_POSITION_INT":
-                        self.last_gps = msg
-                        self.state["lat"] = msg.lat / 1e7
-                        self.state["lon"] = msg.lon / 1e7
-                        self.state["rel_alt"] = msg.relative_alt / 1000.0
-                        
-                    elif msg_type == "SYS_STATUS":
-                        self.last_status = msg
-                        
-                    elif msg_type == "EKF_STATUS_REPORT":
-                        self.last_ekf = msg
+                    if msg.get_srcSystem() == self.sysid:
+                        if (msg_type == "HEARTBEAT" 
+                        and msg.get_srcComponent() == mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1):
+                            self.last_hb = msg
+                            self.state["armed"] = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+                            self.state["mode"] = msg.custom_mode if msg else None
+                            
+                        elif msg_type == "VFR_HUD":
+                            self.last_hud = msg
+                            self.state["throttle"] = msg.throttle
+                            self.state["altitude"] = msg.alt
+                            self.state["groundspeed"] = msg.groundspeed
+                            self.state["heading"] = float(msg.heading)
+                            
+                        elif msg_type == "GLOBAL_POSITION_INT":
+                            self.last_gps = msg
+                            self.state["lat"] = msg.lat / 1e7
+                            self.state["lon"] = msg.lon / 1e7
+                            self.state["rel_alt"] = msg.relative_alt / 1000.0
+                            
+                        elif msg_type == "SYS_STATUS":
+                            self.last_status = msg
+                            
+                        elif msg_type == "EKF_STATUS_REPORT":
+                            self.last_ekf = msg
 
     def is_connection_alive(self, stale_after: float = 5.0):
         return not self.disconnected and (time.time() - self.last_message_at) <= stale_after
@@ -249,6 +268,34 @@ class Drone:
     def get_state(self):
         with self._lock:
             return self.state.copy()
+
+    def capture_home_location_if_unset(self):
+        with self._lock:
+            if self.home_location["lat"] is not None and self.home_location["lon"] is not None:
+                return self.home_location.copy()
+
+            lat = self.state.get("lat")
+            lon = self.state.get("lon")
+            if not lat or not lon:
+                return self.home_location.copy()
+        return self.set_home_location()
+
+    def distance_to(self, lat: float, lon: float) -> float:
+        state = self.get_state()
+        current_lat = state.get("lat")
+        current_lon = state.get("lon")
+        if current_lat is None or current_lon is None:
+            return float("inf")
+        
+        # Haversine formula for distance between two lat/lon points in meters
+        lat1 = math.radians(float(current_lat))
+        lon1 = math.radians(float(current_lon))
+        lat2 = math.radians(float(lat))
+        lon2 = math.radians(float(lon))
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+        return 6371000.0 * 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     
 
 class Swarm:

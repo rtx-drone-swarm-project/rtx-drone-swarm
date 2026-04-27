@@ -7,8 +7,7 @@ export type TelemetryMessage = {
 
 export type MissionStatusMessage = {
   type: "mission_status";
-  status?: string;
-  phase?: "search" | "post_search" | "recall" | null;
+  status: "idle" | "searching" | "search_complete" | "paused" | "recalling" | "mission_complete";
   progress?: number;
   targets?: Target[];
   mission_id?: EntityId;

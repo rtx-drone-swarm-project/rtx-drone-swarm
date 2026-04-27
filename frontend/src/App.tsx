@@ -23,7 +23,6 @@ import type {
   ValidDrone
 } from "./types/mission";
 import type { MissionProgressMessage, MissionStatusMessage, TargetFoundMessage, TelemetryMessage } from "./types/ws";
-import { normalizeMissionStatus } from "./utils/format";
 import { customAreaBounds } from "./utils/geo";
 import { parseCoordinate } from "./utils/validate";
 
@@ -37,9 +36,8 @@ export default function App() {
   const [telemetry, setTelemetry] = useState<TelemetryDrone[]>([]);
   const [mission, setMission] = useState<MissionState>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [searchStatus, setSearchStatus] = useState("idle");
+  const [missionStatus, setMissionStatus] = useState("idle");
   const [progress, setProgress] = useState(0);
-  const [missionPhase, setMissionPhase] = useState<"search" | "post_search" | "recall" | null>(null);
   const [targets, setTargets] = useState<Target[]>([]);
   const [foundHikers, setFoundHikers] = useState<FoundHiker[]>([]);
   const [missionLocked, setMissionLocked] = useState(false);
@@ -156,12 +154,12 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (normalizeMissionStatus(searchStatus) !== "running") return;
+    if (missionStatus !== "searching") return;
     const interval = window.setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(interval);
-  }, [searchStatus]);
+  }, [missionStatus]);
 
   const onTelemetry = useCallback((message: TelemetryMessage) => {
     const drones = Array.isArray(message.drones) ? message.drones : [];
@@ -180,19 +178,14 @@ export default function App() {
 
   const onMissionStatus = useCallback(
     (message: MissionStatusMessage) => {
-      if (message.phase) {
-        setMissionPhase(message.phase);
-      }
-
-      const statusText = normalizeMissionStatus(typeof message.status === "string" ? message.status : "idle");
-      setSearchStatus(statusText);
-      if (typeof message.progress === "number") setProgress(statusText === "complete" ? 100 : message.progress);
+      setMissionStatus(message.status);
+      if (typeof message.progress === "number") setProgress(message.status === "search_complete" ? 100 : message.progress);
       if (Array.isArray(message.targets)) {
         assignHikerLabels(message.targets.map((target) => target.id));
         setTargets(message.targets);
       }
 
-      if (statusText === "complete") {
+      if (message.status === "mission_complete") {
         setElapsedSeconds(0);
         setMissionLocked(true);
       }
@@ -243,7 +236,7 @@ export default function App() {
     validDroneCount,
     mission,
     setMission,
-    setSearchStatus,
+    setMissionStatus,
     setProgress,
     setTargets,
     setElapsedSeconds,
@@ -264,7 +257,7 @@ export default function App() {
   setCompletedTargets(targets);
   setSummaryMissionId(mission.id);
   setSearchSummaryOpen(true);
-  }, [mission, targets, missionPhase]);
+  }, [mission, targets]);
 
   useEffect(() => {
     if (!targets.length) return;
@@ -329,9 +322,8 @@ export default function App() {
     setMapCenter([latValue, lonValue]);
   }, [lat, lon]);
 
-  const normalizedSearchStatus = normalizeMissionStatus(searchStatus);
-  const missionActive = normalizedSearchStatus === "running";
-  const missionComplete = normalizedSearchStatus === "complete";
+  const missionActive = missionStatus !== "idle" && missionStatus !== "mission_complete";
+  const missionComplete = missionStatus === "mission_complete";
   const lostHikerCount = targets.filter((target) => target.status !== "found").length;
 
   return (
@@ -355,7 +347,7 @@ export default function App() {
         <aside className="left-rail">
           <AlertsPanel
             missionComplete={missionComplete}
-            normalizedSearchStatus={normalizedSearchStatus}
+            missionStatus={missionStatus}
             selectedBounds={selectedBounds}
             wsConnected={wsConnected}
           />
@@ -364,7 +356,7 @@ export default function App() {
             telemetryCount={telemetry.length}
             validDroneCount={validDroneCount}
             missionActive={missionActive}
-            searchStatus={searchStatus}
+            missionStatus={missionStatus}
             lostHikerCount={lostHikerCount}
             telemetryMode={telemetryMode}
             selectedAlgorithm={selectedAlgorithm}

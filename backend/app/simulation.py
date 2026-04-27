@@ -359,8 +359,7 @@ async def _broadcast_mission_tick(mission_id: str, mission: Mission) -> None:
             {
                 "type": "mission_status",
                 "mission_id": mission_id,
-                "status": getattr(mission, "status", "running"),
-                "phase": mission.phase,
+                "status": mission.status,
                 "progress": mission.progress,
                 "targets": mission.targets,
             }
@@ -377,14 +376,17 @@ async def simulation_loop(mission_id: str):
         return
 
     mission = mission_db[mission_id]
-    # mission["found_target_ids"] = []
     mission.elapsed_seconds = 0
-    mission.phase = "search"
+    mission.status = "searching"
     recall_sent = False
     grid = build_search_grid(mission.bounds, n=15).tolist()
 
-    while mission.status == "running":
-        if mission.phase == "search":
+    while mission.status != "mission_complete":
+        # Pull live SITL state into the mission before making any coverage or
+        # targeting decisions for this tick.
+        live_drone_ids = _sync_mission_drones_with_sitl(mission)
+
+        if mission.status == "searching":
             mission.elapsed_seconds = getattr(mission, "elapsed_seconds", 0) + 1
             bounds = mission.bounds
 
@@ -393,17 +395,16 @@ async def simulation_loop(mission_id: str):
             live_drone_ids = _sync_mission_drones_with_sitl(mission)
 
             free_drones = [
-                d for d in mission["drones"]
+                d for d in mission.drones
                 if not d.get("assigned_target_id") and d.get("role") not in ["finder", "confirmer"]
             ]
 
-            #centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
             # Pull live SITL state into the mission before making any coverage or
             # targeting decisions for this tick.
             live_drone_ids = _sync_mission_drones_with_sitl(mission)
             centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
 
-            algorithm_name = mission.get("algorithm", "voronoi")
+            algorithm_name = mission.algorithm
             active_strategy = get_algorithm(algorithm_name)
             waypoints_map = await asyncio.to_thread(active_strategy.get_target_waypoints, mission, free_drones)
 
@@ -413,21 +414,28 @@ async def simulation_loop(mission_id: str):
             
             all_targets_found = await _finalize_mission_progress(mission)
             if all_targets_found:
-                print("mission phase set to post_search")
-                mission.phase = "post_search"
+                print("all targets found")
+                mission.status = "search_complete"
 
-        elif mission.phase == "post_search":
+        elif mission.status == "search_complete":
+            print("search complete")
             pass       
+
+        elif mission.status == "paused":
+            print("paused")
+            pass
         
-        elif mission.phase == "recall":
+        elif mission.status == "recalling":
             if not recall_sent:
+                print("sent recall")
                 recall_results = run_direct_recall(mission)
-                logger.info("Recall results: %s", recall_results)
+                # logger.info("Recall results: %s", recall_results)
                 recall_sent = True
 
             all_drones_recall_completed = check_recall_completion()
             if all_drones_recall_completed:
-                mission.status = "complete"
+                print("all drones recall completed")
+                mission.status = "mission_complete"
                 await _broadcast_mission_tick(mission_id, mission)
                 break
 

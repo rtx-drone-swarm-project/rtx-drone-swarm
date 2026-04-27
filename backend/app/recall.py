@@ -13,13 +13,13 @@ logger = logging.getLogger(__name__)
 def check_recall_completion() -> bool:
     states = sitl_bridge.get_states_by_sysid()
     return all(
-        (not s.get("armed")) and (s.get("altitude", 0) < 0.5)
+        (not s.get("armed")) and (float(s.get("alt", 0) or 0) < 0.2)
         for s in states.values()
     )
 
 def run_direct_recall(mission: Mission) -> List[dict]:
     """Recall drones directly through the in-process SITL bridge."""
-    logger.info("Recall invoked. Executing swarm mode set to RTL")
+    logger.info("Recall invoked. Returning drones to stored home, then landing and disarming")
 
     results = []
     for drone in getattr(mission, "drones", []):
@@ -39,5 +39,5 @@ def run_direct_recall(mission: Mission) -> List[dict]:
         result = sitl_bridge.recall_drone(sysid=sysid, drone_id=str(drone_id))
         results.append(result)
 
-    logger.info("Recall results: %s", results)
+    # logger.info("Recall results: %s", results)
     return results
