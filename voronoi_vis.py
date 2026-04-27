@@ -96,8 +96,8 @@ def generate_random_centroids(k=15, full_width=100, full_height=100, sub_x_min=5
 def plot_setup(full_X, X, sub_x_min, sub_x_max, sub_y_min, sub_y_max, centroids, full_width=100, full_height=100):
     fig, ax = plt.subplots(figsize=(8, 8)) # plot setup
 
-    ax.scatter(full_X[:, 0], full_X[:, 1], # plot points in full map (for grid)
-            c='lightgray', s=5)
+    #ax.scatter(full_X[:, 0], full_X[:, 1], # plot points in full map (for grid)
+    #        c='lightgray', s=5)
 
     scatter = ax.scatter(X[:, 0], X[:, 1], # plot points in subregion (for grid)
                         s=10)
@@ -110,7 +110,9 @@ def plot_setup(full_X, X, sub_x_min, sub_x_max, sub_y_min, sub_y_max, centroids,
         c='white',
         s=5,
         alpha=0.0,
-        cmap='inferno'
+        cmap='inferno',
+        vmin=0.1, 
+        vmax=1.0
     )
 
     centroid_plot = ax.scatter(centroids[:, 0], # plot centroids

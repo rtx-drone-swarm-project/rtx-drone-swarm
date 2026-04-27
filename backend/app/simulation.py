@@ -24,7 +24,7 @@ from pymavlink import mavutil
 from app.missions import _sync_mission_drones_with_sitl, missions_db
 from app.settings import DEFAULT_DISPATCH_ALT, SLEEP_BETWEEN_DISPATCH_SECONDS
 from app.sitl import sitl_bridge
-from app.voronoi import lloyd_step
+from app.voronoi import lloyd_step, lloyd_step_aco
 from app.ws import manager
 
 
@@ -157,8 +157,33 @@ def _build_centroid_map(mission: dict) -> dict:
                 pos_list.append([dlat, dlon])
         else:
             pos_list.append([dlat, dlon])
-    positions = np.array(pos_list)
-    new_centroids, _ = lloyd_step(grid_np, positions)
+    
+    centroids = np.array(pos_list)
+
+    k = len(free_drones)
+
+    _init_aco_state_if_needed(mission, k, grid_np)
+    aco_state = mission["_aco_state"]
+
+    pheromone = aco_state["pheromone"]
+    old_centroids = aco_state["old_centroids"]
+
+    if old_centroids is None or len(old_centroids) != k:
+        old_centroids = centroids.copy()
+
+    if pheromone.shape != (len(grid_np), k):
+        pheromone = np.zeros((len(grid_np), k))
+
+    new_centroids, labels, pheromone = lloyd_step_aco(
+        grid_np,
+        centroids,
+        old_centroids,
+        pheromone
+    )
+
+    aco_state["pheromone"] = pheromone
+    aco_state["old_centroids"] = centroids
+
     for drone, centroid in zip(free_drones, new_centroids):
         centroid_map[drone["id"]] = centroid
     return centroid_map
@@ -510,3 +535,10 @@ async def simulation_loop(mission_id: str):
             break
 
         await asyncio.sleep(SLEEP_BETWEEN_DISPATCH_SECONDS)
+
+def _init_aco_state_if_needed(mission: dict, k: int, grid_np: np.ndarray):
+    if "_aco_state" not in mission:
+        mission["_aco_state"] = {
+            "pheromone": np.zeros((len(grid_np), k)),
+            "old_centroids": None,
+        }
