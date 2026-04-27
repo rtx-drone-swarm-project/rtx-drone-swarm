@@ -6,7 +6,7 @@
 
 set -e
 COUNT="${1:-15}"
-ARDUPILOT_PATH="${ARDUPILOT_PATH:-$HOME/drone_project/ardupilot}"
+ARDUPILOT_PATH="${ARDUPILOT_PATH:-$HOME/ardupilot}"
 PARAM_FILE="${2:-$PWD/sitl_params.param}"
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 LOG_BASE="$(cd "$(dirname "$0")/.." && pwd)/logs"

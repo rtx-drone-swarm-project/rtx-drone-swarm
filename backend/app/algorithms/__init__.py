@@ -4,7 +4,8 @@ from app.algorithms.apf import PotentialFieldsCoverage
 # from .lawnmower import LawnmowerSearch
 
 ALGORITHMS = {
-    "voronoi": PotentialFieldsCoverage(), #Temporary to test apf file, didnt want to mess with front end yet
+    "voronoi": VoronoiCoverage(), #Temporary to test apf file, didnt want to mess with front end yet
+    "apf": PotentialFieldsCoverage(),
     #aco,
     #etc.
 }
