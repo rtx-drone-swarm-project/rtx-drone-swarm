@@ -56,18 +56,6 @@ export default function App() {
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<AlgorithmOption>("default");
   const [hikerLabelById, setHikerLabelById] = useState<Record<string, number>>({});
 
-  const pushAlert = useCallback((message: string) => {
-    setAlerts((prev) => [message, ...prev].slice(0, 10));
-  }, []);
-
-  const averageBattery = useMemo(() => {
-    const values = telemetry
-      .map((drone) => drone.battery_remaining)
-      .filter((value): value is number => typeof value === "number" && value >= 0);
-    if (!values.length) return "--";
-    return `${Math.round(values.reduce((a, b) => a + b, 0) / values.length)}%`;
-  }, [telemetry]);
-
   const telemetryMode = useMemo(() => {
     const sources = telemetry
       .map((drone) => drone.telemetry_source)
