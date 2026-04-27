@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 import { createMissionClient } from "../api/missionClient";
-import type { Bounds, FoundHiker, MissionDroneInput, MissionState, Target, ValidDrone } from "../types/mission";
+import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionState, Target, ValidDrone } from "../types/mission";
 import { normalizeMissionStatus } from "../utils/format";
 
 type UseMissionActionsArgs = {
   apiBase: string;
   missionLocked: boolean;
   selectedBounds: Bounds | null;
+  selectedAlgorithm: AlgorithmOption;
   validDrones: ValidDrone[];
   validDroneCount: number;
   mission: MissionState;
@@ -53,6 +54,7 @@ export default function useMissionActions({
   apiBase,
   missionLocked,
   selectedBounds,
+  selectedAlgorithm,
   validDrones,
   validDroneCount,
   mission,
@@ -119,7 +121,10 @@ export default function useMissionActions({
 
       setMission(created);
 
-      const started = await missionClient.startMission(created.id);
+      const started = await missionClient.startMission(
+        created.id,
+        selectedAlgorithm !== "default" ? selectedAlgorithm : undefined
+      );
       setMission(started);
       setSearchStatus(normalizeMissionStatus(started.status ?? "running"));
       setProgress(started.progress ?? 0);
