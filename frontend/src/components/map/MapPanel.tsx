@@ -1,7 +1,7 @@
 import { MapContainer, Marker, Rectangle, TileLayer } from "react-leaflet";
 import type { Bounds, SelectedDrone, Target, ValidDrone } from "../../types/mission";
-import { boundsToLeaflet, fixedAreaBounds } from "../../utils/geo";
-import MapClickSelector from "./MapClickSelector";
+import { boundsToLeaflet } from "../../utils/geo";
+import MapBBoxDrawer from "./MapBBoxDrawer";
 import MapRecenter from "./MapRecenter";
 import { makeDroneIcon, makeTargetCircleIcon } from "./icons";
 
@@ -40,10 +40,12 @@ export default function MapPanel({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution="&copy; OpenStreetMap contributors"
         />
-        <MapClickSelector
+        <MapBBoxDrawer
           enabled={!missionActive}
-          onSelect={(lat, lon) => {
-            onSelectArea(lat, lon, fixedAreaBounds(lat, lon));
+          onBoundsDrawn={(drawnBounds) => {
+            const centerLat = (drawnBounds.min_lat + drawnBounds.max_lat) / 2;
+            const centerLon = (drawnBounds.min_lon + drawnBounds.max_lon) / 2;
+            onSelectArea(centerLat, centerLon, drawnBounds);
           }}
         />
 

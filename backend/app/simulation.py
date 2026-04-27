@@ -34,7 +34,7 @@ JITTER_DEG = 0.0001
 # Degree-space speed used for simple simulated movement.
 SPEED = 0.001
 # Distance threshold for a drone to "detect" a wandering target.
-DETECTION_RADIUS = 0.010
+DETECTION_RADIUS = 0.002
 # Distance threshold for considering a drone close enough to stop moving toward a point.
 TARGET_STOP_RADIUS = 0.00022
 
@@ -414,8 +414,8 @@ def _update_targets_for_tick(mission: dict, bounds: dict) -> None:
             continue
         if "vx" not in target:
             angle = random.uniform(0, 2 * math.pi)
-            target["vx"] = (SPEED / 2) * math.cos(angle)
-            target["vy"] = (SPEED / 2) * math.sin(angle)
+            target["vx"] = SPEED * math.cos(angle)
+            target["vy"] = SPEED * math.sin(angle)
         target["lat"] += target["vx"]
         target["lon"] += target["vy"]
         _bounce_entity(target, bounds, target["vx"], target["vy"])
@@ -510,3 +510,5 @@ async def simulation_loop(mission_id: str):
             break
 
         await asyncio.sleep(SLEEP_BETWEEN_DISPATCH_SECONDS)
+        if mission["status"] != "running":
+            break
