@@ -1,3 +1,4 @@
+import { useState } from "react";
 import CollapsibleSection from "../common/CollapsibleSection";
 
 type NavigationPanelProps = {
@@ -5,9 +6,11 @@ type NavigationPanelProps = {
   lon: string;
   isValidCoord: boolean;
   missionActive: boolean;
+  hasDrones: boolean;
   onLatitudeChange: (value: string) => void;
   onLongitudeChange: (value: string) => void;
-  onSetSearchArea: () => void;
+  onSetSearchArea: (sideKm: number) => void;
+  onPanToDrones: () => void;
 };
 
 export default function NavigationPanel({
@@ -15,10 +18,19 @@ export default function NavigationPanel({
   lon,
   isValidCoord,
   missionActive,
+  hasDrones,
   onLatitudeChange,
   onLongitudeChange,
-  onSetSearchArea
+  onSetSearchArea,
+  onPanToDrones
 }: NavigationPanelProps) {
+  const [sideKm, setSideKm] = useState(4);
+
+  const handleSideKmChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = Math.max(1, Math.min(100, Number(e.target.value)));
+    setSideKm(Number.isFinite(val) ? val : 4);
+  };
+
   return (
     <CollapsibleSection title="Navigation">
       <label className="field">
@@ -42,15 +54,40 @@ export default function NavigationPanel({
         />
       </label>
       {!isValidCoord && <div className="error-text">Lat: -90..90, Lng: -180..180</div>}
+
+      <label className="field">
+        Search Area Size (km)
+        <input
+          type="number"
+          value={sideKm}
+          min={1}
+          max={100}
+          step={1}
+          onChange={handleSideKmChange}
+          disabled={missionActive}
+        />
+      </label>
+
       <button
         className="action-btn start"
-        onClick={onSetSearchArea}
+        onClick={() => onSetSearchArea(sideKm)}
         disabled={!isValidCoord || missionActive}
       >
         Set Search Area
       </button>
-      <div className="hint-text">Creates a ~4 km &times; 4 km box centered on these coordinates.</div>
+      <div className="hint-text">
+        Creates a {sideKm} km &times; {sideKm} km box centered on these coordinates.
+      </div>
       <div className="hint-text">Tip: right-click any location in Google Maps to copy its coordinates.</div>
+
+      <button
+        className="action-btn reset"
+        onClick={onPanToDrones}
+        disabled={!hasDrones}
+      >
+        Pan to Drones
+      </button>
+      {!hasDrones && <div className="hint-text">No drone positions available yet.</div>}
     </CollapsibleSection>
   );
 }

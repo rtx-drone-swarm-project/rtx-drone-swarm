@@ -23,7 +23,7 @@ import type {
 } from "./types/mission";
 import type { MissionProgressMessage, MissionStatusMessage, TargetFoundMessage, TelemetryMessage } from "./types/ws";
 import { normalizeMissionStatus } from "./utils/format";
-import { fixedAreaBounds } from "./utils/geo";
+import { customAreaBounds } from "./utils/geo";
 import { parseCoordinate } from "./utils/validate";
 
 const DEFAULT_CENTER: [number, number] = [33.5, -117.2];
@@ -314,7 +314,7 @@ export default function App() {
     []
   );
 
-  const onSetSearchArea = useCallback(() => {
+  const onSetSearchArea = useCallback((sideKm: number) => {
     const latValue = parseCoordinate(lat, -90, 90);
     const lonValue = parseCoordinate(lon, -180, 180);
     if (latValue == null || lonValue == null) {
@@ -322,10 +322,17 @@ export default function App() {
       return;
     }
     setIsValidCoord(true);
-    const bounds = fixedAreaBounds(latValue, lonValue);
+    const bounds = customAreaBounds(latValue, lonValue, sideKm / 2);
     setSelectedBounds(bounds);
     setMapCenter([latValue, lonValue]);
   }, [lat, lon]);
+
+  const onPanToDrones = useCallback(() => {
+    if (!validDrones.length) return;
+    const avgLat = validDrones.reduce((sum, d) => sum + d.lat, 0) / validDrones.length;
+    const avgLon = validDrones.reduce((sum, d) => sum + d.lon, 0) / validDrones.length;
+    setMapCenter([avgLat, avgLon]);
+  }, [validDrones]);
 
   const normalizedSearchStatus = normalizeMissionStatus(searchStatus);
   const missionActive = normalizedSearchStatus === "running";
@@ -375,9 +382,11 @@ export default function App() {
             lon={lon}
             isValidCoord={isValidCoord}
             missionActive={missionActive}
+            hasDrones={validDroneCount > 0}
             onLatitudeChange={onLatitudeChange}
             onLongitudeChange={onLongitudeChange}
             onSetSearchArea={onSetSearchArea}
+            onPanToDrones={onPanToDrones}
           />
           <ActionsPanel
             selectedBounds={selectedBounds}
