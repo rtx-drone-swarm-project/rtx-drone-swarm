@@ -48,6 +48,7 @@ class Drone:
             "throttle": 0,
             "altitude": 0.0,
             "groundspeed": 0.0,
+            "heading": 0.0,
             "lat": 0.0,
             "lon": 0.0,
             "rel_alt": 0.0
@@ -189,6 +190,7 @@ class Drone:
                         self.state["throttle"] = msg.throttle
                         self.state["altitude"] = msg.alt
                         self.state["groundspeed"] = msg.groundspeed
+                        self.state["heading"] = float(msg.heading)
                         
                     elif msg_type == "GLOBAL_POSITION_INT":
                         self.last_gps = msg
