@@ -15,8 +15,6 @@ SITL_ENABLE_MAP="${SITL_ENABLE_MAP:-1}"
 SITL_ENABLE_MAVPROXY="${SITL_ENABLE_MAVPROXY:-1}"
 SITL_MAVPROXY_CMD="${SITL_MAVPROXY_CMD:-}"
 
-# In headless environments sim_vehicle.py otherwise falls back to /tmp/ArduCopter.log.
-export SITL_RITW_TERMINAL="${SITL_RITW_TERMINAL:-bash}"
 
 git config --global --add safe.directory "$ARDUPILOT_PATH"
 
@@ -57,4 +55,5 @@ elif [[ -n "$SITL_MAVPROXY_CMD" ]]; then
 fi
 
 # Start SITL with separate TCP outputs for each drone.
-./Tools/autotest/sim_vehicle.py "${SIM_VEHICLE_ARGS[@]}" 2>&1 | tee "$SWARM_LOG"
+# exec replaces this shell so Docker signals (SIGTERM/SIGINT) go directly to sim_vehicle.py.
+exec ./Tools/autotest/sim_vehicle.py "${SIM_VEHICLE_ARGS[@]}"
