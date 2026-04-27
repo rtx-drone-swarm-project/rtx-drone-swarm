@@ -48,5 +48,6 @@ def sitl_status():
         "port_step": sitl_bridge.port_step,
         "configured_count": sitl_bridge.count,
         "connected_count": len(states),
+        "last_connect_error": sitl_bridge._last_connect_error,
         "drones": states,
     }

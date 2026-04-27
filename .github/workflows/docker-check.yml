@@ -1,0 +1,28 @@
+name: Docker Build Check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+    docker-build-check:
+        runs-on: ubuntu-latest
+    
+        steps:
+        -   name: Check out repository
+            uses: actions/checkout@v4
+    
+        -   name: Build backend image
+            run: docker build -f backend/Dockerfile -t backend-check .
+
+        -   name: Build frontend image
+            run: docker build -f frontend/Dockerfile -t frontend-check ./frontend
+        
+        -   name: Build sitl image
+            run: docker build -f sitl/Dockerfile -t sitl-check .

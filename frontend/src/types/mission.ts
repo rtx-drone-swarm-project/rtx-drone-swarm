@@ -11,16 +11,18 @@ export type Bounds = {
 
 export type TelemetryDrone = {
   id: EntityId;
+  sysid?: number | null;
   lat?: number | string | null;
   lon?: number | string | null;
   alt?: number | string | null;
   heading?: number | string | null;
-  battery_remaining?: number | null;
+  groundspeed?: number | string | null;
   telemetry_source?: string | null;
   mode?: string | null;
   armed?: boolean | null;
-  target_lat?: number;
-  target_lon?: number;
+  status?: string | null;
+  target_lat?: number | string | null;
+  target_lon?: number | string | null;
   role?: string | null;
 };
 
@@ -48,18 +50,22 @@ export type MissionRecord = {
 
 export type MissionState = MissionRecord | null;
 
-export type SelectedDrone = {
-  id: EntityId;
-  battery: string;
-} | null;
+export type SelectedDrone = ValidDrone | null;
 
 export type ValidDrone = {
   id: EntityId;
+  sysid?: number | null;
   lat: number;
   lon: number;
   alt?: number;
   heading?: number;
-  battery_remaining?: number | null;
+  groundspeed?: number;
+  telemetry_source?: string | null;
+  mode?: string | null;
+  armed?: boolean | null;
+  status?: string | null;
+  target_lat?: number;
+  target_lon?: number;
   role?: string | null;
 };
 
@@ -67,12 +73,13 @@ export type MissionDroneInput = {
   id: EntityId;
   lat: number;
   lon: number;
+  sysid?: number | null;
   alt?: number;
   heading?: number;
+  groundspeed?: number;
   target_lat?: number;
   target_lon?: number;
   role?: string | null;
-  battery_remaining?: number | null;
 };
 
 export type MissionCreateRequest = {

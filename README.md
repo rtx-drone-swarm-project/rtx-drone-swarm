@@ -23,9 +23,21 @@ This prototype demonstrates how a coordinated drone swarm could help search team
 - Ian Tang
 - Louie Gutierrez
 
+## First-Time Setup
+
+1. Copy the local environment template:
+
+```bash
+cp .env.example .env
+```
+
+2. Edit `.env` and set `ARDUPILOT_PATH` to your local ArduPilot checkout.
+
+3. If ArduPilot SITL is not installed and built yet, follow [docs/SITL_QUICKSTART.md](docs/SITL_QUICKSTART.md) first.
+
 ## Run the Demo
 
-These commands assume ArduPilot SITL is already installed and built on the host machine. If not, follow the one-time setup guide in [docs/SITL_QUICKSTART.md](docs/SITL_QUICKSTART.md).
+These commands assume ArduPilot SITL is already installed and built on the host machine. Docker reads repo-local settings from `.env`, including the ArduPilot path mounted into the SITL service. If you still need to install ArduPilot, follow the one-time setup guide in [docs/SITL_QUICKSTART.md](docs/SITL_QUICKSTART.md).
 
 1. Install repo Python dependencies:
 
@@ -33,16 +45,24 @@ These commands assume ArduPilot SITL is already installed and built on the host 
 pip3 install -r requirements.txt
 ```
 
-2. Start the simulated swarm from the repo root:
+2. Create `.env` from the example and set your local paths:
 
 ```bash
-./scripts/start_sitl_swarm.sh 15
+cp .env.example .env
 ```
 
-3. In a second terminal, start the app stack:
+Set `ARDUPILOT_PATH` in `.env` to your local ArduPilot checkout, then start the full stack:
 
 ```bash
 docker compose up --build
+```
+
+If you want to change the published frontend or backend ports, edit `FRONTEND_PORT` and `BACKEND_PORT` in `.env`.
+
+If you only want to refresh the Docker images, run:
+
+```bash
+docker compose build
 ```
 
 ## What You Should See
@@ -51,13 +71,16 @@ docker compose up --build
 - Backend health: `http://localhost:8000/health`
 - SITL telemetry status: `http://localhost:8000/sitl/status`
 
-When SITL is connected correctly, `/sitl/status` should report `connected_count > 0` and include live drone entries.
+When SITL is connected correctly, `/sitl/status` should report `connected_count > 0` and include live drone entries. If SITL is still booting, the backend will stay up and `last_connect_error` will explain the current connection failure.
 
 ## Operational Notes
 
-- `scripts/start_sitl_swarm.sh` expects a local ArduPilot checkout at `~/ardupilot` by default. Override with `ARDUPILOT_PATH=/path/to/ardupilot`.
-- The default SITL telemetry ports are UDP `14550`, `14560`, `14570`, and so on.
-- Docker publishes UDP `14550-14690` to the backend container so host SITL can stream telemetry into the app.
+- `scripts/launch_sitl.sh` remains the underlying SITL launcher, but Docker Compose now starts it in a dedicated `sitl` service.
+- `docker compose up --build` builds the backend, frontend, and SITL images.
+- Use `docker compose up -d --build` if you want the app stack to keep running in the background.
+- Compose auto-loads `.env` from the repo root; use `.env.example` as the template.
+- The SITL service bind-mounts your local ArduPilot checkout from `ARDUPILOT_PATH` into `/ardupilot`; Compose will fail fast if that variable is missing.
+- The backend connects to the SITL service over the Compose network using the hostname `sitl`.
 - Stop the swarm with `Ctrl+C` in the SITL terminal. If needed, kill remaining processes with `pkill -f arducopter` and `pkill -f mavproxy`.
 
 ## Repository Layout
@@ -65,7 +88,7 @@ When SITL is connected correctly, `/sitl/status` should report `connected_count 
 - `frontend/` React + Leaflet mission UI
 - `backend/` FastAPI mission, telemetry, and dispatch service
 - `scripts/` SITL swarm launch and command helpers
-- `docker-compose.yml` local app stack for frontend + backend
+- `docker-compose.yml` local app stack for frontend + backend + SITL
 
 ## More Detail
 

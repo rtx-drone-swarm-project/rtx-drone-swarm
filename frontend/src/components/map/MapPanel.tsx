@@ -1,9 +1,9 @@
-import { MapContainer, Marker, Rectangle, TileLayer, Tooltip } from "react-leaflet";
+import { MapContainer, Marker, Rectangle, TileLayer } from "react-leaflet";
 import type { Bounds, SelectedDrone, Target, ValidDrone } from "../../types/mission";
 import { boundsToLeaflet, fixedAreaBounds } from "../../utils/geo";
 import MapClickSelector from "./MapClickSelector";
 import MapRecenter from "./MapRecenter";
-import { makeDroneIcon, makeTargetCircleIcon, makeTargetTriangleIcon } from "./icons";
+import { makeDroneIcon, makeTargetCircleIcon } from "./icons";
 
 type MapPanelProps = {
   defaultCenter: [number, number];
@@ -13,6 +13,7 @@ type MapPanelProps = {
   missionActive: boolean;
   validDrones: ValidDrone[];
   targets: Target[];
+  getHikerLabel: (targetId: string | number) => string;
   setSelectedDrone: (value: SelectedDrone) => void;
   onSelectArea: (lat: number, lon: number, bounds: Bounds) => void;
 };
@@ -25,6 +26,7 @@ export default function MapPanel({
   missionActive,
   validDrones,
   targets,
+  getHikerLabel,
   setSelectedDrone,
   onSelectArea
 }: MapPanelProps) {
@@ -53,46 +55,28 @@ export default function MapPanel({
         )}
 
         {validDrones.map((drone, idx) => {
-          const label = `D${typeof drone.id === "number" ? drone.id : idx + 1}`;
+          const rawId = String(drone.id);
+          const label = rawId.startsWith("D") ? rawId : `D${rawId || idx + 1}`;
           return (
             <Marker
               key={`${String(drone.id)}-${drone.role ?? "normal"}`}
               position={[drone.lat, drone.lon]}
-              icon={makeDroneIcon(label, drone.role)}
+              icon={makeDroneIcon(label, drone.role, drone.heading)}
               eventHandlers={{
-                click: () =>
-                  setSelectedDrone({
-                    id: drone.id,
-                    battery:
-                      typeof drone.battery_remaining === "number"
-                        ? `${Math.round(drone.battery_remaining)}%`
-                        : "--"
-                  })
+                click: () => setSelectedDrone(drone)
               }}
-            >
-              <Tooltip>{`Drone ${drone.id}${drone.role ? ` (${drone.role})` : ""}`}</Tooltip>
-            </Marker>
+            />
           );
         })}
 
         {targets.map((target) => {
-          const isFoundOrConfirming = target.status === "found" || target.status === "confirming";
+          const label = getHikerLabel(target.id);
           return (
             <Marker
               key={`${target.id}-${target.status ?? "wandering"}`}
               position={[target.lat, target.lon]}
-              icon={isFoundOrConfirming ? makeTargetTriangleIcon() : makeTargetCircleIcon()}
-            >
-              <Tooltip>
-                {target.status === "found"
-                  ? `Found Hiker ${target.id}`
-                  : target.status === "confirming"
-                    ? `Confirming Hiker ${target.id}`
-                    : target.status === "wandering"
-                      ? `Wandering Hiker ${target.id}`
-                      : `Target ${target.id}`}
-              </Tooltip>
-            </Marker>
+              icon={makeTargetCircleIcon(label, target.status)}
+            />
           );
         })}
       </MapContainer>

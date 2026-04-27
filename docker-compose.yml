@@ -1,23 +1,40 @@
 services:
+  sitl:
+    build:
+      context: .
+      dockerfile: sitl/Dockerfile
+    environment:
+      - ARDUPILOT_PATH=/ardupilot
+      - SITL_COUNT=${SITL_COUNT:-15}
+      - SITL_ENABLE_MAVPROXY=0
+      - SITL_MAVPROXY_CMD=${SITL_MAVPROXY_CMD:-}
+      - SITL_ENABLE_MAP=0
+    working_dir: /workspace
+    command: ["./scripts/launch_sitl.sh", "${SITL_COUNT:-15}"]
+    volumes:
+      - .:/workspace
+      - ${ARDUPILOT_PATH:?copy .env.example to .env and set ARDUPILOT_PATH}:/ardupilot
+    restart: unless-stopped
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      - SITL_HOST=${SITL_HOST:-127.0.0.1}
-      - SITL_BASE_PORT=${SITL_BASE_PORT:-14550}
+      - SITL_HOST=${SITL_HOST:-sitl}
+      - SITL_BASE_PORT=${SITL_BASE_PORT:-5760}
       - SITL_PORT_STEP=${SITL_PORT_STEP:-10}
       - SITL_COUNT=${SITL_COUNT:-15}
     ports:
-      - "8000:8000"   # Change to "8001:8000" if 8000 is in use
-      - "14550-14690:14550-14690/udp"   # Receive SITL MAVLink UDP from host or another machine
+      - "${BACKEND_PORT:-8000}:8000"   # Change in .env if 8000 is in use
+    depends_on:
+      - sitl
     restart: unless-stopped
   frontend:
     build: ./frontend
     ports:
-      - "5173:5173"   # Change to "5174:5173" if 5173 is in use
+      - "${FRONTEND_PORT:-5173}:5173"   # Change in .env if 5173 is in use
     environment:
-      - VITE_API_PORT=8000   # Match backend host port (e.g. 8001 if backend uses 8001)
+      - VITE_API_PORT=${BACKEND_PORT:-8000}   # Match backend host port from .env
     depends_on:
       - backend
     restart: unless-stopped

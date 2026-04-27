@@ -22,7 +22,7 @@ import type {
   ValidDrone
 } from "./types/mission";
 import type { MissionProgressMessage, MissionStatusMessage, TargetFoundMessage, TelemetryMessage } from "./types/ws";
-import { normalizeMissionStatus, statusLabel } from "./utils/format";
+import { normalizeMissionStatus } from "./utils/format";
 import { parseCoordinate } from "./utils/validate";
 
 const DEFAULT_CENTER: [number, number] = [33.5, -117.2];
@@ -32,7 +32,6 @@ export default function App() {
   const apiPort = getApiPort();
   const apiBase = useMemo(() => getApiBase(apiPort), [apiPort]);
 
-  const [alerts, setAlerts] = useState<string[]>(["System ready."]);
   const [telemetry, setTelemetry] = useState<TelemetryDrone[]>([]);
   const [mission, setMission] = useState<MissionState>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -52,18 +51,7 @@ export default function App() {
   const [hikerSummaryOpen, setHikerSummaryOpen] = useState(false);
   const [completedTargets, setCompletedTargets] = useState<Target[]>([]);
   const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
-
-  const pushAlert = useCallback((message: string) => {
-    setAlerts((prev) => [message, ...prev].slice(0, 10));
-  }, []);
-
-  const averageBattery = useMemo(() => {
-    const values = telemetry
-      .map((drone) => drone.battery_remaining)
-      .filter((value): value is number => typeof value === "number" && value >= 0);
-    if (!values.length) return "--";
-    return `${Math.round(values.reduce((a, b) => a + b, 0) / values.length)}%`;
-  }, [telemetry]);
+  const [hikerLabelById, setHikerLabelById] = useState<Record<string, number>>({});
 
   const telemetryMode = useMemo(() => {
     const sources = telemetry
@@ -85,16 +73,26 @@ export default function App() {
 
           const normalizedDrone: ValidDrone = {
             id: drone.id ?? "unknown",
+            sysid: typeof drone.sysid === "number" ? drone.sysid : null,
             lat: latNum,
             lon: lonNum,
-            battery_remaining: drone.battery_remaining,
+            telemetry_source: typeof drone.telemetry_source === "string" ? drone.telemetry_source : null,
+            mode: typeof drone.mode === "string" ? drone.mode : null,
+            armed: typeof drone.armed === "boolean" ? drone.armed : null,
+            status: typeof drone.status === "string" ? drone.status : null,
             role: typeof drone.role === "string" ? drone.role : null
           };
 
           const altNum = Number(drone.alt);
           const headingNum = Number(drone.heading);
+          const groundspeedNum = Number(drone.groundspeed);
+          const targetLatNum = Number(drone.target_lat);
+          const targetLonNum = Number(drone.target_lon);
           if (Number.isFinite(altNum)) normalizedDrone.alt = altNum;
           if (Number.isFinite(headingNum)) normalizedDrone.heading = headingNum;
+          if (Number.isFinite(groundspeedNum)) normalizedDrone.groundspeed = groundspeedNum;
+          if (Number.isFinite(targetLatNum)) normalizedDrone.target_lat = targetLatNum;
+          if (Number.isFinite(targetLonNum)) normalizedDrone.target_lon = targetLonNum;
 
           return normalizedDrone;
         })
@@ -103,6 +101,55 @@ export default function App() {
   );
 
   const validDroneCount = validDrones.length;
+
+  const getHikerLabel = useCallback(
+    (targetId: string | number) => {
+      const normalizedId = String(targetId);
+      const sequenceNumber = hikerLabelById[normalizedId];
+      return `Hiker ${sequenceNumber ?? normalizedId}`;
+    },
+    [hikerLabelById]
+  );
+
+  const assignHikerLabels = useCallback((targetIds: Array<string | number>) => {
+    if (!targetIds.length) return;
+
+    setHikerLabelById((prev) => {
+      let nextIndex = Object.keys(prev).length + 1;
+      let changed = false;
+      const next = { ...prev };
+
+      for (const targetId of targetIds) {
+        const normalizedId = String(targetId);
+        if (next[normalizedId] != null) continue;
+        next[normalizedId] = nextIndex;
+        nextIndex += 1;
+        changed = true;
+      }
+
+      return changed ? next : prev;
+    });
+  }, []);
+
+  const foundHikersSorted = useMemo(
+    () =>
+      [...foundHikers].sort((a, b) => {
+        const left = hikerLabelById[String(a.id)] ?? Number.MAX_SAFE_INTEGER;
+        const right = hikerLabelById[String(b.id)] ?? Number.MAX_SAFE_INTEGER;
+        return left - right;
+      }),
+    [foundHikers, hikerLabelById]
+  );
+
+  const completedTargetsSorted = useMemo(
+    () =>
+      [...completedTargets].sort((a, b) => {
+        const left = hikerLabelById[String(a.id)] ?? Number.MAX_SAFE_INTEGER;
+        const right = hikerLabelById[String(b.id)] ?? Number.MAX_SAFE_INTEGER;
+        return left - right;
+      }),
+    [completedTargets, hikerLabelById]
+  );
 
   useEffect(() => {
     if (normalizeMissionStatus(searchStatus) !== "running") return;
@@ -132,17 +179,17 @@ export default function App() {
       const statusText = normalizeMissionStatus(typeof message.status === "string" ? message.status : "idle");
       setSearchStatus(statusText);
       if (typeof message.progress === "number") setProgress(statusText === "complete" ? 100 : message.progress);
-      if (Array.isArray(message.targets)) setTargets(message.targets);
+      if (Array.isArray(message.targets)) {
+        assignHikerLabels(message.targets.map((target) => target.id));
+        setTargets(message.targets);
+      }
 
       if (statusText === "complete") {
         setElapsedSeconds(0);
         setMissionLocked(true);
-        pushAlert("Mission completed.");
-      } else {
-        pushAlert(`Mission ${message.mission_id}: ${statusLabel(statusText)}.`);
       }
     },
-    [pushAlert]
+    [assignHikerLabels]
   );
 
   const onMissionProgress = useCallback((message: MissionProgressMessage) => {
@@ -157,6 +204,7 @@ export default function App() {
       const foundLon = Number(message.lon);
       const foundAt = typeof message.found_at === "number" ? message.found_at : undefined;
       const canStore = Number.isFinite(foundLat) && Number.isFinite(foundLon);
+      assignHikerLabels([foundId]);
 
       if (canStore) {
         setFoundHikers((prev) => {
@@ -165,17 +213,13 @@ export default function App() {
         });
       }
 
-      const latText = Number.isFinite(foundLat) ? foundLat.toFixed(6) : "unknown";
-      const lonText = Number.isFinite(foundLon) ? foundLon.toFixed(6) : "unknown";
-      pushAlert(`Hiker ${String(foundId)} located at ${latText}, ${lonText}.`);
     },
-    [pushAlert]
+    [assignHikerLabels]
   );
 
   useMissionSocket({
     apiPort,
     onConnectedChange: setWsConnected,
-    onAlert: pushAlert,
     onTelemetry,
     onMissionStatus,
     onMissionProgress,
@@ -199,7 +243,7 @@ export default function App() {
     setHikerSummaryOpen,
     setCompletedTargets,
     setSummaryMissionId,
-    pushAlert
+    setHikerLabelById
   });
 
   useEffect(() => {
@@ -217,12 +261,11 @@ export default function App() {
     setCompletedTargets(targets);
     setSummaryMissionId(mission.id);
     setHikerSummaryOpen(true);
-    pushAlert("All hikers found in current search area.");
-    pushAlert("Mission complete. You can review coordinates in the summary modal.");
-  }, [mission, pushAlert, summaryMissionId, targets]);
+  }, [mission, summaryMissionId, targets]);
 
   useEffect(() => {
     if (!targets.length) return;
+    assignHikerLabels(targets.map((target) => target.id));
     setFoundHikers((prev) => {
       const existing = new Set(prev.map((hiker) => String(hiker.id)));
       const discovered = targets
@@ -230,7 +273,7 @@ export default function App() {
         .map((target) => ({ id: target.id, lat: target.lat, lon: target.lon }));
       return discovered.length ? [...prev, ...discovered] : prev;
     });
-  }, [targets]);
+  }, [assignHikerLabels, targets]);
 
   const applyNavigation = useCallback((nextLat: string, nextLon: string) => {
     const latValue = parseCoordinate(nextLat, -90, 90);
@@ -266,9 +309,8 @@ export default function App() {
       setLon(selectedLon.toFixed(6));
       setMapCenter([selectedLat, selectedLon]);
       setIsValidCoord(true);
-      pushAlert("Marker placed; 100km² search area selected.");
     },
-    [pushAlert]
+    []
   );
 
   const normalizedSearchStatus = normalizeMissionStatus(searchStatus);
@@ -289,6 +331,7 @@ export default function App() {
           missionActive={missionActive}
           validDrones={validDrones}
           targets={targets}
+          getHikerLabel={getHikerLabel}
           setSelectedDrone={setSelectedDrone}
           onSelectArea={onSelectArea}
         />
@@ -299,7 +342,6 @@ export default function App() {
             normalizedSearchStatus={normalizedSearchStatus}
             selectedBounds={selectedBounds}
             wsConnected={wsConnected}
-            alerts={alerts}
           />
           <SwarmStatusPanel
             elapsedSeconds={elapsedSeconds}
@@ -307,7 +349,6 @@ export default function App() {
             validDroneCount={validDroneCount}
             missionActive={missionActive}
             searchStatus={searchStatus}
-            averageBattery={averageBattery}
             lostHikerCount={lostHikerCount}
             telemetryMode={telemetryMode}
           />
@@ -332,7 +373,7 @@ export default function App() {
             onStopMission={stopMission}
             onResetMission={resetMissionLock}
           />
-          <FoundHikersPanel hikers={foundHikers} />
+          <FoundHikersPanel hikers={foundHikersSorted} getHikerLabel={getHikerLabel} />
         </aside>
       </main>
 
@@ -340,7 +381,8 @@ export default function App() {
       <HikerSummaryModal
         isOpen={hikerSummaryOpen}
         onClose={() => setHikerSummaryOpen(false)}
-        targets={completedTargets}
+        targets={completedTargetsSorted}
+        getHikerLabel={getHikerLabel}
       />
     </div>
   );
