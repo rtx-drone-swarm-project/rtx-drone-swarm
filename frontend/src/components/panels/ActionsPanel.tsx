@@ -25,14 +25,14 @@ export default function ActionsPanel({
   return (
     <CollapsibleSection title="Actions">
       <button
-        className="action-btn start"
+        className="action-btn start mission-start"
         onClick={onStartMission}
         disabled={!selectedBounds || missionActive || missionLocked}
       >
         {missionLocked ? "Mission Complete" : "Start Mission"}
       </button>
 
-      {!selectedBounds && <div className="hint-text">Enter coordinates above and press "Set Search Area", or drag on the map to draw the search area.</div>}
+      {!selectedBounds && <div className="hint-text">Enter coordinates above and press "Set Search Area", or Shift-drag on the map to draw the search area.</div>}
 
       {missionLocked && (
         <div className="hint-text success-text">Mission locked after completion. Reset to run another.</div>

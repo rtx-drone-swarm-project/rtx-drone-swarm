@@ -6,11 +6,9 @@ type NavigationPanelProps = {
   lon: string;
   isValidCoord: boolean;
   missionActive: boolean;
-  hasDrones: boolean;
   onLatitudeChange: (value: string) => void;
   onLongitudeChange: (value: string) => void;
   onSetSearchArea: (sideKm: number) => void;
-  onPanToDrones: () => void;
 };
 
 export default function NavigationPanel({
@@ -18,11 +16,9 @@ export default function NavigationPanel({
   lon,
   isValidCoord,
   missionActive,
-  hasDrones,
   onLatitudeChange,
   onLongitudeChange,
-  onSetSearchArea,
-  onPanToDrones
+  onSetSearchArea
 }: NavigationPanelProps) {
   const [sideKm, setSideKm] = useState(4);
 
@@ -75,19 +71,6 @@ export default function NavigationPanel({
       >
         Set Search Area
       </button>
-      <div className="hint-text">
-        Creates a {sideKm} km &times; {sideKm} km box centered on these coordinates.
-      </div>
-      <div className="hint-text">Tip: right-click any location in Google Maps to copy its coordinates.</div>
-
-      <button
-        className="action-btn reset"
-        onClick={onPanToDrones}
-        disabled={!hasDrones}
-      >
-        Pan to Drones
-      </button>
-      {!hasDrones && <div className="hint-text">No drone positions available yet.</div>}
     </CollapsibleSection>
   );
 }

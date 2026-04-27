@@ -327,13 +327,6 @@ export default function App() {
     setMapCenter([latValue, lonValue]);
   }, [lat, lon]);
 
-  const onPanToDrones = useCallback(() => {
-    if (!validDrones.length) return;
-    const avgLat = validDrones.reduce((sum, d) => sum + d.lat, 0) / validDrones.length;
-    const avgLon = validDrones.reduce((sum, d) => sum + d.lon, 0) / validDrones.length;
-    setMapCenter([avgLat, avgLon]);
-  }, [validDrones]);
-
   const normalizedSearchStatus = normalizeMissionStatus(searchStatus);
   const missionActive = normalizedSearchStatus === "running";
   const missionComplete = normalizedSearchStatus === "complete";
@@ -382,11 +375,9 @@ export default function App() {
             lon={lon}
             isValidCoord={isValidCoord}
             missionActive={missionActive}
-            hasDrones={validDroneCount > 0}
             onLatitudeChange={onLatitudeChange}
             onLongitudeChange={onLongitudeChange}
             onSetSearchArea={onSetSearchArea}
-            onPanToDrones={onPanToDrones}
           />
           <ActionsPanel
             selectedBounds={selectedBounds}

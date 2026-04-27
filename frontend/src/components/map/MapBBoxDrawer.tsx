@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Rectangle, useMap, useMapEvents } from "react-leaflet";
 import type { Bounds } from "../../types/mission";
 
@@ -14,9 +14,25 @@ export default function MapBBoxDrawer({ enabled, onBoundsDrawn }: MapBBoxDrawerP
   const [start, setStart] = useState<[number, number] | null>(null);
   const [current, setCurrent] = useState<[number, number] | null>(null);
 
+  useEffect(() => {
+    return () => {
+      map.dragging.enable();
+      map.getContainer().style.cursor = "";
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (enabled) return;
+    map.dragging.enable();
+    map.getContainer().style.cursor = "";
+    setStart(null);
+    setCurrent(null);
+  }, [enabled, map]);
+
   useMapEvents({
     mousedown(e) {
       if (!enabled) return;
+      if (!e.originalEvent.shiftKey) return;
       map.dragging.disable();
       map.getContainer().style.cursor = "crosshair";
       setStart([e.latlng.lat, e.latlng.lng]);

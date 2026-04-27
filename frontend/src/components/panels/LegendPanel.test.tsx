@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import LegendPanel from "./LegendPanel";
 
 describe("LegendPanel", () => {
-  it("renders the current operational marker states", () => {
+  it("renders all marker symbol rows", () => {
     render(<LegendPanel />);
 
     expect(screen.getByText("Drone")).toBeTruthy();
@@ -13,7 +13,16 @@ describe("LegendPanel", () => {
     expect(screen.getByText("Hiker being confirmed")).toBeTruthy();
     expect(screen.getByText("Hiker found")).toBeTruthy();
     expect(screen.getByText("Search area boundary")).toBeTruthy();
-    expect(screen.getByText(/Drone call signs appear on hover/i)).toBeTruthy();
-    expect(screen.getByText(/Blue marks finder drones, orange marks confirmers/i)).toBeTruthy();
+  });
+
+  it("renders the compact how-to hint and not the old verbose note", () => {
+    render(<LegendPanel />);
+
+    expect(screen.getByText(/Drag to draw area/i)).toBeTruthy();
+    expect(screen.getByText(/Scroll to zoom/i)).toBeTruthy();
+    expect(screen.getByText(/Click drone for details/i)).toBeTruthy();
+
+    expect(screen.queryByText(/Drone call signs appear on hover/i)).toBeNull();
+    expect(screen.queryByText(/Blue marks finder drones/i)).toBeNull();
   });
 });
