@@ -132,6 +132,11 @@ class InMemoryPheromoneGrid:
             t = i / steps
             self.deposit(lat0 + t * (lat1 - lat0), lon0 + t * (lon1 - lon0))
 
+    def reset(self):
+        """Zero out the pheromone grid (called after Lloyd repartition)."""
+        with self._lock:
+            self.grid[:] = 0.0
+
 
 # ── Redis stub ──────────────────────────────────────────────────────
 
