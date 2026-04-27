@@ -34,7 +34,9 @@ JITTER_DEG = 0.0001
 # Degree-space speed used for simple simulated movement.
 SPEED = 0.0005
 # Distance threshold for a drone to "detect" a wandering target.
-DETECTION_RADIUS = 0.0005
+# About 200m at this latitude; large enough that detection does not require
+# marker centers to visually overlap at the default map zoom.
+DETECTION_RADIUS = 0.002
 # Distance threshold for considering a drone close enough to stop moving toward a point.
 TARGET_STOP_RADIUS = 0.00055
 
