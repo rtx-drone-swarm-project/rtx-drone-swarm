@@ -24,7 +24,6 @@ describe("useMissionSocket", () => {
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
 
     const onConnectedChange = vi.fn();
-    const onAlert = vi.fn();
     const onTelemetry = vi.fn();
     const onMissionStatus = vi.fn();
     const onMissionProgress = vi.fn();
@@ -34,7 +33,6 @@ describe("useMissionSocket", () => {
       useMissionSocket({
         apiPort: "8000",
         onConnectedChange,
-        onAlert,
         onTelemetry,
         onMissionStatus,
         onMissionProgress,

@@ -209,6 +209,7 @@ async def stop_mission(mission_id: str):
             "progress": mission["progress"],
         }
     )
+    await manager.broadcast({"type": "telemetry", "drones": []})
 
     return mission
 

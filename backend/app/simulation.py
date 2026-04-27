@@ -33,11 +33,13 @@ logger = logging.getLogger(__name__)
 # Small random perturbation keeps simulated movement from looking perfectly linear.
 JITTER_DEG = 0.0001
 # Degree-space speed used for simple simulated movement.
-SPEED = 0.001
+SPEED = 0.0005
 # Distance threshold for a drone to "detect" a wandering target.
-DETECTION_RADIUS = 0.010
+# About 200m at this latitude; large enough that detection does not require
+# marker centers to visually overlap at the default map zoom.
+DETECTION_RADIUS = 0.002
 # Distance threshold for considering a drone close enough to stop moving toward a point.
-TARGET_STOP_RADIUS = 0.00022
+TARGET_STOP_RADIUS = 0.00055
 
 
 async def _emit_target_found(mission: dict, target: dict, drone_id: Optional[str] = None):
@@ -121,120 +123,7 @@ def _assign_confirmation_drone(mission: dict, target: dict, finder_drone: dict) 
     target["status"] = "confirming"
     return confirmer
 
-
-'''def _build_centroid_map(mission: dict) -> dict:
-    """Compute the next Lloyd centroid for each free-searching drone.
-
-    Drones already assigned to a target are excluded. For drones still en route
-    to a previously assigned point, the pending target is used as the seed
-    position so centroid recomputation does not immediately pull them elsewhere.
-    """
-    centroid_map: dict = {}
-    if "grid" not in mission:
-        return centroid_map
-
-    free_drones = [
-        d
-        for d in mission["drones"]
-        if not d.get("assigned_target_id") and d.get("role") not in ["finder", "confirmer"]
-    ]
-    if not free_drones:
-        return centroid_map
-
-    grid_np = np.array(mission["grid"])
-    pos_list = []
-    for drone in free_drones:
-        tlat = drone.get("target_lat")
-        tlon = drone.get("target_lon")
-        dlat = drone.get("lat", 0)
-        dlon = drone.get("lon", 0)
-        if tlat is not None and tlon is not None:
-            dist_to_target = math.hypot(dlat - tlat, dlon - tlon)
-            if dist_to_target > 0.005:
-                # Use the queued destination while the drone is still in transit so
-                # the coverage calculation reflects where it is already headed.
-                pos_list.append([tlat, tlon])
-            else:
-                pos_list.append([dlat, dlon])
-        else:
-            pos_list.append([dlat, dlon])
-    positions = np.array(pos_list)
-    new_centroids, _ = lloyd_step(grid_np, positions)
-    for drone, centroid in zip(free_drones, new_centroids):
-        centroid_map[drone["id"]] = centroid
-    return centroid_map'''
-
-
-'''def _rearm_live_drones_if_needed(mission: dict, live_drone_ids: set[str]) -> None:
-    """Periodically recover live drones back into GUIDED flight if they disarm.
-
-    This is a lightweight safety net for live SITL drones. It only runs on a
-    coarse interval and skips drones that were just armed recently or are still
-    inside a direct-dispatch sequence.
-    """
-    if not live_drone_ids or mission.get("elapsed_seconds", 0) % 10 != 0:
-        return
-
-    live_states = sitl_bridge.get_states_by_sysid()
-    now = time.time()
-    for drone in mission["drones"]:
-        sysid = drone.get("sysid")
-        if not sysid or sitl_bridge.is_dispatching(sysid):
-            continue
-        last_arm = sitl_bridge._last_arm_time.get(sysid, 0)
-        if now - last_arm < 20:
-            continue
-        state = live_states.get(sysid)
-        if not state or not sitl_bridge.is_ready(sysid):
-            continue
-        conn = sitl_bridge._get_conn(sysid)
-        conn_lock = sitl_bridge._get_conn_lock(sysid)
-        if not conn or not conn_lock:
-            continue
-        if state.get("mode") != "GUIDED":
-            logger.info("Re-arm: setting GUIDED for sysid=%s (currently %s)", sysid, state.get("mode"))
-            with conn_lock:
-                mode_map = conn.mode_mapping()
-                conn.mav.set_mode_send(
-                    sysid,
-                    mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
-                    mode_map.get("GUIDED", 4),
-                )
-        elif not state.get("armed"):
-            logger.info("Re-arm: arming+takeoff sysid=%s", sysid)
-            with conn_lock:
-                conn.mav.command_long_send(
-                    sysid,
-                    conn.target_component,
-                    mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
-                    0,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                )
-            sitl_bridge._last_arm_time[sysid] = now
-            time.sleep(2.0)
-            with conn_lock:
-                conn.mav.command_long_send(
-                    sysid,
-                    conn.target_component,
-                    mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    DEFAULT_DISPATCH_ALT,
-                )'''
-
-
-def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], waypoint_map: dict) -> None:
+def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], centroid_map: dict) -> None:
     """Send goto commands to live drones toward targets, queued points, or centroids.
 
     Priority order is:
@@ -415,8 +304,8 @@ def _update_targets_for_tick(mission: dict, bounds: dict) -> None:
             continue
         if "vx" not in target:
             angle = random.uniform(0, 2 * math.pi)
-            target["vx"] = (SPEED / 2) * math.cos(angle)
-            target["vy"] = (SPEED / 2) * math.sin(angle)
+            target["vx"] = SPEED / 2 * math.cos(angle)
+            target["vy"] = SPEED / 2 * math.sin(angle)
         target["lat"] += target["vx"]
         target["lon"] += target["vy"]
         _bounce_entity(target, bounds, target["vx"], target["vy"])
@@ -521,3 +410,5 @@ async def simulation_loop(mission_id: str):
             break
 
         await asyncio.sleep(SLEEP_BETWEEN_DISPATCH_SECONDS)
+        if mission["status"] != "running":
+            break

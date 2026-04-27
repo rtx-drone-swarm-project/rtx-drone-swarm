@@ -56,14 +56,14 @@ export default function ActionsPanel({
       </div>
 
       <button
-        className="action-btn start"
+        className="action-btn start mission-start"
         onClick={onStartMission}
         disabled={!selectedBounds || missionActive || missionLocked}
       >
         {missionLocked ? "Mission Complete" : "Start Mission"}
       </button>
 
-      {!selectedBounds && <div className="hint-text">Click the map to select a 100km^2 area.</div>}
+      {!selectedBounds && <div className="hint-text">Enter coordinates above and press "Set Search Area", or Shift-drag on the map to draw the search area.</div>}
 
       {missionLocked && (
         <div className="hint-text success-text">Mission locked after completion. Reset to run another.</div>

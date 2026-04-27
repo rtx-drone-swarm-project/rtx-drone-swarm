@@ -4,9 +4,10 @@ type HikerSummaryModalProps = {
   isOpen: boolean;
   onClose: () => void;
   targets: Target[];
+  getHikerLabel: (targetId: string | number) => string;
 };
 
-export default function HikerSummaryModal({ isOpen, onClose, targets }: HikerSummaryModalProps) {
+export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLabel }: HikerSummaryModalProps) {
   if (!isOpen || !targets.length) return null;
 
   return (
@@ -30,9 +31,9 @@ export default function HikerSummaryModal({ isOpen, onClose, targets }: HikerSum
             All hikers in the selected search area have been found. Final coordinates:
           </p>
           <ul className="hiker-summary-list">
-            {targets.map((target, idx) => (
-              <li key={`${target.id}-${idx}`} className="hiker-summary-item">
-                <div className="hiker-summary-label">Hiker {idx + 1}</div>
+            {targets.map((target) => (
+              <li key={String(target.id)} className="hiker-summary-item">
+                <div className="hiker-summary-label">{getHikerLabel(target.id)}</div>
                 <div className="hiker-summary-coords">
                   {target.lat.toFixed(6)}, {target.lon.toFixed(6)}
                 </div>

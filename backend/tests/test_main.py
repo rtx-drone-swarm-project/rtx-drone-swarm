@@ -291,6 +291,46 @@ def test_simulation_progress_only_advances_when_targets_are_found():
         missions_db.pop(mission_id, None)
 
 
+def test_target_detection_uses_expanded_radius_before_icons_overlap():
+    mission = {
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 35.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {
+                "id": "drone1",
+                "lat": 34.5,
+                "lon": -117.5,
+            }
+        ],
+        "targets": [
+            {
+                "id": "t1",
+                "lat": 34.5012,
+                "lon": -117.5,
+                "status": "wandering",
+                "vx": 0,
+                "vy": 0,
+            }
+        ],
+    }
+
+    simulation_module._update_targets_for_tick(
+        mission,
+        mission["bounds"],
+    )
+
+    target = mission["targets"][0]
+    drone = mission["drones"][0]
+    assert simulation_module.DETECTION_RADIUS >= 0.0012
+    assert target["status"] == "detected"
+    assert target["assigned_drone_id"] == "drone1"
+    assert drone["assigned_target_id"] == "t1"
+
+
 def test_simulation_completes_when_all_targets_are_found():
     mission_id = "sim-complete-all-targets-found"
     missions_db[mission_id] = {

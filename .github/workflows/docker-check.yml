@@ -23,3 +23,6 @@ jobs:
 
         -   name: Build frontend image
             run: docker build -f frontend/Dockerfile -t frontend-check ./frontend
+        
+        -   name: Build sitl image
+            run: docker build -f sitl/Dockerfile -t sitl-check .
