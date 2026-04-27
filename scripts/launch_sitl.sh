@@ -55,4 +55,4 @@ elif [[ -n "$SITL_MAVPROXY_CMD" ]]; then
 fi
 
 # Start SITL with separate TCP outputs for each drone.
-./Tools/autotest/sim_vehicle.py "${SIM_VEHICLE_ARGS[@]}"
+./Tools/autotest/sim_vehicle.py "${SIM_VEHICLE_ARGS[@]}" 2>&1 | tee "$SWARM_LOG"
