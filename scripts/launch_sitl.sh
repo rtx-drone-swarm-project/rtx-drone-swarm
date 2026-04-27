@@ -18,6 +18,8 @@ SITL_ENABLE_MAVPROXY="${SITL_ENABLE_MAVPROXY:-1}"
 SITL_MAVPROXY_CMD="${SITL_MAVPROXY_CMD:-}"
 mkdir -p "$LOG_BASE/sitl" "$LOG_BASE/swarm" "$LOG_BASE/cloud"
 
+git config --global --add safe.directory "$ARDUPILOT_PATH"
+
 if [[ ! -d "$ARDUPILOT_PATH" ]]; then
   echo "ArduPilot not found at $ARDUPILOT_PATH"
   echo "Set ARDUPILOT_PATH or clone: git clone https://github.com/ArduPilot/ardupilot.git"
