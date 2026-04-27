@@ -53,8 +53,8 @@ export default function App() {
   const [hikerSummaryOpen, setHikerSummaryOpen] = useState(false);
   const [completedTargets, setCompletedTargets] = useState<Target[]>([]);
   const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
-<<<<<<< Plug-And-Play-Algorithms
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<AlgorithmOption>("default");
+  const [hikerLabelById, setHikerLabelById] = useState<Record<string, number>>({});
 
   const pushAlert = useCallback((message: string) => {
     setAlerts((prev) => [message, ...prev].slice(0, 10));
@@ -67,9 +67,6 @@ export default function App() {
     if (!values.length) return "--";
     return `${Math.round(values.reduce((a, b) => a + b, 0) / values.length)}%`;
   }, [telemetry]);
-=======
-  const [hikerLabelById, setHikerLabelById] = useState<Record<string, number>>({});
->>>>>>> main
 
   const telemetryMode = useMemo(() => {
     const sources = telemetry
