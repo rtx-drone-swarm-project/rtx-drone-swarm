@@ -1,8 +1,7 @@
 """Helpers for sending mission recall commands to live SITL drones."""
 
 import logging
-import sys
-from typing import List, Optional
+from typing import List
 
 from app.missions import Mission, _coerce_sysid
 from app.sitl import sitl_bridge
@@ -12,9 +11,11 @@ logger = logging.getLogger(__name__)
 
 def check_recall_completion() -> bool:
     states = sitl_bridge.get_states_by_sysid()
+    if not states:
+        return False
     return all(
-        (not s.get("armed")) and (float(s.get("alt", 0) or 0) < 0.2)
-        for s in states.values()
+        state.get("armed") is False and float(state.get("alt") or 0.0) <= 0.1
+        for state in states.values()
     )
 
 def run_direct_recall(mission: Mission) -> List[dict]:
