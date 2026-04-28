@@ -20,15 +20,7 @@ export default function AlertsPanel({
       <span className="alert-icon">&#x2705;</span>
       <div>
         <div className="alert-title">Mission status</div>
-        <div className="alert-sub">Search complete — all hikers found.</div>
-      </div>
-    </div>
-  ) : missionStatus === "paused" ? (
-    <div className="alert-chip stopped">
-      <span className="alert-icon">&#x1F6D1;</span>
-      <div>
-        <div className="alert-title">Mission status</div>
-        <div className="alert-sub">Paused — search paused by operator.</div>
+        <div className="alert-sub">Mission complete — all hikers found, all drones recalled.</div>
       </div>
     </div>
   ) : missionStatus === "searching" ? (
@@ -37,8 +29,36 @@ export default function AlertsPanel({
       <div>
         <div className="alert-title">Mission status</div>
         <div className="alert-sub">
-          <SearchingLabel text="Search in progress — searching selected area" />
+          <SearchingLabel text="Search in progress — searching selected area." />
         </div>
+      </div>
+    </div>
+  ) : missionStatus === "search_complete" ? (
+    <div className="alert-chip info">
+      <span className="alert-icon search-pulse-icon">&#x1F50D;</span>
+      <div>
+        <div className="alert-title">Mission status</div>
+        <div className="alert-sub">
+          <SearchingLabel text="Search complete — all hikers found, awaiting drone instruction." />
+        </div>
+      </div>
+    </div>
+  ) : missionStatus === "recalling" ? (
+    <div className="alert-chip info">
+      <span className="alert-icon search-pulse-icon">&#x1F50D;</span>
+      <div>
+        <div className="alert-title">Mission status</div>
+        <div className="alert-sub">
+          <SearchingLabel text="Recalling — all hikers found, recalling drones." />
+        </div>
+      </div>
+    </div>
+  ) : missionStatus === "paused" ? (
+    <div className="alert-chip stopped">
+      <span className="alert-icon">&#x1F6D1;</span>
+      <div>
+        <div className="alert-title">Mission status</div>
+        <div className="alert-sub">Paused — search paused by operator.</div>
       </div>
     </div>
   ) : selectedBounds ? (

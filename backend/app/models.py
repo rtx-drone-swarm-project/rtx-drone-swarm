@@ -3,6 +3,7 @@
 from typing import Optional, List
 
 from pydantic import BaseModel
+import numpy as np
 
 class Bounds(BaseModel):
     """Latitude and longitude bounds for a mission search area."""
@@ -55,6 +56,33 @@ class MissionStart(BaseModel):
     algorithm: Optional[str] = None
     hikers: Optional[List[Hiker]] = None
 
+class Mission:
+    id: str
+    name: str
+    status: "idle" or "searching" or "search_complete" or "recalling" or "paused" or "mission_complete"
+    progress: float
+    elapsed_seconds: int
+    algorithm: str
+    bounds: dict[str, float]
+    drones: list[dict]
+    hikers: list[dict]
+    targets: list[dict]
+    algorithm: str
+    grid: np.ndarray or None
+
+    def __init__(self, mission_id: str, mission_data: MissionCreate):
+        self.id = mission_id
+        self.name = mission_data.name
+        self.status = "idle"
+        self.progress = 0.0
+        self.elapsed_seconds = 0
+        self.algorithm = getattr(mission_data, "algorithm", "voronoi")
+        self.bounds = mission_data.bounds.model_dump()
+        self.drones = [d.model_dump() for d in mission_data.drones]
+        self.hikers = [m.model_dump() for m in mission_data.hikers] if mission_data.hikers else []
+        self.targets = []
+        self.algorithm = getattr(mission_data, "algorithm", "voronoi")
+        self.grid = None
 
 class DispatchAssignment(BaseModel):
     """Single direct-dispatch target for one drone."""

@@ -3,7 +3,8 @@
 import logging
 from typing import List
 
-from app.missions import Mission, _coerce_sysid
+from app.missions import _coerce_sysid
+from app.models import Mission
 from app.sitl import sitl_bridge
 
 

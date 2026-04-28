@@ -21,11 +21,11 @@ from typing import Optional
 import numpy as np
 from pymavlink import mavutil
 
-from app.missions import Mission, _sync_mission_drones_with_sitl, mission_db
+from app.missions import _sync_mission_drones_with_sitl, mission_db
+from app.models import Mission
 from app.settings import DEFAULT_DISPATCH_ALT, SLEEP_BETWEEN_DISPATCH_SECONDS
 from app.recall import run_direct_recall, check_recall_completion
 from app.sitl import sitl_bridge
-#from app.voronoi import lloyd_step
 from app.ws import manager
 from app.algorithms import get_algorithm
 
@@ -379,7 +379,6 @@ async def simulation_loop(mission_id: str):
     mission.elapsed_seconds = 0
     mission.status = "searching"
     recall_sent = False
-    grid = build_search_grid(mission.bounds, n=15).tolist()
 
     while mission.status != "mission_complete":
         # Pull live SITL state into the mission before making any coverage or
@@ -402,7 +401,6 @@ async def simulation_loop(mission_id: str):
             # Pull live SITL state into the mission before making any coverage or
             # targeting decisions for this tick.
             live_drone_ids = _sync_mission_drones_with_sitl(mission)
-            centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
 
             algorithm_name = mission.algorithm
             active_strategy = get_algorithm(algorithm_name)
@@ -414,32 +412,24 @@ async def simulation_loop(mission_id: str):
             
             all_targets_found = await _finalize_mission_progress(mission)
             if all_targets_found:
-                print("all targets found")
                 mission.status = "search_complete"
 
         elif mission.status == "search_complete":
-            print("search complete")
             pass       
 
         elif mission.status == "paused":
-            print("paused")
             pass
         
         elif mission.status == "recalling":
             if not recall_sent:
-                print("sent recall")
                 recall_results = run_direct_recall(mission)
-                # logger.info("Recall results: %s", recall_results)
                 recall_sent = True
 
             all_drones_recall_completed = check_recall_completion()
             if all_drones_recall_completed:
-                print("all drones recall completed")
                 mission.status = "mission_complete"
                 await _broadcast_mission_tick(mission_id, mission)
                 break
 
         await _broadcast_mission_tick(mission_id, mission)
         await asyncio.sleep(SLEEP_BETWEEN_DISPATCH_SECONDS)
-        if mission["status"] != "running":
-            break

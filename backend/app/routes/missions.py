@@ -9,9 +9,8 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 
 from app.dispatch import run_direct_dispatch, run_dispatch_script
-from app.models import DispatchTargetsRequest, MissionCreate, MissionStart
+from app.models import DispatchTargetsRequest, MissionCreate, MissionStart, Mission
 from app.missions import (
-    Mission,
     _assign_start_area_targets,
     _build_start_dispatch_assignments,
     _coerce_sysid,
@@ -22,7 +21,6 @@ from app.missions import (
 )
 from app.settings import DEFAULT_DISPATCH_HOST, DEFAULT_DISPATCH_TIMEOUT_SECONDS
 from app.simulation import simulation_loop
-#from app.voronoi import build_search_grid <---------------------------------------------------------------------------------------------
 from app.algorithms.base import build_search_grid
 from app.ws import manager
 
@@ -118,6 +116,7 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
             }
         )
     mission.targets = targets
+    mission.grid = build_search_grid(bounds, n=15).tolist()
 
     dispatch_assignments = _build_start_dispatch_assignments(mission)
     if not dispatch_assignments:

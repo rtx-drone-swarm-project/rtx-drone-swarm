@@ -48,7 +48,7 @@ describe("App integration", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "idle", progress: 0 }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "running", progress: 0, targets: [] }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "searching", progress: 0, targets: [] }) });
 
     vi.stubGlobal("fetch", fetchMock);
 

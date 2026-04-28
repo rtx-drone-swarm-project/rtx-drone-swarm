@@ -17,37 +17,11 @@ from app.settings import (
     DEFAULT_SITL_PORT_STEP,
     LAUNCH_SITL_SCRIPT,
 )
-from app.voronoi import build_search_grid
-from app.models import MissionCreate
+from app.algorithms.base import build_search_grid
+from app.models import MissionCreate, Mission
 
 
 mission_db: Dict[str, dict] = {}
-
-class Mission:
-    id: str
-    name: str
-    status: "idle" or "searching" or "search_complete" or "recalling" or "paused" or "mission_complete"
-    progress: float
-    elapsed_seconds: int
-    algorithm: str
-    bounds: dict[str, float]
-    drones: list[dict]
-    hikers: list[dict]
-    targets: list[dict]
-    algorithm: str
-
-    def __init__(self, mission_id: str, mission_data: MissionCreate):
-        self.id = mission_id
-        self.name = mission_data.name
-        self.status = "idle"
-        self.progress = 0.0
-        self.elapsed_seconds = 0
-        self.algorithm = getattr(mission_data, "algorithm", "voronoi")
-        self.bounds = mission_data.bounds.model_dump()
-        self.drones = [d.model_dump() for d in mission_data.drones]
-        self.hikers = [m.model_dump() for m in mission_data.hikers] if mission_data.hikers else []
-        self.targets = []
-        self.algorithm = getattr(mission_data, "algorithm", "voronoi")
 
 
 def _coerce_sysid(value: object) -> Optional[int]:

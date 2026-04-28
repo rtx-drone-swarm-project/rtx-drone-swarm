@@ -2,6 +2,7 @@ import math
 import numpy as np
 from typing import List, Dict, Tuple
 from app.algorithms.base import BaseSearchAlgorithm
+from app.models import Mission
 
 def lloyd_step(grid_points: np.ndarray, centroids: np.ndarray):
     """
@@ -23,17 +24,17 @@ def lloyd_step(grid_points: np.ndarray, centroids: np.ndarray):
 
 
 class VoronoiCoverage(BaseSearchAlgorithm):
-    def initialize(self, mission: dict) -> None:
+    def initialize(self, mission: Mission) -> None:
         """Run once when the mission starts to generate the search grid."""
         pass
 
-    def get_target_waypoints(self, mission: dict, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
+    def get_target_waypoints(self, mission: Mission, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
         """Run every simulation tick to get the next Voronoi centroid."""
         centroid_map = {}
-        if not free_drones or "grid" not in mission:
+        if not free_drones or not mission.grid:
             return centroid_map
 
-        grid_np = np.array(mission["grid"])
+        grid_np = np.array(mission.grid)
         pos_list = []
         
         for drone in free_drones:

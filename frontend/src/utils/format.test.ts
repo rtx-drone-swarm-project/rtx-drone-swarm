@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatElapsed, formatSeconds, normalizeMissionStatus, statusLabel } from "./format";
+import { formatElapsed, formatSeconds, statusLabel } from "./format";
 
 describe("format utilities", () => {
   it("formats elapsed seconds", () => {
@@ -13,16 +13,10 @@ describe("format utilities", () => {
     expect(formatSeconds(7)).toBe("00:07");
   });
 
-  it("normalizes mission status values", () => {
-    expect(normalizeMissionStatus("in_progress")).toBe("running");
-    expect(normalizeMissionStatus("completed")).toBe("complete");
-    expect(normalizeMissionStatus("idle")).toBe("idle");
-  });
-
   it("returns operator label for mission status", () => {
-    expect(statusLabel("running")).toBe("Mission in progress");
-    expect(statusLabel("stopped")).toBe("Mission stopped");
-    expect(statusLabel("complete")).toBe("Mission completed");
+    expect(statusLabel("searching")).toBe("Mission searching");
+    expect(statusLabel("paused")).toBe("Mission paused");
+    expect(statusLabel("mission_complete")).toBe("Mission completed");
     expect(statusLabel("anything-else")).toBe("Idle");
   });
 });

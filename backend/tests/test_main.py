@@ -137,7 +137,7 @@ def test_start_mission():
     start_response = client.post(f"/missions/{mission_id}/start")
     assert start_response.status_code == 200
     start_data = start_response.json()
-    assert start_data["status"] == "running"
+    assert start_data["status"] == "searching"
     
     # Test starting a non-existent mission
     invalid_start_response = client.post("/missions/invalid_id/start")
@@ -174,7 +174,7 @@ def test_stop_mission():
     stop_response = client.post(f"/missions/{mission_id}/stop")
     assert stop_response.status_code == 200
     stop_data = stop_response.json()
-    assert stop_data["status"] == "stopped"
+    assert stop_data["status"] == "paused"
 
     # Test stopping a non-existent mission
     invalid_stop_response = client.post("/missions/invalid_id/stop")
@@ -192,7 +192,7 @@ def test_simulation_emits_target_found_and_completes_mission():
     mission_db[mission_id] = {
         "id": mission_id,
         "name": "Simulation Event Test",
-        "status": "running",
+        "status": "searching",
         "progress": 0.0,
         "elapsed_seconds": 0,
         "bounds": {
@@ -231,7 +231,7 @@ def test_simulation_emits_target_found_and_completes_mission():
     try:
         asyncio.run(simulation_loop(mission_id))
         mission = mission_db[mission_id]
-        assert mission.status == "complete"
+        assert mission.status == "mission_complete"
         assert mission.progress == 100.0
     finally:
         manager.broadcast = original_broadcast
@@ -252,7 +252,7 @@ def test_simulation_progress_only_advances_when_targets_are_found():
     mission_db[mission_id] = {
         "id": mission_id,
         "name": "Progress From Found Targets Test",
-        "status": "running",
+        "status": "searching",
         "progress": 0.0,
         "elapsed_seconds": 0,
         "bounds": {
@@ -284,7 +284,7 @@ def test_simulation_progress_only_advances_when_targets_are_found():
         mission = mission_db[mission_id]
         all_targets_found = asyncio.run(simulation_module._finalize_mission_progress(mission))
         assert all_targets_found is False
-        assert mission.status == "running"
+        assert mission.status == "searching"
         assert mission.progress == 50.0
     finally:
         manager.broadcast = original_broadcast
@@ -320,11 +320,11 @@ def test_target_detection_uses_expanded_radius_before_icons_overlap():
 
     simulation_module._update_targets_for_tick(
         mission,
-        mission["bounds"],
+        mission.bounds,
     )
 
-    target = mission["targets"][0]
-    drone = mission["drones"][0]
+    target = mission.targets[0]
+    drone = mission.drones[0]
     assert simulation_module.DETECTION_RADIUS >= 0.0012
     assert target["status"] == "detected"
     assert target["assigned_drone_id"] == "drone1"
@@ -336,7 +336,7 @@ def test_simulation_completes_when_all_targets_are_found():
     mission_db[mission_id] = {
         "id": mission_id,
         "name": "All Targets Found Completion Test",
-        "status": "running",
+        "status": "searching",
         "progress": 0.0,
         "elapsed_seconds": 0,
         "bounds": {
@@ -368,7 +368,7 @@ def test_simulation_completes_when_all_targets_are_found():
         mission = mission_db[mission_id]
         all_targets_found = asyncio.run(simulation_module._finalize_mission_progress(mission))
         assert all_targets_found is True
-        assert mission.status == "complete"
+        assert mission.status == "mission_complete"
         assert mission.progress == 100.0
     finally:
         manager.broadcast = original_broadcast
@@ -380,7 +380,7 @@ def test_simulation_uses_voronoi_centroid_for_unassigned_simulated_drones():
     mission_db[mission_id] = {
         "id": mission_id,
         "name": "Voronoi Motion Test",
-        "status": "running",
+        "status": "searching",
         "progress": 0.0,
         "elapsed_seconds": 0,
         "bounds": {
@@ -403,7 +403,7 @@ def test_simulation_uses_voronoi_centroid_for_unassigned_simulated_drones():
 
     async def stop_after_first_telemetry(message):
         if message.get("type") == "telemetry":
-            mission_db[mission_id]["status"] = "stopped"
+            mission_db[mission_id]["status"] = "paused"
 
     original_broadcast = manager.broadcast
     original_get_states = sitl_bridge.get_states_by_sysid
@@ -468,7 +468,7 @@ def test_start_mission_runs_dispatch_bridge_when_targets_present():
         start_response = client.post(f"/missions/{mission_id}/start")
         assert start_response.status_code == 200
         payload = start_response.json()
-        assert payload["status"] == "running"
+        assert payload["status"] == "searching"
         import time; time.sleep(0.3)
         assert len(captured.get("assignments", [])) == 1
         assert captured["assignments"][0]["sysid"] == 1
