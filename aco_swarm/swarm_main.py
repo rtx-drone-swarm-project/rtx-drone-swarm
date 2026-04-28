@@ -19,6 +19,11 @@ Start SITL manually before running this script:
   # Terminal 2 — Swarm (MAVProxy map opens automatically)
   python3 swarm_main.py --drones 5
 
+  # With search targets:
+  python3 swarm_main.py --drones 5 \
+    --targets="-35.364:149.166,-35.361:149.168" \
+    --detection-radius 30 --validation-window 60
+
 Phase flow
 ----------
   1. All drones initialize, arm, and take off
@@ -26,7 +31,11 @@ Phase flow
   3. Lloyd bootstrap runs once (using spawn positions as centroids)
   4. Territories are assigned; planner transitions → ACO
   5. ACO navigation loop begins per drone
-  6. Lloyd repartitions adaptively when ALL drones exceed coverage_threshold
+  6. While covering, each drone checks for target proximity each tick
+  7. On detection: TargetManager → PENDING; ValidationProtocol dispatches
+     nearest other drone to corroborate within validation_window seconds
+  8. On confirmation: pheromone spike deposited; both drones resume ACO
+  9. Lloyd repartitions adaptively when ALL drones exceed coverage_threshold
 """
 
 import argparse
@@ -48,6 +57,8 @@ from drone_agent import DroneAgent, haversine_m
 from pymavlink import mavutil
 from voronoi_aco_hybrid import VoronoiACOPlanner, DroneState, PlannerPhase
 from metrics import MetricsTracker
+from target_manager import TargetManager
+from validation_protocol import ValidationProtocol
 
 
 logging.basicConfig(
@@ -170,7 +181,11 @@ def connect_all(drone_list: List[DroneAgent]) -> List[DroneAgent]:
 
 
 # ── State writer (feeds MAVProxy Voronoi module) ─────────────────────
-def _write_state(agents: List[DroneAgent], planner: VoronoiACOPlanner):
+def _write_state(
+    agents: List[DroneAgent],
+    planner: VoronoiACOPlanner,
+    target_manager: TargetManager = None,
+):
     agent_data = []
     for a in agents:
         if a.lat is None:
@@ -183,28 +198,60 @@ def _write_state(agents: List[DroneAgent], planner: VoronoiACOPlanner):
             del a._path[:-PATH_MAX_LEN]
 
         agent_data.append({
-            "id":        a.drone_id,
-            "lat":       a.lat,
-            "lon":       a.lon,
-            "territory": a.territory.tolist() if a.territory is not None and len(a.territory) > 0 else [],
-            "path":      list(a._path),
+            "id":                  a.drone_id,
+            "lat":                 a.lat,
+            "lon":                 a.lon,
+            "territory":           a.territory.tolist() if a.territory is not None and len(a.territory) > 0 else [],
+            "path":                list(a._path),
+            "on_validation":       a._validation_target is not None,
         })
 
+    # Build confirmed-targets list for MAVProxy overlay (future use)
+    confirmed = []
+    if target_manager is not None:
+        for t in target_manager.get_confirmed_targets():
+            confirmed.append({"id": t.target_id, "lat": t.lat, "lon": t.lon})
+    
+    # Build pending-targets list for MAVProxy overlay
+    pending = []
+    if target_manager is not None:
+        for t in target_manager.get_pending_targets():
+            pending.append({
+                "id": t.target_id, "lat": t.lat, "lon": t.lon,
+                "detected_by": t.detected_by
+            })
+    # Also expose ALL targets (including undetected) so map can show them
+    all_targets = []
+    if target_manager is not None:
+        for t in target_manager._targets.values():
+            all_targets.append({
+                "id": t.target_id, "lat": t.lat, "lon": t.lon,
+                "state": t.state.name
+            })
+
     # np.save always appends .npy, so name the tmp WITHOUT .npy extension.
-    # Result: np.save writes to STATE_FILE + ".tmp.npy", which we then
-    # atomically rename to STATE_FILE (which already ends in .npy).
-    tmp_base = STATE_FILE[:-4] + ".tmp"        # strip .npy → add .tmp
-    tmp_file = tmp_base + ".npy"               # np.save will produce this
-    np.save(tmp_base, {                        # save to base (np appends .npy)
-        "pheromone": planner.pheromone.get_snapshot(),
-        "agents":    agent_data,
+    tmp_base = STATE_FILE[:-4] + ".tmp"
+    tmp_file = tmp_base + ".npy"
+    np.save(tmp_base, {
+        "pheromone":          planner.pheromone.get_snapshot(),
+        "agents":             agent_data,
+        "confirmed_targets":  confirmed,
+        "pending_targets":   pending,
+        "all_targets":        all_targets,
     })
     os.replace(tmp_file, STATE_FILE)
 
 
-def _state_writer_loop(agents: List[DroneAgent], planner: VoronoiACOPlanner):
+def _state_writer_loop(
+    agents: List[DroneAgent],
+    planner: VoronoiACOPlanner,
+    target_manager: TargetManager = None,
+):
     while True:
-        _write_state(agents, planner)
+        try:
+            _write_state(agents, planner, target_manager)
+        except Exception as e:
+            log.warning(f"[state-writer] write failed (skipping): {e}")
         time.sleep(1)
 
 
@@ -281,8 +328,6 @@ def _lloyd_loop(
             continue
 
         # ── Gate 2: wait until drones are at spawn positions ──────────
-        # This guarantees Lloyd uses well-separated centroids instead of
-        # the home-position cluster, preventing territory collapse.
         if not spawn_ready.is_set():
             log.debug("[Lloyd] Waiting for spawn_ready signal…")
             continue
@@ -294,13 +339,10 @@ def _lloyd_loop(
             planner._run_lloyd(states)
             _push_territories(agents, states)
 
-            # Validate balance; warn but don't abort — SITL positions
-            # should be well-separated by circular_spawn()
             if not _check_territory_balance(agents):
                 log.warning("[Lloyd] Bootstrap produced imbalanced territories — "
                             "consider increasing --spawn-radius")
 
-            # Unlock ACO navigation
             planner.lloyd_active = False
             planner.transition_to_aco()
             bootstrapped = True
@@ -309,8 +351,6 @@ def _lloyd_loop(
             continue
 
         # ── ADAPTIVE REPARTITION ──────────────────────────────────────
-        # Only trigger when every drone has saturated its territory.
-        # This preserves ACO's ability to cover uncompleted zones first.
         coverages = [
             planner._territory_coverage(
                 DroneState(id=a.drone_id, lat=a.lat, lon=a.lon,
@@ -321,7 +361,6 @@ def _lloyd_loop(
         ]
 
         if len(coverages) < len(agents):
-            # Some drones still have no territory — skip
             time.sleep(2)
             continue
 
@@ -335,7 +374,6 @@ def _lloyd_loop(
             f"({[f'{c:.0%}' for c in coverages]}) — repartitioning…"
         )
 
-        # Pause ACO briefly while Lloyd rewrites territories
         planner.lloyd_active = True
         try:
             states = _build_drone_states(agents)
@@ -349,36 +387,62 @@ def _lloyd_loop(
 
         log.info("[Lloyd] Repartition complete ✓")
 
-        # Reset pheromone grid so ACO re-explores new territories
         planner.pheromone.reset()
         log.info("[Lloyd] Pheromone grid reset for fresh ACO pass ✓")
 
-        # Cool-down: don't immediately re-trigger
         time.sleep(10)
 
 
 # ── CLI ──────────────────────────────────────────────────────────────
 def parse_args():
     p = argparse.ArgumentParser(description="Stigmergy swarm — macOS SITL")
-    p.add_argument("--drones",            type=int,   default=5)
-    p.add_argument("--duration",          type=float, default=0,
+    p.add_argument("--drones",             type=int,   default=5)
+    p.add_argument("--duration",           type=float, default=0,
                    help="Seconds to run, 0 = forever (default: forever)")
-    p.add_argument("--altitude",          type=float, default=10.0)
-    p.add_argument("--spawn-radius",      type=float, default=SPAWN_RADIUS_M,
+    p.add_argument("--altitude",           type=float, default=10.0)
+    p.add_argument("--spawn-radius",       type=float, default=SPAWN_RADIUS_M,
                    help="Spawn circle radius in metres")
-    p.add_argument("--no-map",            action="store_true",
+    p.add_argument("--no-map",             action="store_true",
                    help="Skip MAVProxy launch")
-    p.add_argument("--grid-rows",         type=int,   default=40)
-    p.add_argument("--grid-cols",         type=int,   default=40)
-    p.add_argument("--evap-rate",         type=float, default=0.97)
-    p.add_argument("--loop-hz",           type=float, default=5.0)
-    p.add_argument("--print-homes",       action="store_true",
+    p.add_argument("--grid-rows",          type=int,   default=40)
+    p.add_argument("--grid-cols",          type=int,   default=40)
+    p.add_argument("--evap-rate",          type=float, default=0.97)
+    p.add_argument("--loop-hz",            type=float, default=5.0)
+    p.add_argument("--print-homes",        action="store_true",
                    help="Print --home string for sim_vehicle.py and exit")
-    p.add_argument("--home-lat",          type=float, default=-35.363262)
-    p.add_argument("--home-lon",          type=float, default=149.165237)
-    p.add_argument("--coverage-threshold",type=float, default=0.85,
+    p.add_argument("--home-lat",           type=float, default=-35.363262)
+    p.add_argument("--home-lon",           type=float, default=149.165237)
+    p.add_argument("--coverage-threshold", type=float, default=0.85,
                    help="Per-drone coverage fraction that triggers Lloyd repartition "
                         "(default: 0.85)")
+    # ── Search arguments ──────────────────────────────────────────────
+    p.add_argument(
+        "--targets",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated target positions as lat:lon pairs. "
+            "Example: --targets=-35.364:149.165,-35.361:149.168"
+        ),
+    )
+    p.add_argument(
+        "--detection-radius",
+        type=float,
+        default=30.0,
+        help="Metres within which a drone detects a target (default: 30)",
+    )
+    p.add_argument(
+        "--validation-window",
+        type=float,
+        default=60.0,
+        help="Seconds a PENDING sighting stays open for corroboration (default: 60)",
+    )
+    p.add_argument(
+        "--pheromone-boost",
+        type=float,
+        default=50.0,
+        help="Pheromone deposits at a confirmed target site (default: 50, deters re-visits)",
+    )
     return p.parse_args()
 
 
@@ -436,11 +500,39 @@ def main():
         aco_radius=2,
         alpha=0.3,
     )
-    # Start in LLOYD phase with navigation locked until bootstrap
     planner.phase = PlannerPhase.LLOYD
-    planner.lloyd_active = True   # blocks drone nav until bootstrap done
+    planner.lloyd_active = True
 
     log.info(f"Pheromone grid {cfg.rows}×{cfg.cols} | evap={cfg.evaporation_rate}")
+
+    # ── Target manager ────────────────────────────────────────────────
+    target_positions = []
+    if args.targets.strip():
+        for pair in args.targets.split(","):
+            pair = pair.strip()
+            if ":" in pair:
+                lat_s, lon_s = pair.split(":", 1)
+                target_positions.append((float(lat_s), float(lon_s)))
+
+    target_csv = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        f"targets_{int(time.time())}.csv",
+    )
+    target_manager = TargetManager(
+        targets=target_positions,
+        detection_radius=args.detection_radius,
+        validation_window=args.validation_window,
+        csv_path=target_csv if target_positions else None,
+    )
+    if target_positions:
+        log.info(
+            f"TargetManager: {len(target_positions)} targets loaded | "
+            f"radius={args.detection_radius}m | window={args.validation_window}s | "
+            f"CSV → {target_csv}"
+        )
+    else:
+        log.info("TargetManager: no targets specified (search disabled) — "
+                 "use --targets=lat:lon,lat:lon to enable")
 
     # ── SITL readiness ────────────────────────────────────────────────
     wait_for_ports(args.drones, timeout=300.0)
@@ -456,7 +548,7 @@ def main():
     for i, (lat, lon) in enumerate(positions):
         drone = DroneAgent(
             drone_id=i,
-            connection_str=f"udpin:127.0.0.1:{agent_udp(i)}",   # fixed: was connection=
+            connection_str=f"udpin:127.0.0.1:{agent_udp(i)}",
             grid=grid,
             planner=planner,
             altitude=args.altitude,
@@ -474,9 +566,7 @@ def main():
         log.info(f"[ID CHECK] Drone {a.drone_id} "
                  f"sysid={a.conn.expected_sysid}")
 
-    # ── Infinite battery: set SIM_BATT_CAPACITY=0 on all vehicles ────
-    # Must be done after connection, before arming.
-    # Value 0 disables battery simulation entirely in ArduPilot SITL.
+    # ── Infinite battery ──────────────────────────────────────────────
     for a in agents:
         try:
             a.conn.master.param_set_send(
@@ -492,7 +582,24 @@ def main():
         log.error("No drones connected — exiting.")
         sys.exit(1)
 
-    # Initial position snapshot (best-effort; agents may not have GPS yet)
+    # ── Validation protocol ───────────────────────────────────────────
+    # Constructed after agents are connected so _select_validator() has
+    # a full list to work with from the start.
+    validation_protocol = ValidationProtocol(
+        target_manager=target_manager,
+        agents=agents,
+        planner=planner,
+        pheromone_boost=args.pheromone_boost,
+    )
+
+    # Inject search context into every agent
+    for agent in agents:
+        agent._target_manager      = target_manager
+        agent._validation_protocol = validation_protocol
+
+    log.info("ValidationProtocol ready ✓")
+
+    # Initial position snapshot
     time.sleep(3)
     for agent in agents:
         agent._update_position()
@@ -501,9 +608,6 @@ def main():
 
     time.sleep(2)
 
-    # ── Spawn-ready event: set after drones reach spawn positions ───────
-    # Passed into _lloyd_loop so bootstrap never runs on home-position
-    # cluster — it only fires once drones are at their spread-out spawns.
     spawn_ready = threading.Event()
 
     # ── Start Lloyd thread ────────────────────────────────────────────
@@ -521,10 +625,10 @@ def main():
         agent.start()
         time.sleep(0.8)
 
-    # ── Start state writer (feeds MAVProxy overlay) ───────────────────
+    # ── Start state writer ────────────────────────────────────────────
     threading.Thread(
         target=_state_writer_loop,
-        args=(agents, planner),
+        args=(agents, planner, target_manager),
         daemon=True,
         name="state-writer",
     ).start()
@@ -566,7 +670,7 @@ def main():
         time.sleep(2)
     else:
         log.warning("Spawn timeout — signalling Lloyd with current positions")
-        spawn_ready.set()   # unblock bootstrap even on timeout
+        spawn_ready.set()
 
     # ── Shutdown handlers ─────────────────────────────────────────────
     def _cleanup():
@@ -593,11 +697,19 @@ def main():
 
         while True:
             time.sleep(2)
-            _write_state(agents, planner)
+            _write_state(agents, planner, target_manager)
             metrics.report()
+
+            # Target status summary (only when targets are configured)
+            if target_positions:
+                log.info(target_manager.summary())
 
             # Drift correction: push drones back toward their territory
             for agent in agents:
+                # Skip drift correction if drone is on a validation mission —
+                # it's intentionally outside its territory right now.
+                if agent._validation_target is not None:
+                    continue
                 if (agent.lat is None
                         or agent.territory is None
                         or len(agent.territory) == 0):
@@ -617,7 +729,7 @@ def main():
         log.info(f"Running for {args.duration}s — Ctrl+C to stop early")
         run_deadline = time.time() + args.duration
         while time.time() < run_deadline:
-            _write_state(agents, planner)
+            _write_state(agents, planner, target_manager)
             time.sleep(2)
         _cleanup()
     else:

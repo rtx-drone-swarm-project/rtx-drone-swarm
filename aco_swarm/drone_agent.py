@@ -6,6 +6,12 @@ Modular drone agent with separated concerns:
   - FlightController: vehicle state and flight commands
   - NavigationController: high-level waypoint following
   - DroneAgent: orchestrates everything
+
+SEARCH ADDITIONS:
+  - DroneAgent.__init__: _target_manager, _validation_protocol,
+    _validation_target attributes
+  - NavigationController.get_waypoint: validation override check
+  - DroneAgent._execute_navigation_step: detection check each tick
 """
 
 import time
@@ -242,27 +248,41 @@ class NavigationController:
     def should_defer_to_lloyd(self) -> bool:
         return getattr(self.planner, "lloyd_active", False)
 
-    def get_waypoint(self, current_pos: Position) -> Optional[Tuple[float, float]]:
+    def get_waypoint(
+        self,
+        current_pos: Position,
+        validation_target: Optional[Tuple[float, float]] = None,
+    ) -> Optional[Tuple[float, float]]:
         """
-        Get next ACO waypoint within assigned territory.
+        Get next waypoint.
 
-        FIX (vs original):
-          - Deposit pheromone at the TARGET waypoint, not along the raw GPS
-            flight path. Raw GPS frequently crosses territory boundaries
-            (SITL doesn't snap to territory), so depositing there made
-            utilization appear 0% even when the drone was moving.
-          - Removed deposit_path(prev→current) which caused out-of-territory
-            pheromone accumulation and inflated overlap %.
+        Priority order:
+          1. Validation override — if ValidationProtocol has dispatched this
+             drone to corroborate a sighting, fly directly to that target.
+             Normal ACO is suspended until the override is cleared.
+          2. Defer to Lloyd — if a repartition is in progress, return None
+             so the drone holds position.
+          3. ACO navigation — standard pheromone-guided waypoint within
+             the assigned territory.
+
+        Pheromone is deposited at the ACO waypoint only (not during
+        validation flight, so validation drones don't pollute the grid).
         """
+        # ── Priority 1: validation override ──────────────────────────
+        if validation_target is not None:
+            return validation_target
+
+        # ── Priority 2: Lloyd repartition in progress ─────────────────
         if self.should_defer_to_lloyd():
             return None
+
+        # ── Priority 3: ACO ───────────────────────────────────────────
         if not self.can_navigate():
             return None
 
         state = DroneState(id=self.drone_id, lat=current_pos.lat, lon=current_pos.lon)
         state.territory = self.territory
 
-        # Get ACO waypoint (already within territory via clamp)
         target_lat, target_lon = self.planner._aco_waypoint(state)
         target_lat, target_lon = self.planner.clamp_to_territory(state, target_lat, target_lon)
 
@@ -301,6 +321,16 @@ class DroneAgent:
                                         expected_sysid if expected_sysid else drone_id + 1)
         self.flight = None
         self.nav    = NavigationController(drone_id, planner, grid)
+
+        # ── Search / validation state (injected by swarm_main) ────────
+        # _target_manager      : TargetManager | None
+        # _validation_protocol : ValidationProtocol | None
+        # _validation_target   : (lat, lon) | None  — set by ValidationProtocol
+        #                        when this drone is dispatched to corroborate
+        #                        a sighting; cleared on confirm or expiry.
+        self._target_manager      = None
+        self._validation_protocol = None
+        self._validation_target: Optional[Tuple[float, float]] = None
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -405,14 +435,46 @@ class DroneAgent:
             pos = self.conn.get_position()
             if pos:
                 self.current_position = pos
+                self._check_detections()        # ← search: run every tick
                 self._execute_navigation_step()
             elapsed    = time.time() - t0
             sleep_time = max(0, self.loop_interval - elapsed)
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
+    def _check_detections(self):
+        """
+        Run target proximity check every navigation tick (5 Hz).
+
+        TargetManager.check_detection() is O(targets), thread-safe, and
+        returns non-None only on meaningful state transitions — so this is
+        cheap to call on every tick.
+
+        When a hit is returned, immediately notify ValidationProtocol so it
+        can dispatch a corroborating drone before the validation window
+        starts ticking.
+        """
+        if self._target_manager is None:
+            return
+        if self.current_position is None:
+            return
+
+        hit = self._target_manager.check_detection(
+            drone_id=self.drone_id,
+            lat=self.current_position.lat,
+            lon=self.current_position.lon,
+        )
+        if hit is not None and self._validation_protocol is not None:
+            self._validation_protocol.on_detection(hit)
+
     def _execute_navigation_step(self):
-        waypoint = self.nav.get_waypoint(self.current_position)
+        # Pass current validation override into NavigationController so it
+        # can take priority over ACO without the nav layer needing a direct
+        # reference to ValidationProtocol.
+        waypoint = self.nav.get_waypoint(
+            self.current_position,
+            validation_target=self._validation_target,
+        )
         if waypoint is None:
             return
         if self.phase == DronePhase.SPAWNING and self.nav.can_navigate():
