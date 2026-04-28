@@ -10,7 +10,7 @@ async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Pro
 
 export type MissionApiClient = {
   createMission: (payload: MissionCreateRequest) => Promise<MissionRecord>;
-  startMission: (missionId: string | number) => Promise<MissionRecord>;
+  startMission: (missionId: string | number, algorithm?: string) => Promise<MissionRecord>;
   stopMission: (missionId: string | number) => Promise<MissionRecord>;
   deleteMission: (missionId: string | number) => Promise<void>;
 };
@@ -24,10 +24,18 @@ export function createMissionClient(apiBase: string): MissionApiClient {
         body: JSON.stringify(payload)
       }),
 
-    startMission: (missionId) =>
-      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/start`, {
-        method: "POST"
-      }),
+    startMission: (missionId, algorithm) => {
+      const hasBody = algorithm && algorithm !== "default";
+      return requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/start`, {
+        method: "POST",
+        ...(hasBody
+          ? {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ algorithm })
+            }
+          : {})
+      });
+    },
 
     stopMission: (missionId) =>
       requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/stop`, {

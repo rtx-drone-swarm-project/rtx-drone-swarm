@@ -8,9 +8,9 @@ type SwarmStatusPanelProps = {
   validDroneCount: number;
   missionActive: boolean;
   searchStatus: string;
-  averageBattery: string;
   lostHikerCount: number;
   telemetryMode: string;
+  selectedAlgorithm: string;
 };
 
 export default function SwarmStatusPanel({
@@ -19,10 +19,11 @@ export default function SwarmStatusPanel({
   validDroneCount,
   missionActive,
   searchStatus,
-  averageBattery,
   lostHikerCount,
-  telemetryMode
+  telemetryMode,
+  selectedAlgorithm
 }: SwarmStatusPanelProps) {
+  const algorithmLabel = selectedAlgorithm === "default" ? "Default" : selectedAlgorithm.toUpperCase();
   return (
     <CollapsibleSection title="Swarm Status">
       <div className="kv-grid">
@@ -34,14 +35,14 @@ export default function SwarmStatusPanel({
         <strong>{validDroneCount}</strong>
         <span>Search Status</span>
         <strong>{missionActive ? <SearchingLabel text="Searching" /> : statusLabel(searchStatus)}</strong>
-        <span>Battery</span>
-        <strong>{averageBattery}</strong>
         <span>Telemetry</span>
         <strong className={telemetryMode === "LIVE SITL" ? "success" : telemetryMode === "SIMULATED" ? "warning-text" : ""}>
           {telemetryMode}
         </strong>
         <span>Hikers Lost</span>
         <strong>{lostHikerCount}</strong>
+        <span>Algorithm</span>
+        <strong>{algorithmLabel}</strong>
       </div>
     </CollapsibleSection>
   );

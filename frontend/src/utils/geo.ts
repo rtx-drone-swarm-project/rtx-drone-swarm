@@ -23,6 +23,18 @@ export function fixedAreaBounds(centerLat: number, centerLon: number): Bounds {
   };
 }
 
+export function customAreaBounds(centerLat: number, centerLon: number, halfSideKm: number): Bounds {
+  const latDelta = kmToLatDelta(halfSideKm);
+  const lonDelta = kmToLonDelta(halfSideKm, centerLat);
+
+  return {
+    min_lat: centerLat - latDelta,
+    max_lat: centerLat + latDelta,
+    min_lon: centerLon - lonDelta,
+    max_lon: centerLon + lonDelta
+  };
+}
+
 export function boundsToLeaflet(bounds: Bounds): [[number, number], [number, number]] {
   return [
     [bounds.min_lat, bounds.min_lon],

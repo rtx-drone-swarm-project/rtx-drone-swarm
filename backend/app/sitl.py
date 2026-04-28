@@ -145,11 +145,6 @@ class SITLTelemetryBridge:
         for drone in self.swarm.drones:
             d_state = drone.get_state()
             
-            # Fetch battery if available
-            battery = None
-            if drone.last_status and getattr(drone.last_status, 'battery_remaining', -1) != -1:
-                battery = drone.last_status.battery_remaining
-
             has_pos = bool(d_state["lat"] and d_state["lon"])
             
             # Only add drones to the telemetry payload if they have a position
@@ -163,8 +158,7 @@ class SITLTelemetryBridge:
                 "lon": d_state["lon"],
                 "alt": d_state["rel_alt"], 
                 "groundspeed": d_state["groundspeed"],
-                "heading": None, 
-                "battery_remaining": battery,
+                "heading": d_state["heading"],
                 "armed": d_state["armed"],
                 "mode": d_state["mode"],
                 "telemetry_source": "sitl",           # ADDED THIS FOR FRONTEND
