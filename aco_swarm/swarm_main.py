@@ -45,6 +45,7 @@ from typing import List
 
 from stigmergy_engine import InMemoryPheromoneGrid, GridConfig
 from drone_agent import DroneAgent, haversine_m
+from pymavlink import mavutil
 from voronoi_aco_hybrid import VoronoiACOPlanner, DroneState, PlannerPhase
 from metrics import MetricsTracker
 
@@ -472,6 +473,20 @@ def main():
     for a in agents:
         log.info(f"[ID CHECK] Drone {a.drone_id} "
                  f"sysid={a.conn.expected_sysid}")
+
+    # ── Infinite battery: set SIM_BATT_CAPACITY=0 on all vehicles ────
+    # Must be done after connection, before arming.
+    # Value 0 disables battery simulation entirely in ArduPilot SITL.
+    for a in agents:
+        try:
+            a.conn.master.param_set_send(
+                "SIM_BATT_CAPACITY",
+                0,
+                mavutil.mavlink.MAV_PARAM_TYPE_REAL32
+            )
+            log.info(f"[Drone {a.drone_id + 1}] SIM_BATT_CAPACITY=0 (infinite battery) ✓")
+        except Exception as e:
+            log.warning(f"[Drone {a.drone_id + 1}] Could not set battery param: {e}")
 
     if not agents:
         log.error("No drones connected — exiting.")

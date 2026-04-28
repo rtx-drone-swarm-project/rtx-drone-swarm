@@ -2,6 +2,10 @@
 mavproxy_voronoi.py
 -------------------
 MAVProxy module that overlays Voronoi partition polygons on the map.
+
+UPDATED FOR 15 DRONES:
+  - Expanded COLORS array from 12 to 15 unique colors
+  - All drones get unique colors (no wrapping)
 """
 
 import numpy as np
@@ -25,18 +29,21 @@ def _resolve_state_file() -> str:
 
 
 COLORS = [
-    (230, 25,  75),   # red
-    (60,  180, 75),   # green
-    (67,  99,  216),  # blue
-    (245, 130, 49),   # orange
-    (145, 30,  180),  # purple
-    (66,  212, 244),  # cyan
-    (240, 50,  230),  # magenta
-    (191, 239, 69),   # lime
-    (250, 190, 212),  # pink
-    (70,  153, 144),  # teal
-    (220, 190, 255),  # lavender
-    (154, 99,  36),   # brown
+    (230, 25,  75),   # red      - D0
+    (60,  180, 75),   # green    - D1
+    (67,  99,  216),  # blue     - D2
+    (245, 130, 49),   # orange   - D3
+    (145, 30,  180),  # purple   - D4
+    (66,  212, 244),  # cyan     - D5
+    (240, 50,  230),  # magenta  - D6
+    (191, 239, 69),   # lime     - D7
+    (250, 190, 212),  # pink     - D8
+    (70,  153, 144),  # teal     - D9
+    (220, 190, 255),  # lavender - D10
+    (154, 99,  36),   # brown    - D11
+    (255, 225, 25),   # yellow   - D12
+    (0,   130, 200),  # steel    - D13
+    (128, 128, 0),    # olive    - D14
 ]
 
 # How many seconds of no file updates before we clear all overlays.
@@ -193,7 +200,7 @@ class VoronoiModule(mp_module.MPModule):
                 cy = float(pts[:, 1].mean())
                 self._add_object(map_module,
                     f"voronoi_label_{drone_id}", "label",
-                    (cx, cy), f"D{drone_id}", layer="voronoi", colour=color)
+                    (cx, cy), f"D{drone_id + 1}", layer="voronoi", colour=color)
 
             # Flight trail
             if len(path) >= 2:

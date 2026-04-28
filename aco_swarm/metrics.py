@@ -125,7 +125,7 @@ class MetricsTracker:
                     f"{dist:.1f}", f"{eff:.4f}", f"{util:.4f}", ter
                 ])
 
-            print(f"  D{agent.drone_id:<6} ({agent.lat:.5f},{agent.lon:.5f})  "
+            print(f"  D{agent.drone_id + 1:<6} ({agent.lat:.5f},{agent.lon:.5f})  "
                 f"{dist:<10.1f} {eff:<13.1%} {util:.1%}  [{ter} cells]")
 
         if write_csv:
