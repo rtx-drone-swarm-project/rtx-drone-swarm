@@ -32,14 +32,7 @@ export default function LegendPanel() {
         Search area boundary
       </div>
       <div className="legend-help">
-        <strong>How to use</strong>
-        <ul>
-          <li>Click map to select area</li>
-          <li>Pan map by dragging</li>
-          <li>Zoom with mouse wheel</li>
-          <li>Click drones for details</li>
-        </ul>
-        <p className="legend-note">Drone call signs appear on hover. Blue marks finder drones, orange marks confirmers, and found hikers keep a separate checked marker.</p>
+        Drag to draw area · Scroll to zoom · Click drone for details
       </div>
     </CollapsibleSection>
   );

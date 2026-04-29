@@ -23,9 +23,34 @@ This prototype demonstrates how a coordinated drone swarm could help search team
 - Ian Tang
 - Louie Gutierrez
 
+## Prerequisites
+
+The preferred local demo path uses Docker Compose, but the SITL simulator still depends on a full ArduPilot checkout on the host machine.
+
+- Git to clone this repository:
+
+```bash
+git clone https://github.com/rtx-drone-swarm-project/rtx-drone-swarm.git
+cd rtx-drone-swarm
+```
+
+- Docker Engine 24+ with Docker Compose V2 (`docker compose`), or Docker Desktop 4+ on macOS/Windows.
+- A full ArduPilot checkout built for SITL. `ARDUPILOT_PATH` must point to the ArduPilot repository root, the directory that contains `Tools/autotest/sim_vehicle.py`.
+- For native Ubuntu/Linux setup without Docker, install system build tools and Python package tooling:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential python3-pip
+python3 -m pip install MAVProxy empy==3.3.4 future pyserial
+```
+
+If Ubuntu blocks system-wide Python installs, use a virtual environment or rerun the `pip` command with `--break-system-packages`.
+
 ## First-Time Setup
 
-1. Copy the local environment template:
+1a. If ArduPilot SITL is not installed and built yet, follow [docs/SITL_QUICKSTART.md](docs/SITL_QUICKSTART.md) first.
+
+1b. Copy the local environment template:
 
 ```bash
 cp .env.example .env
@@ -33,16 +58,24 @@ cp .env.example .env
 
 2. Edit `.env` and set `ARDUPILOT_PATH` to your local ArduPilot checkout.
 
-3. If ArduPilot SITL is not installed and built yet, follow [docs/SITL_QUICKSTART.md](docs/SITL_QUICKSTART.md) first.
+3. Verify the path points to the ArduPilot repo root:
+
+```bash
+set -a
+source .env
+set +a
+test -f "$ARDUPILOT_PATH/Tools/autotest/sim_vehicle.py"
+```
 
 ## Run the Demo
 
 These commands assume ArduPilot SITL is already installed and built on the host machine. Docker reads repo-local settings from `.env`, including the ArduPilot path mounted into the SITL service. If you still need to install ArduPilot, follow the one-time setup guide in [docs/SITL_QUICKSTART.md](docs/SITL_QUICKSTART.md).
 
-1. Install repo Python dependencies:
+1. Optional: install repo Python dependencies for host helper scripts and local backend runs. Docker-only runs install service dependencies during image builds.
 
 ```bash
 pip3 install -r requirements.txt
+pip3 install -r backend/requirements.txt
 ```
 
 2. Create `.env` from the example and set your local paths:
@@ -64,6 +97,8 @@ If you only want to refresh the Docker images, run:
 ```bash
 docker compose build
 ```
+
+To run without Docker, use the host-only path in [docs/SITL_QUICKSTART.md](docs/SITL_QUICKSTART.md#host-sitl--host-backend).
 
 ## What You Should See
 

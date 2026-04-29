@@ -46,6 +46,7 @@ class MissionCreate(BaseModel):
     bounds: Bounds
     drones: List[Drone]
     hikers: Optional[List[Hiker]] = None
+    algorithm: Optional[str] = "voronoi"
 
 class MissionStart(BaseModel):
     """Optional mission-start overrides for drones, algorithm, or hikers."""

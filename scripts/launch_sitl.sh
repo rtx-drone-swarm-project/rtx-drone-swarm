@@ -2,7 +2,7 @@
 # Start 15 headless SITL drones (ArduCopter swarm).
 # Requires ArduPilot clone. Set ARDUPILOT_PATH if not ~/ardupilot.
 #
-# Logs: SITL outputs to logs/sitl/<run_id>/, capacity metrics to logs/swarm/
+# File logging is disabled by default; see scripts/sitl_params.param.
 
 set -e
 COUNT="${1:-15}"
@@ -10,13 +10,13 @@ ARDUPILOT_PATH="${ARDUPILOT_PATH:-$HOME/ardupilot}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PARAM_FILE="${2:-$SCRIPT_DIR/sitl_params.param}"
-RUN_ID="$(date +%Y%m%d-%H%M%S)"
-LOG_BASE="$REPO_ROOT/logs"
 SITL_LOCATION="${SITL_LOCATION:-CMAC}"
 SITL_ENABLE_MAP="${SITL_ENABLE_MAP:-1}"
 SITL_ENABLE_MAVPROXY="${SITL_ENABLE_MAVPROXY:-1}"
 SITL_MAVPROXY_CMD="${SITL_MAVPROXY_CMD:-}"
-mkdir -p "$LOG_BASE/sitl" "$LOG_BASE/swarm" "$LOG_BASE/cloud"
+
+
+git config --global --add safe.directory "$ARDUPILOT_PATH"
 
 if [[ ! -d "$ARDUPILOT_PATH" ]]; then
   echo "ArduPilot not found at $ARDUPILOT_PATH"
@@ -26,14 +26,8 @@ if [[ ! -d "$ARDUPILOT_PATH" ]]; then
   exit 1
 fi
 
-SITL_LOG="$LOG_BASE/sitl/swarm-$RUN_ID"
-SWARM_LOG="$LOG_BASE/swarm/start-$RUN_ID.log"
-mkdir -p "$SITL_LOG"
-
-echo "Starting $COUNT headless SITL drones (run $RUN_ID)"
-echo "SITL logs: $SITL_LOG"
-echo "Swarm log: $SWARM_LOG"
-echo "Cloud log dir: $LOG_BASE/cloud"
+echo "Starting $COUNT headless SITL drones"
+echo "SITL file logging: disabled"
 echo ""
 
 cd "$ARDUPILOT_PATH"
@@ -46,6 +40,7 @@ SIM_VEHICLE_ARGS=(
   --auto-sysid
   --location "$SITL_LOCATION"
   --auto-offset-line 90,10
+  --speedup 2
   --add-param-file "$PARAM_FILE"
 )
 
@@ -60,4 +55,5 @@ elif [[ -n "$SITL_MAVPROXY_CMD" ]]; then
 fi
 
 # Start SITL with separate TCP outputs for each drone.
-./Tools/autotest/sim_vehicle.py "${SIM_VEHICLE_ARGS[@]}" 2>&1 | tee "$SWARM_LOG"
+# exec replaces this shell so Docker signals (SIGTERM/SIGINT) go directly to sim_vehicle.py.
+exec ./Tools/autotest/sim_vehicle.py "${SIM_VEHICLE_ARGS[@]}"

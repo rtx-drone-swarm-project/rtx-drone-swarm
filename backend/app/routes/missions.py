@@ -21,7 +21,8 @@ from app.missions import (
 )
 from app.settings import DEFAULT_DISPATCH_HOST, DEFAULT_DISPATCH_TIMEOUT_SECONDS
 from app.simulation import simulation_loop
-from app.voronoi import build_search_grid
+#from app.voronoi import build_search_grid <---------------------------------------------------------------------------------------------
+from app.algorithms.base import build_search_grid
 from app.ws import manager
 
 
@@ -39,6 +40,7 @@ def create_mission(mission_data: MissionCreate):
         "status": "idle",
         "progress": 0.0,
         "elapsed_seconds": 0,
+        "algorithm": getattr(mission_data, "algorithm", "voronoi"),
         "bounds": mission_data.bounds.model_dump(),
         "drones": [d.model_dump() for d in mission_data.drones],
         "hikers": [m.model_dump() for m in mission_data.hikers] if mission_data.hikers else [],
@@ -207,6 +209,7 @@ async def stop_mission(mission_id: str):
             "progress": mission["progress"],
         }
     )
+    await manager.broadcast({"type": "telemetry", "drones": []})
 
     return mission
 
