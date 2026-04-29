@@ -124,27 +124,57 @@ class ACONavigator:
 
     def _select_least_visited(self, points: np.ndarray) -> np.ndarray:
         """
-        Select least-visited territory point.
-
-        Adds ±10m jitter to the chosen point to prevent waypoint freeze
-        when multiple cells tie for minimum pheromone (common at startup).
+        Boustrophedon (lawnmower) sweep selector.
+        
+        Sorts territory cells into row-major order (north→south, 
+        alternating left→right / right→left per row). Picks the 
+        first unvisited cell in sweep order. This produces clean
+        parallel sweeps instead of random jumps.
+        
+        Falls back to lowest-pheromone if all cells visited (for 
+        repartition passes).
         """
-        best_val   = float("inf")
-        candidates = []
-
-        for point in points:
-            pher = self.pheromone.get_value(point[0], point[1])
-            if pher < best_val:
-                best_val   = pher
-                candidates = [point]
-            elif pher == best_val:
-                candidates.append(point)
-
-        chosen = np.array(random.choice(candidates))
-
-        # ~10m jitter in degrees (~0.0001° ≈ 11m)
-        jitter = np.random.uniform(-0.0001, 0.0001, 2)
-        return chosen + jitter
+        UNVISITED_THRESHOLD = 0.01   # pheromone below this = unvisited
+        ROW_BAND_DEG = 0.0003        # ~33m row height — matches detection radius
+        
+        # Get pheromone for all points
+        pher_vals = np.array([
+            self.pheromone.get_value(p[0], p[1]) for p in points
+        ])
+        
+        # Find unvisited cells
+        unvisited_mask = pher_vals < UNVISITED_THRESHOLD
+        unvisited = points[unvisited_mask]
+        
+        if len(unvisited) == 0:
+            # All visited — pick global minimum for re-sweep
+            chosen = points[np.argmin(pher_vals)].copy()
+            return chosen + np.random.uniform(-0.00005, 0.00005, 2)
+        
+        # Assign row bands (quantize latitude into strips)
+        lat_min = unvisited[:, 0].min()
+        row_idx = ((unvisited[:, 0] - lat_min) / ROW_BAND_DEG).astype(int)
+        
+        # Sort: primary = row (north to south = descending lat),
+        #       secondary = col alternating by row (boustrophedon)
+        sorted_indices = []
+        for row in sorted(set(row_idx)):
+            mask = row_idx == row
+            row_points = unvisited[mask]
+            # Alternate direction per row
+            reverse = (row % 2 == 1)
+            order = np.argsort(row_points[:, 1])  # sort by longitude
+            if reverse:
+                order = order[::-1]
+            sorted_indices.extend(np.where(mask)[0][order])
+        
+        if len(sorted_indices) == 0:
+            chosen = points[np.argmin(pher_vals)].copy()
+        else:
+            chosen = unvisited[sorted_indices[0]].copy()
+        
+        # Small jitter (~5m) to prevent exact waypoint stacking
+        return chosen + np.random.uniform(-0.00005, 0.00005, 2)
 
     def clamp_to_territory(self, drone: DroneState, lat: float, lon: float) -> Tuple[float, float]:
         if not drone.has_territory():
@@ -153,7 +183,7 @@ class ACONavigator:
         dists      = np.linalg.norm(drone.territory - target, axis=1)
         nearest_idx = np.argmin(dists)
         # Snap to nearest territory point if the jitter/blend pushed us outside
-        if dists[nearest_idx] > 0.001:   # ~100m — unchanged threshold
+        if dists[nearest_idx] > 0.0003:   # ~33m — snaps back much sooner
             nearest = drone.territory[nearest_idx]
             return (float(nearest[0]), float(nearest[1]))
         return lat, lon
@@ -227,17 +257,28 @@ class VoronoiACOPlanner:
     # ── Coverage metrics ───────────────────────────────────────────
 
     def _territory_coverage(self, drone: DroneState) -> float:
+        """
+        Coverage = fraction of territory cells that have been visited.
+        
+        A cell is 'visited' if pheromone > 0 in its grid neighborhood OR
+        if the drone has passed within PHYSICAL_VISIT_RADIUS_DEG of it.
+        
+        Using a larger neighborhood (5x5 instead of 3x3) prevents the metric
+        from requiring exact waypoint-on-cell hits, which are rare at edges.
+        """
         if not drone.has_territory():
             return 0.0
         snap    = self.pheromone.get_snapshot()
         visited = 0
+        RADIUS  = 2   # 5×5 neighborhood instead of 3×3
+
         for pt in drone.territory:
             row, col = self.pheromone.world_to_grid(pt[0], pt[1])
             found = False
-            for dr in range(-1, 2):
+            for dr in range(-RADIUS, RADIUS + 1):
                 if found:
                     break
-                for dc in range(-1, 2):
+                for dc in range(-RADIUS, RADIUS + 1):
                     r = max(0, min(self.pheromone.config.rows - 1, row + dr))
                     c = max(0, min(self.pheromone.config.cols - 1, col + dc))
                     if snap[r, c] > 0:

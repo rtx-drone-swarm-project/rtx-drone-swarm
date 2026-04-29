@@ -230,16 +230,24 @@ def _write_state(
             })
 
     # np.save always appends .npy, so name the tmp WITHOUT .npy extension.
-    tmp_base = STATE_FILE[:-4] + ".tmp"
-    tmp_file = tmp_base + ".npy"
-    np.save(tmp_base, {
-        "pheromone":          planner.pheromone.get_snapshot(),
-        "agents":             agent_data,
-        "confirmed_targets":  confirmed,
-        "pending_targets":   pending,
-        "all_targets":        all_targets,
-    })
-    os.replace(tmp_file, STATE_FILE)
+    
+    try:
+        tmp_base = STATE_FILE[:-4] + ".tmp"
+        tmp_file = tmp_base + ".npy"
+        np.save(tmp_base, {
+            "pheromone":         planner.pheromone.get_snapshot(),
+            "agents":            agent_data,
+            "confirmed_targets": confirmed,
+            "pending_targets":   pending,
+            "all_targets":       all_targets,
+        })
+        # np.save is synchronous but rename needs the file to exist
+        if os.path.exists(tmp_file):
+            os.replace(tmp_file, STATE_FILE)
+        else:
+            log.warning("[state-writer] tmp file missing — skipping replace")
+    except Exception as e:
+        log.warning(f"[state-writer] write failed: {e}")
 
 
 def _state_writer_loop(
@@ -292,6 +300,20 @@ def _push_territories(agents: List[DroneAgent], states: List[DroneState]):
         if s.territory is not None and len(s.territory) > 0:
             agents[s.id].territory = s.territory
 
+def _seed_edge_pheromone(agents, planner, boost=0.1):
+    """
+    Deposit a tiny amount of pheromone at territory CENTROIDS so that
+    the edge-bias formula in _select_least_visited() immediately pulls
+    drones outward on the first tick (centroid has pheromone > 0,
+    edges have 0, so edges win the score comparison).
+    """
+    for agent in agents:
+        if agent.territory is None or len(agent.territory) == 0:
+            continue
+        centroid = agent.territory.mean(axis=0)
+        # Deposit at centroid so it's "already visited" — forces outward pull
+        planner.pheromone.deposit(float(centroid[0]), float(centroid[1]))
+        planner.pheromone.deposit(float(centroid[0]), float(centroid[1]))
 
 # ── Lloyd bootstrap + adaptive repartition loop ───────────────────────
 def _lloyd_loop(
@@ -338,6 +360,7 @@ def _lloyd_loop(
             states = _build_drone_states(agents)
             planner._run_lloyd(states)
             _push_territories(agents, states)
+            #_seed_edge_pheromone(agents, planner) 
 
             if not _check_territory_balance(agents):
                 log.warning("[Lloyd] Bootstrap produced imbalanced territories — "
@@ -478,8 +501,8 @@ def main():
         lat_min=home_lat - span, lat_max=home_lat + span,
         lon_min=home_lon - span, lon_max=home_lon + span,
         rows=args.grid_rows, cols=args.grid_cols,
-        evaporation_rate=args.evap_rate,
-        deposit_strength=1.0,
+        evaporation_rate=0.97,
+        deposit_strength=0.1,
         tick_interval=1.0,
     )
     grid = InMemoryPheromoneGrid(cfg)
@@ -697,7 +720,10 @@ def main():
 
         while True:
             time.sleep(2)
-            _write_state(agents, planner, target_manager)
+            try:
+                _write_state(agents, planner, target_manager)
+            except Exception as e:
+                log.warning(f"[main-loop] state write failed: {e}")
             metrics.report()
 
             # Target status summary (only when targets are configured)
@@ -729,7 +755,10 @@ def main():
         log.info(f"Running for {args.duration}s — Ctrl+C to stop early")
         run_deadline = time.time() + args.duration
         while time.time() < run_deadline:
-            _write_state(agents, planner, target_manager)
+            try:
+                _write_state(agents, planner, target_manager)
+            except Exception as e:
+                log.warning(f"[main-loop] state write failed: {e}")
             time.sleep(2)
         _cleanup()
     else:
