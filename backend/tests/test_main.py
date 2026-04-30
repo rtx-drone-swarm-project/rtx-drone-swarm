@@ -840,6 +840,111 @@ def test_mission_drone_to_sysid_map_assigns_existing_and_fallback_sysids():
     assert mission["drones"][1]["sysid"] == 2
 
 
+def test_start_mission_stores_algorithm_from_body():
+    mission_data = {
+        "name": "Algorithm Override Test",
+        "bounds": {"min_lat": 34.0, "max_lat": 35.0, "min_lon": -118.0, "max_lon": -117.0},
+        "drones": [{"id": "drone1", "lat": 34.5, "lon": -117.5}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    start_response = client.post(f"/missions/{mission_id}/start", json={"algorithm": "apf"})
+    assert start_response.status_code == 200
+    assert start_response.json()["algorithm"] == "apf"
+
+
+def test_start_mission_defaults_algorithm_to_voronoi_when_no_body():
+    mission_data = {
+        "name": "Default Algorithm Test",
+        "bounds": {"min_lat": 34.0, "max_lat": 35.0, "min_lon": -118.0, "max_lon": -117.0},
+        "drones": [{"id": "drone1", "lat": 34.5, "lon": -117.5}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    start_response = client.post(f"/missions/{mission_id}/start")
+    assert start_response.status_code == 200
+    assert start_response.json()["algorithm"] == "voronoi"
+
+
+def test_metrics_endpoint_returns_algorithm_and_structure():
+    mission_data = {
+        "name": "Metrics Test",
+        "bounds": {"min_lat": 34.0, "max_lat": 35.0, "min_lon": -118.0, "max_lon": -117.0},
+        "drones": [{"id": "drone1", "lat": 34.5, "lon": -117.5}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    client.post(f"/missions/{mission_id}/start", json={"algorithm": "apf"})
+
+    response = client.get(f"/missions/{mission_id}/metrics")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["algorithm"] == "apf"
+    assert payload["status"] == "running"
+    assert "targets_total" in payload
+    assert "targets_found" in payload
+    assert "found_at_seconds" in payload
+    assert isinstance(payload["found_at_seconds"], list)
+
+
+def test_metrics_endpoint_returns_404_for_missing_mission():
+    response = client.get("/missions/nonexistent-id/metrics")
+    assert response.status_code == 404
+
+
+def test_emit_target_found_stores_found_at_on_target():
+    mission_id = "emit-found-at-test"
+    missions_db[mission_id] = {
+        "id": mission_id,
+        "status": "running",
+        "elapsed_seconds": 42,
+        "_found_target_ids": [],
+        "bounds": {"min_lat": 34.0, "max_lat": 35.0, "min_lon": -118.0, "max_lon": -117.0},
+        "drones": [],
+        "targets": [],
+    }
+    target = {"id": "tgt-x", "lat": 34.5, "lon": -117.5, "status": "detected"}
+
+    async def fake_broadcast(_message):
+        pass
+
+    original_broadcast = manager.broadcast
+    manager.broadcast = fake_broadcast
+    try:
+        asyncio.run(simulation_module._emit_target_found(missions_db[mission_id], target))
+    finally:
+        manager.broadcast = original_broadcast
+        missions_db.pop(mission_id, None)
+
+    assert target["found_at"] == 42
+
+
+def test_finalize_mission_stores_completion_elapsed_seconds():
+    mission = {
+        "status": "running",
+        "progress": 0.0,
+        "elapsed_seconds": 77,
+        "targets": [
+            {"id": "t1", "status": "found"},
+            {"id": "t2", "status": "found"},
+        ],
+    }
+
+    async def run():
+        return await simulation_module._finalize_mission_progress(mission)
+
+    result = asyncio.run(run())
+    assert result is True
+    assert mission["status"] == "complete"
+    assert mission["completion_elapsed_seconds"] == 77
+
+
 def test_normalize_script_results_matches_expected_assignments_by_sysid_and_drone_id():
     expected_assignments = [
         {"drone_id": "drone-a", "sysid": 1},
