@@ -4,7 +4,8 @@ import CollapsibleSection from "../common/CollapsibleSection";
 const ALGORITHM_OPTIONS: { value: AlgorithmOption; label: string }[] = [
   { value: "default", label: "Default" },
   { value: "aco", label: "ACO" },
-  { value: "voronoi", label: "Voronoi" }
+  { value: "voronoi", label: "Voronoi" },
+  { value: "apf", label: "APF" }
 ];
 
 type ActionsPanelProps = {
