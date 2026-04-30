@@ -23,3 +23,8 @@ DEFAULT_SITL_COUNT = int(os.environ.get("SITL_COUNT", "15"))
 DEFAULT_SITL_POLL_INTERVAL_SECONDS = float(os.environ.get("SITL_POLL_INTERVAL_SECONDS", "0.2"))
 
 GOTO_TYPE_MASK = 0b110111111000
+
+# Target groundspeed sent to SITL drones via MAV_CMD_DO_CHANGE_SPEED after
+# takeoff. ArduPilot's default WPNAV_SPEED is 500 cm/s (5 m/s); raising this
+# makes GUIDED-mode coverage noticeably faster during simulation.
+SITL_DRONE_SPEED_MS = float(os.environ.get("SITL_DRONE_SPEED_MS", "15.0"))

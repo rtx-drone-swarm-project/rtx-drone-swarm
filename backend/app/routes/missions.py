@@ -223,15 +223,26 @@ def get_mission_metrics(mission_id: str):
     targets = mission.get("targets", [])
     found_targets = [t for t in targets if t.get("status") == "found"]
     found_times = [t["found_at"] for t in found_targets if "found_at" in t]
+
+    grid_size = len(mission.get("grid", []))
+    covered = mission.get("covered_grid_indices", [])
+    coverage_pct = round(100.0 * len(covered) / grid_size, 1) if grid_size else 0.0
+    elapsed = mission.get("elapsed_seconds", 0)
+    coverage_rate = round(len(covered) / elapsed, 2) if elapsed > 0 else 0.0
+
     return {
         "algorithm": mission.get("algorithm", "voronoi"),
         "status": mission.get("status"),
-        "elapsed_seconds": mission.get("elapsed_seconds", 0),
+        "elapsed_seconds": elapsed,
         "completion_elapsed_seconds": mission.get("completion_elapsed_seconds"),
         "targets_total": len(targets),
         "targets_found": len(found_targets),
         "found_at_seconds": found_times,
+        "first_find_seconds": min(found_times) if found_times else None,
+        "last_find_seconds": max(found_times) if found_times else None,
         "avg_find_seconds": round(sum(found_times) / len(found_times), 1) if found_times else None,
+        "coverage_pct": coverage_pct,
+        "coverage_rate_per_sec": coverage_rate,
     }
 
 

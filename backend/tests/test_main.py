@@ -925,6 +925,201 @@ def test_emit_target_found_stores_found_at_on_target():
     assert target["found_at"] == 42
 
 
+def test_sweep_algorithm_assigns_dense_paths_and_returns_first_waypoint():
+    from app.algorithms.boustrophedon import VoronoiBoustrophedon
+    from app.algorithms.base import DETECTION_RADIUS
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+    mission = {
+        "bounds": bounds,
+        "drones": [
+            {"id": "drone1", "lat": 0.01, "lon": 0.01},
+            {"id": "drone2", "lat": 0.03, "lon": 0.03},
+        ],
+    }
+    algorithm = VoronoiBoustrophedon()
+    waypoints = algorithm.get_target_waypoints(mission, mission["drones"])
+
+    assert "sweep_paths" in mission
+    assert set(mission["sweep_paths"].keys()) == {"drone1", "drone2"}
+    # Each drone covers half of a 0.04°×0.04° area at DETECTION_RADIUS spacing → many waypoints
+    assert all(len(path) > 2 for path in mission["sweep_paths"].values())
+    assert set(waypoints.keys()) == {"drone1", "drone2"}
+    assert mission["sweep_reached_radius"] == DETECTION_RADIUS
+
+
+def test_sweep_algorithm_advances_to_next_waypoint_when_drone_arrives():
+    from app.algorithms.boustrophedon import VoronoiBoustrophedon
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+    mission = {
+        "bounds": bounds,
+        "drones": [{"id": "drone1", "lat": -0.1, "lon": -0.1}],  # far from path start
+    }
+    algorithm = VoronoiBoustrophedon()
+
+    first = algorithm.get_target_waypoints(mission, mission["drones"])
+    initial_path_length = len(mission["sweep_paths"]["drone1"])
+
+    # Teleport drone to the first waypoint
+    mission["drones"][0]["lat"] = first["drone1"][0]
+    mission["drones"][0]["lon"] = first["drone1"][1]
+    second = algorithm.get_target_waypoints(mission, mission["drones"])
+
+    assert len(mission["sweep_paths"]["drone1"]) < initial_path_length
+
+
+def test_sweep_algorithm_returns_empty_when_no_bounds():
+    from app.algorithms.boustrophedon import VoronoiBoustrophedon
+
+    algorithm = VoronoiBoustrophedon()
+    mission = {"drones": [{"id": "drone1", "lat": 0.0, "lon": 0.0}]}
+    assert algorithm.get_target_waypoints(mission, mission["drones"]) == {}
+
+
+def test_sweep_reached_radius_equals_detection_radius():
+    from app.algorithms.boustrophedon import VoronoiBoustrophedon, _REACH_RADIUS
+    from app.algorithms.base import DETECTION_RADIUS
+
+    mission = {
+        "bounds": {"min_lat": 33.45, "max_lat": 33.47, "min_lon": -117.25, "max_lon": -117.23},
+        "drones": [{"id": "d1", "lat": 33.46, "lon": -117.24}],
+    }
+    alg = VoronoiBoustrophedon()
+    alg.get_target_waypoints(mission, mission["drones"])
+
+    assert mission["sweep_reached_radius"] == DETECTION_RADIUS
+    assert _REACH_RADIUS == DETECTION_RADIUS
+
+
+def test_dense_grid_covers_full_bounds():
+    """Every point in the search area must be within DETECTION_RADIUS of a grid point."""
+    from app.algorithms.boustrophedon import _build_dense_grid
+    from app.algorithms.base import DETECTION_RADIUS
+    import numpy as np
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01}
+    grid = _build_dense_grid(bounds)
+
+    assert float(grid[:, 0].min()) == 0.0
+    assert float(grid[:, 1].min()) == 0.0
+    assert float(grid[:, 0].max()) >= bounds["max_lat"] - DETECTION_RADIUS * 0.1
+    assert float(grid[:, 1].max()) >= bounds["max_lon"] - DETECTION_RADIUS * 0.1
+
+
+def test_dense_grid_spaced_at_detection_radius():
+    from app.algorithms.boustrophedon import _build_dense_grid
+    from app.algorithms.base import DETECTION_RADIUS
+    import numpy as np
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01}
+    grid = _build_dense_grid(bounds)
+
+    unique_lats = np.unique(np.round(grid[:, 0], 8))
+    unique_lons = np.unique(np.round(grid[:, 1], 8))
+    assert abs(float(np.diff(unique_lats).min()) - DETECTION_RADIUS) < 1e-9
+    assert abs(float(np.diff(unique_lons).min()) - DETECTION_RADIUS) < 1e-9
+
+
+def test_voronoi_partition_covers_entire_dense_grid():
+    """Every dense-grid point must be assigned to exactly one drone — no gaps."""
+    from app.algorithms.boustrophedon import _build_dense_grid, _voronoi_assign
+    import numpy as np
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01}
+    grid = _build_dense_grid(bounds)
+    positions = np.array([[0.002, 0.002], [0.008, 0.008]])
+    labels = _voronoi_assign(grid, positions)
+
+    # All grid points are assigned — no unassigned index
+    assert len(labels) == len(grid)
+    # Each drone gets at least one point
+    assert 0 in labels and 1 in labels
+
+
+def test_row_endpoints_lawnmower_alternates_direction():
+    from app.algorithms.boustrophedon import _row_endpoints_lawnmower
+    import numpy as np
+
+    pts = np.array([
+        [0.0, 0.0], [0.0, 0.002], [0.0, 0.004],
+        [0.002, 0.0], [0.002, 0.002], [0.002, 0.004],
+    ])
+    path = _row_endpoints_lawnmower(pts)
+
+    # Row 0 (even): (0.0, 0.0) → (0.0, 0.004)  left to right
+    assert path[0] == (0.0, 0.0)
+    assert path[1] == (0.0, 0.004)
+    # Row 1 (odd): (0.002, 0.004) → (0.002, 0.0)  right to left
+    assert path[2] == (0.002, 0.004)
+    assert path[3] == (0.002, 0.0)
+
+
+def test_row_endpoints_lawnmower_emits_two_per_row():
+    from app.algorithms.boustrophedon import _row_endpoints_lawnmower
+    import numpy as np
+
+    # 3 lat rows, 5 cols each → 6 waypoints (2 per row), not 15
+    pts = np.array([[lat, lon]
+                    for lat in [0.0, 0.002, 0.004]
+                    for lon in np.arange(0.0, 0.01, 0.002)])
+    path = _row_endpoints_lawnmower(pts)
+    assert len(path) == 6  # 3 rows × 2 endpoints
+
+
+def test_sweep_drone_idles_when_partition_exhausted():
+    """When a drone's path runs out it should go idle (not regenerate)."""
+    from app.algorithms.boustrophedon import VoronoiBoustrophedon
+
+    mission = {
+        "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+        "drones": [{"id": "d1", "lat": 0.005, "lon": 0.005}],
+    }
+    alg = VoronoiBoustrophedon()
+    alg.get_target_waypoints(mission, mission["drones"])
+    mission["sweep_paths"]["d1"] = []  # simulate exhausted path
+
+    result = alg.get_target_waypoints(mission, mission["drones"])
+    assert "d1" not in result
+
+
+def test_update_coverage_marks_grid_cells_within_detection_radius():
+    mission = {
+        "grid": [[34.5, -117.5], [34.5001, -117.5], [40.0, -117.5]],
+        "drones": [{"id": "drone1", "lat": 34.5, "lon": -117.5}],
+    }
+    simulation_module._update_coverage(mission)
+    covered = mission["covered_grid_indices"]
+    assert 0 in covered
+    assert 1 in covered
+    assert 2 not in covered
+
+
+def test_update_coverage_is_no_op_when_grid_missing():
+    mission = {"drones": [{"id": "drone1", "lat": 34.5, "lon": -117.5}]}
+    simulation_module._update_coverage(mission)
+    assert "covered_grid_indices" not in mission
+
+
+def test_metrics_endpoint_includes_coverage_and_find_time_fields():
+    mission_data = {
+        "name": "Coverage Metrics Test",
+        "bounds": {"min_lat": 34.0, "max_lat": 35.0, "min_lon": -118.0, "max_lon": -117.0},
+        "drones": [{"id": "drone1", "lat": 34.5, "lon": -117.5}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+    client.post(f"/missions/{mission_id}/start", json={"algorithm": "sweep"})
+
+    response = client.get(f"/missions/{mission_id}/metrics")
+    payload = response.json()
+    assert payload["algorithm"] == "sweep"
+    assert "coverage_pct" in payload
+    assert "coverage_rate_per_sec" in payload
+    assert "first_find_seconds" in payload
+    assert "last_find_seconds" in payload
+
+
 def test_finalize_mission_stores_completion_elapsed_seconds():
     mission = {
         "status": "running",

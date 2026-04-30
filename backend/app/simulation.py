@@ -24,9 +24,9 @@ from pymavlink import mavutil
 from app.missions import _sync_mission_drones_with_sitl, missions_db
 from app.settings import DEFAULT_DISPATCH_ALT, SLEEP_BETWEEN_DISPATCH_SECONDS
 from app.sitl import sitl_bridge
-#from app.voronoi import lloyd_step
 from app.ws import manager
 from app.algorithms import get_algorithm
+from app.algorithms.base import DETECTION_RADIUS
 
 
 logger = logging.getLogger(__name__)
@@ -34,10 +34,6 @@ logger = logging.getLogger(__name__)
 JITTER_DEG = 0.0001
 # Degree-space speed used for simple simulated movement.
 SPEED = 0.0005
-# Distance threshold for a drone to "detect" a wandering target.
-# About 200m at this latitude; large enough that detection does not require
-# marker centers to visually overlap at the default map zoom.
-DETECTION_RADIUS = 0.002
 # Distance threshold for considering a drone close enough to stop moving toward a point.
 TARGET_STOP_RADIUS = 0.00055
 
@@ -328,6 +324,30 @@ def _update_targets_for_tick(mission: dict, bounds: dict) -> None:
             nearest_drone["role"] = None
 
 
+def _update_coverage(mission: dict) -> None:
+    """Mark grid cells within ``DETECTION_RADIUS`` of any drone as covered.
+
+    Algorithm-agnostic so the same metric is comparable across strategies.
+    """
+    grid = mission.get("grid")
+    if not grid:
+        return
+    drones = mission.get("drones", [])
+    if not drones:
+        return
+    grid_np = np.array(grid)
+    drone_positions = np.array(
+        [[d.get("lat", 0.0), d.get("lon", 0.0)] for d in drones]
+    )
+    distances = np.linalg.norm(grid_np[:, np.newaxis] - drone_positions, axis=2)
+    min_dist = distances.min(axis=1)
+    newly_covered = np.where(min_dist <= DETECTION_RADIUS)[0]
+
+    covered_set = set(mission.setdefault("covered_grid_indices", []))
+    covered_set.update(int(i) for i in newly_covered)
+    mission["covered_grid_indices"] = sorted(covered_set)
+
+
 async def _finalize_mission_progress(mission: dict) -> bool:
     """Advance mission progress and complete the mission when all targets are found.
 
@@ -405,6 +425,7 @@ async def simulation_loop(mission_id: str):
         _send_live_drone_gotos(mission, live_drone_ids, waypoints_map)
         await _update_drones_for_tick(mission, live_drone_ids, waypoints_map, bounds)
         _update_targets_for_tick(mission, bounds)
+        _update_coverage(mission)
         all_targets_found = await _finalize_mission_progress(mission)
         await _broadcast_mission_tick(mission_id, mission)
 
