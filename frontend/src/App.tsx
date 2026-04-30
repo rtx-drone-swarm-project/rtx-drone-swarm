@@ -53,7 +53,8 @@ export default function App() {
   const [hikerSummaryOpen, setHikerSummaryOpen] = useState(false);
   const [completedTargets, setCompletedTargets] = useState<Target[]>([]);
   const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
-  const [selectedAlgorithm, setSelectedAlgorithm] = useState<AlgorithmOption>("default");
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState<AlgorithmOption>("voronoi");
+  const [completionElapsedSeconds, setCompletionElapsedSeconds] = useState<number>(0);
   const [hikerLabelById, setHikerLabelById] = useState<Record<string, number>>({});
 
   const telemetryMode = useMemo(() => {
@@ -188,11 +189,12 @@ export default function App() {
       }
 
       if (statusText === "complete") {
+        setCompletionElapsedSeconds(elapsedSeconds);
         setElapsedSeconds(0);
         setMissionLocked(true);
       }
     },
-    [assignHikerLabels]
+    [assignHikerLabels, elapsedSeconds]
   );
 
   const onMissionProgress = useCallback((message: MissionProgressMessage) => {
@@ -261,6 +263,7 @@ export default function App() {
     setProgress(100);
     setSearchStatus("complete");
     setMissionLocked(true);
+    setCompletionElapsedSeconds(elapsedSeconds);
     setElapsedSeconds(0);
     setCompletedTargets(targets);
     setSummaryMissionId(mission.id);
@@ -405,6 +408,8 @@ export default function App() {
         onClose={() => setHikerSummaryOpen(false)}
         targets={completedTargetsSorted}
         getHikerLabel={getHikerLabel}
+        algorithm={selectedAlgorithm}
+        completionElapsedSeconds={completionElapsedSeconds}
       />
     </div>
   );

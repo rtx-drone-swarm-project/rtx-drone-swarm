@@ -121,10 +121,7 @@ export default function useMissionActions({
 
       setMission(created);
 
-      const started = await missionClient.startMission(
-        created.id,
-        selectedAlgorithm !== "default" ? selectedAlgorithm : undefined
-      );
+      const started = await missionClient.startMission(created.id, selectedAlgorithm);
       setMission(started);
       setSearchStatus(normalizeMissionStatus(started.status ?? "running"));
       setProgress(started.progress ?? 0);
