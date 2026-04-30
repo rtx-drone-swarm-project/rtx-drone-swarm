@@ -3,7 +3,8 @@ import CollapsibleSection from "../common/CollapsibleSection";
 
 const ALGORITHM_OPTIONS: { value: AlgorithmOption; label: string }[] = [
   { value: "voronoi", label: "Voronoi (Lloyd's)" },
-  { value: "apf", label: "APF (Potential Fields)" }
+  { value: "apf", label: "APF (Potential Fields)" },
+  { value: "sweep", label: "Sweep (Voronoi + Lawnmower)" }
 ];
 
 type ActionsPanelProps = {

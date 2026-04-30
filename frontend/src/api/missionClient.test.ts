@@ -54,6 +54,20 @@ describe("missionClient", () => {
     );
   });
 
+  it("sends sweep algorithm in body when sweep is selected", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "running" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMissionClient("http://localhost:8000");
+    await client.startMission("m1", "sweep");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/missions/m1/start",
+      expect.objectContaining({ body: JSON.stringify({ algorithm: "sweep" }) })
+    );
+  });
+
   it("sends voronoi algorithm in body when voronoi is selected", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "running" }) });

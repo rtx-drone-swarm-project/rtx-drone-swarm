@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getApiBase, getApiPort } from "./api/runtime";
 import TopBar from "./components/layout/TopBar";
 import MapPanel from "./components/map/MapPanel";
@@ -16,6 +16,7 @@ import type {
   AlgorithmOption,
   Bounds,
   FoundHiker,
+  MissionMetrics,
   MissionState,
   SelectedDrone,
   Target,
@@ -55,6 +56,14 @@ export default function App() {
   const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<AlgorithmOption>("voronoi");
   const [completionElapsedSeconds, setCompletionElapsedSeconds] = useState<number>(0);
+  const [completedMetrics, setCompletedMetrics] = useState<MissionMetrics | null>(null);
+
+  // Ref so onMissionStatus can read current elapsed without it being a dep,
+  // which would recreate the callback every second and reconnect the WebSocket.
+  const elapsedSecondsRef = useRef(elapsedSeconds);
+  useEffect(() => {
+    elapsedSecondsRef.current = elapsedSeconds;
+  }, [elapsedSeconds]);
   const [hikerLabelById, setHikerLabelById] = useState<Record<string, number>>({});
 
   const telemetryMode = useMemo(() => {
@@ -189,12 +198,12 @@ export default function App() {
       }
 
       if (statusText === "complete") {
-        setCompletionElapsedSeconds(elapsedSeconds);
+        setCompletionElapsedSeconds(elapsedSecondsRef.current);
         setElapsedSeconds(0);
         setMissionLocked(true);
       }
     },
-    [assignHikerLabels, elapsedSeconds]
+    [assignHikerLabels]
   );
 
   const onMissionProgress = useCallback((message: MissionProgressMessage) => {
@@ -269,6 +278,22 @@ export default function App() {
     setSummaryMissionId(mission.id);
     setHikerSummaryOpen(true);
   }, [mission, summaryMissionId, targets]);
+
+  useEffect(() => {
+    if (!hikerSummaryOpen || !summaryMissionId) return;
+    let cancelled = false;
+    fetch(`${apiBase}/missions/${summaryMissionId}/metrics`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setCompletedMetrics(data as MissionMetrics);
+      })
+      .catch(() => {
+        // Mission may have been deleted before fetch completes; ignore.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, hikerSummaryOpen, summaryMissionId]);
 
   useEffect(() => {
     if (!targets.length) return;
@@ -410,6 +435,7 @@ export default function App() {
         getHikerLabel={getHikerLabel}
         algorithm={selectedAlgorithm}
         completionElapsedSeconds={completionElapsedSeconds}
+        metrics={completedMetrics}
       />
     </div>
   );

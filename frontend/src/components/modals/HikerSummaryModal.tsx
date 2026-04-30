@@ -1,8 +1,9 @@
-import type { Target } from "../../types/mission";
+import type { MissionMetrics, Target } from "../../types/mission";
 
 const ALGORITHM_LABELS: Record<string, string> = {
   voronoi: "Voronoi (Lloyd's)",
-  apf: "APF (Potential Fields)"
+  apf: "APF (Potential Fields)",
+  sweep: "Sweep (Voronoi + Lawnmower)"
 };
 
 type HikerSummaryModalProps = {
@@ -12,9 +13,10 @@ type HikerSummaryModalProps = {
   getHikerLabel: (targetId: string | number) => string;
   algorithm?: string;
   completionElapsedSeconds?: number;
+  metrics?: MissionMetrics | null;
 };
 
-export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLabel, algorithm, completionElapsedSeconds }: HikerSummaryModalProps) {
+export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLabel, algorithm, completionElapsedSeconds, metrics }: HikerSummaryModalProps) {
   if (!isOpen || !targets.length) return null;
 
   return (
@@ -34,7 +36,7 @@ export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLa
         </div>
 
         <div className="hiker-summary-body">
-          {(algorithm || completionElapsedSeconds != null) && (
+          {(algorithm || completionElapsedSeconds != null || metrics) && (
             <div className="mission-metrics">
               <div className="kv-grid">
                 {algorithm && (
@@ -51,6 +53,24 @@ export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLa
                 )}
                 <span>Hikers Found</span>
                 <strong>{targets.length}</strong>
+                {metrics?.coverage_pct != null && (
+                  <>
+                    <span>Coverage</span>
+                    <strong>{metrics.coverage_pct}%</strong>
+                  </>
+                )}
+                {metrics?.first_find_seconds != null && (
+                  <>
+                    <span>First Find</span>
+                    <strong>{metrics.first_find_seconds}s</strong>
+                  </>
+                )}
+                {metrics?.avg_find_seconds != null && (
+                  <>
+                    <span>Avg Find</span>
+                    <strong>{metrics.avg_find_seconds}s</strong>
+                  </>
+                )}
               </div>
             </div>
           )}
