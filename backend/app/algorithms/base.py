@@ -2,6 +2,11 @@ from typing import List, Dict, Tuple
 import numpy as np
 import math
 
+# Distance (degrees) within which a drone detects a target.
+# Algorithms use this for sweep row density.  simulation.py imports from here
+# so both always use the same value.
+DETECTION_RADIUS = 0.002
+
 def build_search_grid(bounds: dict, n: int = 15) -> np.ndarray:
     """
     Build an n×n grid of [lat, lon] points covering the mission bounds.
