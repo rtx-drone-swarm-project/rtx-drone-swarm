@@ -23,7 +23,7 @@ export default function SwarmStatusPanel({
   telemetryMode,
   selectedAlgorithm
 }: SwarmStatusPanelProps) {
-  const algorithmLabel = selectedAlgorithm === "default" ? "Default" : selectedAlgorithm.toUpperCase();
+  const algorithmLabel = selectedAlgorithm === "voronoi" ? "Voronoi" : "APF";
   return (
     <CollapsibleSection title="Swarm Status">
       <div className="kv-grid">

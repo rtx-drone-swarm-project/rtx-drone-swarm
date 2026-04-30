@@ -1,6 +1,6 @@
 export type MissionStatus = "idle" | "running" | "stopped" | "complete";
 
-export type AlgorithmOption = "default" | "aco" | "voronoi" | "apf";
+export type AlgorithmOption = "voronoi" | "apf";
 
 export type EntityId = string | number;
 
