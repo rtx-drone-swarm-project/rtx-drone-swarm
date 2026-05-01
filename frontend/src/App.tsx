@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getApiBase, getApiPort } from "./api/runtime";
 import TopBar from "./components/layout/TopBar";
 import MapPanel from "./components/map/MapPanel";
@@ -16,6 +16,7 @@ import type {
   AlgorithmOption,
   Bounds,
   FoundHiker,
+  MissionMetrics,
   MissionState,
   SelectedDrone,
   Target,
@@ -55,6 +56,19 @@ export default function App() {
   const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<AlgorithmOption>("voronoi");
   const [completionElapsedSeconds, setCompletionElapsedSeconds] = useState<number>(0);
+  const [completedMetrics, setCompletedMetrics] = useState<MissionMetrics | null>(null);
+
+  // Ref so onMissionStatus can read current elapsed without it being a dep,
+  // which would recreate the callback every second and reconnect the WebSocket.
+  const elapsedSecondsRef = useRef(elapsedSeconds);
+  const runningMissionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    elapsedSecondsRef.current = elapsedSeconds;
+  }, [elapsedSeconds]);
+
+  // Drone trails: last N positions per drone_id, updated from telemetry.
+  const [droneTrails, setDroneTrails] = useState<Record<string, [number, number][]>>({});
+  const TRAIL_MAX_POINTS = 120;
   const [hikerLabelById, setHikerLabelById] = useState<Record<string, number>>({});
 
   const telemetryMode = useMemo(() => {
@@ -97,6 +111,20 @@ export default function App() {
           if (Number.isFinite(groundspeedNum)) normalizedDrone.groundspeed = groundspeedNum;
           if (Number.isFinite(targetLatNum)) normalizedDrone.target_lat = targetLatNum;
           if (Number.isFinite(targetLonNum)) normalizedDrone.target_lon = targetLonNum;
+
+          if (
+            Array.isArray(drone.sweep_centroid) &&
+            Number.isFinite(Number(drone.sweep_centroid[0])) &&
+            Number.isFinite(Number(drone.sweep_centroid[1]))
+          ) {
+            normalizedDrone.sweep_centroid = [
+              Number(drone.sweep_centroid[0]),
+              Number(drone.sweep_centroid[1])
+            ];
+          }
+          if (typeof drone.sweep_phase === "string") {
+            normalizedDrone.sweep_phase = drone.sweep_phase;
+          }
 
           return normalizedDrone;
         })
@@ -166,6 +194,22 @@ export default function App() {
   const onTelemetry = useCallback((message: TelemetryMessage) => {
     const drones = Array.isArray(message.drones) ? message.drones : [];
     setTelemetry(drones);
+    setDroneTrails((prev) => {
+      const next = { ...prev };
+      for (const d of drones) {
+        const lat = Number(d.lat);
+        const lon = Number(d.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        const key = String(d.id);
+        const history = next[key] ?? [];
+        const last = history[history.length - 1];
+        if (!last || last[0] !== lat || last[1] !== lon) {
+          const updated = [...history, [lat, lon] as [number, number]];
+          next[key] = updated.slice(-TRAIL_MAX_POINTS);
+        }
+      }
+      return next;
+    });
     setMapAutocentered((prev) => {
       if (prev) return prev;
       const lats = drones.map((d) => Number(d.lat)).filter(Number.isFinite);
@@ -189,12 +233,21 @@ export default function App() {
       }
 
       if (statusText === "complete") {
-        setCompletionElapsedSeconds(elapsedSeconds);
+        setCompletionElapsedSeconds(elapsedSecondsRef.current);
         setElapsedSeconds(0);
         setMissionLocked(true);
       }
+      if (statusText === "running") {
+        const runningMissionId = message.mission_id != null ? String(message.mission_id) : "__unknown_running_mission__";
+        if (runningMissionIdRef.current !== runningMissionId) {
+          runningMissionIdRef.current = runningMissionId;
+          setDroneTrails({});
+        }
+      } else {
+        runningMissionIdRef.current = null;
+      }
     },
-    [assignHikerLabels, elapsedSeconds]
+    [assignHikerLabels]
   );
 
   const onMissionProgress = useCallback((message: MissionProgressMessage) => {
@@ -271,6 +324,29 @@ export default function App() {
   }, [mission, summaryMissionId, targets]);
 
   useEffect(() => {
+    if (!hikerSummaryOpen || !summaryMissionId) {
+      setCompletedMetrics(null);
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    setCompletedMetrics(null);
+    fetch(`${apiBase}/missions/${summaryMissionId}/metrics`, { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setCompletedMetrics(data as MissionMetrics);
+      })
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        // Mission may have been deleted before fetch completes; ignore.
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [apiBase, hikerSummaryOpen, summaryMissionId]);
+
+  useEffect(() => {
     if (!targets.length) return;
     assignHikerLabels(targets.map((target) => target.id));
     setFoundHikers((prev) => {
@@ -333,6 +409,18 @@ export default function App() {
     setMapCenter([latValue, lonValue]);
   }, [lat, lon]);
 
+  const onAlgorithmChange = useCallback((algorithm: AlgorithmOption) => {
+    setSelectedAlgorithm(algorithm);
+    runningMissionIdRef.current = null;
+    setDroneTrails({});
+  }, []);
+
+  const onResetMission = useCallback(() => {
+    runningMissionIdRef.current = null;
+    setDroneTrails({});
+    resetMissionLock();
+  }, [resetMissionLock]);
+
   const normalizedSearchStatus = normalizeMissionStatus(searchStatus);
   const missionActive = normalizedSearchStatus === "running";
   const missionComplete = normalizedSearchStatus === "complete";
@@ -353,6 +441,8 @@ export default function App() {
           targets={targets}
           getHikerLabel={getHikerLabel}
           setSelectedDrone={setSelectedDrone}
+          droneTrails={droneTrails}
+          selectedAlgorithm={selectedAlgorithm}
           onSelectArea={onSelectArea}
         />
 
@@ -393,10 +483,10 @@ export default function App() {
             validDroneCount={validDroneCount}
             mission={mission}
             selectedAlgorithm={selectedAlgorithm}
-            onAlgorithmChange={setSelectedAlgorithm}
+            onAlgorithmChange={onAlgorithmChange}
             onStartMission={startMission}
             onStopMission={stopMission}
-            onResetMission={resetMissionLock}
+            onResetMission={onResetMission}
           />
           <FoundHikersPanel hikers={foundHikersSorted} getHikerLabel={getHikerLabel} />
         </aside>
@@ -408,8 +498,9 @@ export default function App() {
         onClose={() => setHikerSummaryOpen(false)}
         targets={completedTargetsSorted}
         getHikerLabel={getHikerLabel}
-        algorithm={selectedAlgorithm}
+        algorithm={completedMetrics?.algorithm ?? mission?.algorithm ?? selectedAlgorithm}
         completionElapsedSeconds={completionElapsedSeconds}
+        metrics={completedMetrics}
       />
     </div>
   );

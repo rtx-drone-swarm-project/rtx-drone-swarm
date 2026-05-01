@@ -1,12 +1,12 @@
 # app/algorithms/__init__.py
 from app.algorithms.voronoi import VoronoiCoverage
 from app.algorithms.apf import PotentialFieldsCoverage
+from app.algorithms.boustrophedon import VoronoiBoustrophedon
 
 ALGORITHMS = {
-    "voronoi": VoronoiCoverage(), #Temporary to test apf file, didnt want to mess with front end yet
+    "voronoi": VoronoiCoverage(),
     "apf": PotentialFieldsCoverage(),
-    #aco,
-    #etc.
+    "sweep": VoronoiBoustrophedon(),
 }
 
 def get_algorithm(name: str):

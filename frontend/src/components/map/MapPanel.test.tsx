@@ -11,12 +11,20 @@ const once = vi.fn((eventName: string, handler: () => void) => {
   mapEventHandlers[eventName] = handler;
 });
 const off = vi.fn();
+const mocks = vi.hoisted(() => ({
+  marker: vi.fn((_props: Record<string, unknown>) => null),
+  polyline: vi.fn((_props: Record<string, unknown>) => null),
+  makeCentroidIcon: vi.fn((_label: string, _phase?: string | null) => ({ icon: "centroid" })),
+  makeDroneIcon: vi.fn((_label: string, _role?: string | null, _heading?: number) => ({ icon: "drone" })),
+  makeTargetCircleIcon: vi.fn((_label: string, _status?: string | null) => ({ icon: "target" }))
+}));
 let mapEventHandlers: Record<string, () => void> = {};
 
 vi.mock("react-leaflet", () => ({
   MapContainer: ({ children }: { children: React.ReactNode }) => <div data-testid="map-container">{children}</div>,
   TileLayer: () => null,
-  Marker: () => null,
+  Marker: mocks.marker,
+  Polyline: mocks.polyline,
   Rectangle: () => null,
   useMap: () => ({
     flyTo,
@@ -34,8 +42,9 @@ vi.mock("react-leaflet", () => ({
 vi.mock("./MapBBoxDrawer", () => ({ default: () => null }));
 vi.mock("./MapRecenter", () => ({ default: () => null }));
 vi.mock("./icons", () => ({
-  makeDroneIcon: vi.fn(() => ({})),
-  makeTargetCircleIcon: vi.fn(() => ({}))
+  makeCentroidIcon: mocks.makeCentroidIcon,
+  makeDroneIcon: mocks.makeDroneIcon,
+  makeTargetCircleIcon: mocks.makeTargetCircleIcon
 }));
 
 const defaultProps = {
@@ -60,6 +69,11 @@ describe("MapPanel", () => {
     setZoom.mockClear();
     once.mockClear();
     off.mockClear();
+    mocks.marker.mockClear();
+    mocks.polyline.mockClear();
+    mocks.makeCentroidIcon.mockClear();
+    mocks.makeDroneIcon.mockClear();
+    mocks.makeTargetCircleIcon.mockClear();
     mapEventHandlers = {};
   });
 
@@ -136,5 +150,94 @@ describe("MapPanel", () => {
 
     expect(stop).toHaveBeenCalledTimes(1);
     expect(setZoom).toHaveBeenCalledTimes(1);
+  });
+
+  it("labels sweep centroids clearly and updates marker position when telemetry changes", () => {
+    const { rerender } = render(
+      <MapPanel
+        {...defaultProps}
+        missionActive
+        selectedAlgorithm="sweep"
+        validDrones={[
+          {
+            id: "1",
+            lat: 33.5,
+            lon: -117.2,
+            sweep_centroid: [33.51, -117.21],
+            sweep_phase: "en_route"
+          }
+        ]}
+      />
+    );
+
+    expect(mocks.makeCentroidIcon).toHaveBeenLastCalledWith("D1 centroid", "en_route");
+    let centroidMarkers = mocks.marker.mock.calls.map(([props]) => props).filter((props) => props.interactive === false);
+    expect(centroidMarkers[centroidMarkers.length - 1]?.position).toEqual([33.51, -117.21]);
+
+    mocks.marker.mockClear();
+    mocks.makeCentroidIcon.mockClear();
+    rerender(
+      <MapPanel
+        {...defaultProps}
+        missionActive
+        selectedAlgorithm="sweep"
+        validDrones={[
+          {
+            id: "1",
+            lat: 33.52,
+            lon: -117.22,
+            sweep_centroid: [33.53, -117.23],
+            sweep_phase: "sweeping"
+          }
+        ]}
+      />
+    );
+
+    expect(mocks.makeCentroidIcon).toHaveBeenLastCalledWith("D1 centroid", "sweeping");
+    centroidMarkers = mocks.marker.mock.calls.map(([props]) => props).filter((props) => props.interactive === false);
+    expect(centroidMarkers[centroidMarkers.length - 1]?.position).toEqual([33.53, -117.23]);
+  });
+
+  it("hides stale centroid markers when the selected algorithm is not sweep", () => {
+    render(
+      <MapPanel
+        {...defaultProps}
+        missionActive
+        selectedAlgorithm="apf"
+        validDrones={[
+          {
+            id: "1",
+            lat: 33.5,
+            lon: -117.2,
+            sweep_centroid: [33.51, -117.21],
+            sweep_phase: "sweeping"
+          }
+        ]}
+      />
+    );
+
+    expect(mocks.makeCentroidIcon).not.toHaveBeenCalled();
+  });
+
+  it("renders sweep trails with stronger styling", () => {
+    render(
+      <MapPanel
+        {...defaultProps}
+        missionActive
+        selectedAlgorithm="sweep"
+        validDrones={[{ id: "1", lat: 33.5, lon: -117.2 }]}
+        droneTrails={{ "1": [[33.5, -117.2], [33.51, -117.21]] }}
+      />
+    );
+
+    const trailProps = mocks.polyline.mock.calls[0][0];
+    expect(trailProps.positions).toEqual([[33.5, -117.2], [33.51, -117.21]]);
+    expect(trailProps.pathOptions).toEqual(
+      expect.objectContaining({
+        weight: 4,
+        opacity: 0.92,
+        className: "sweep-drone-trail"
+      })
+    );
   });
 });

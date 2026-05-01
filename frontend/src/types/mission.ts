@@ -1,6 +1,21 @@
 export type MissionStatus = "idle" | "running" | "stopped" | "complete";
 
-export type AlgorithmOption = "voronoi" | "apf";
+export type AlgorithmOption = "voronoi" | "apf" | "sweep";
+
+export type MissionMetrics = {
+  algorithm?: string;
+  status?: string;
+  elapsed_seconds?: number;
+  completion_elapsed_seconds?: number | null;
+  targets_total?: number;
+  targets_found?: number;
+  found_at_seconds?: number[];
+  first_find_seconds?: number | null;
+  last_find_seconds?: number | null;
+  avg_find_seconds?: number | null;
+  coverage_pct?: number;
+  coverage_rate_per_sec?: number;
+};
 
 export type EntityId = string | number;
 
@@ -26,6 +41,8 @@ export type TelemetryDrone = {
   target_lat?: number | string | null;
   target_lon?: number | string | null;
   role?: string | null;
+  sweep_centroid?: [number, number] | null;
+  sweep_phase?: string | null;
 };
 
 export type Target = {
@@ -70,6 +87,8 @@ export type ValidDrone = {
   target_lat?: number;
   target_lon?: number;
   role?: string | null;
+  sweep_centroid?: [number, number];
+  sweep_phase?: string;
 };
 
 export type MissionDroneInput = {
