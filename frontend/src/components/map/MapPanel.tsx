@@ -1,10 +1,10 @@
-import { MapContainer, Marker, Rectangle, TileLayer } from "react-leaflet";
-import type { Bounds, SelectedDrone, Target, ValidDrone } from "../../types/mission";
+import { MapContainer, Marker, Polyline, Rectangle, TileLayer } from "react-leaflet";
+import type { AlgorithmOption, Bounds, SelectedDrone, Target, ValidDrone } from "../../types/mission";
 import { boundsToLeaflet } from "../../utils/geo";
 import MapBBoxDrawer from "./MapBBoxDrawer";
 import MapControlStack from "./MapControlStack";
 import MapRecenter from "./MapRecenter";
-import { makeDroneIcon, makeTargetCircleIcon } from "./icons";
+import { makeCentroidIcon, makeDroneIcon, makeTargetCircleIcon } from "./icons";
 
 type MapPanelProps = {
   defaultCenter: [number, number];
@@ -17,7 +17,15 @@ type MapPanelProps = {
   getHikerLabel: (targetId: string | number) => string;
   setSelectedDrone: (value: SelectedDrone) => void;
   onSelectArea: (lat: number, lon: number, bounds: Bounds) => void;
+  droneTrails?: Record<string, [number, number][]>;
+  selectedAlgorithm?: AlgorithmOption;
 };
+
+const TRAIL_COLORS = ["#34d399", "#60a5fa", "#f472b6", "#fbbf24", "#a78bfa", "#22d3ee", "#fb7185", "#4ade80"];
+
+function trailColorForIndex(idx: number): string {
+  return TRAIL_COLORS[idx % TRAIL_COLORS.length];
+}
 
 export default function MapPanel({
   defaultCenter,
@@ -29,8 +37,11 @@ export default function MapPanel({
   targets,
   getHikerLabel,
   setSelectedDrone,
-  onSelectArea
+  onSelectArea,
+  droneTrails,
+  selectedAlgorithm
 }: MapPanelProps) {
+  const sweepActive = selectedAlgorithm === "sweep" && missionActive;
   const rectBounds = selectedBounds ? boundsToLeaflet(selectedBounds) : null;
 
   return (
@@ -57,6 +68,43 @@ export default function MapPanel({
             pathOptions={{ color: "#3b82f6", fillOpacity: 0.08, dashArray: "8 8", weight: 2 }}
           />
         )}
+
+        {droneTrails &&
+          validDrones.map((drone, idx) => {
+            const trail = droneTrails[String(drone.id)];
+            if (!trail || trail.length < 2) return null;
+            const isSweepTrail = selectedAlgorithm === "sweep";
+            return (
+              <Polyline
+                key={`trail-${String(drone.id)}`}
+                positions={trail}
+                pathOptions={{
+                  color: trailColorForIndex(idx),
+                  weight: isSweepTrail ? 4 : 2,
+                  opacity: isSweepTrail ? 0.92 : 0.6,
+                  dashArray: isSweepTrail ? undefined : "4 6",
+                  className: isSweepTrail ? "sweep-drone-trail" : "drone-trail"
+                }}
+              />
+            );
+          })}
+
+        {sweepActive &&
+          validDrones.map((drone, idx) => {
+            const centroid = drone.sweep_centroid;
+            if (!centroid) return null;
+            const rawId = String(drone.id);
+            const label = rawId.startsWith("D") ? rawId : `D${rawId || idx + 1}`;
+            const centroidKey = `${rawId}-${centroid[0].toFixed(7)}-${centroid[1].toFixed(7)}-${drone.sweep_phase ?? "unknown"}`;
+            return (
+              <Marker
+                key={`centroid-${centroidKey}`}
+                position={centroid}
+                icon={makeCentroidIcon(`${label} centroid`, drone.sweep_phase)}
+                interactive={false}
+              />
+            );
+          })}
 
         {validDrones.map((drone, idx) => {
           const rawId = String(drone.id);

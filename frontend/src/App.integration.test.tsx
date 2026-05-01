@@ -1,23 +1,30 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
+const mocks = vi.hoisted(() => ({
+  mapPanelProps: [] as any[]
+}));
+
 vi.mock("./components/map/MapPanel", () => ({
-  default: ({ onSelectArea }: { onSelectArea: (lat: number, lon: number, bounds: any) => void }) => (
-    <button
-      type="button"
-      onClick={() =>
-        onSelectArea(33.5, -117.2, {
-          min_lat: 33.45,
-          max_lat: 33.55,
-          min_lon: -117.25,
-          max_lon: -117.15
-        })
-      }
-    >
-      Select Area
-    </button>
-  )
+  default: (props: { onSelectArea: (lat: number, lon: number, bounds: any) => void }) => {
+    mocks.mapPanelProps.push(props);
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          props.onSelectArea(33.5, -117.2, {
+            min_lat: 33.45,
+            max_lat: 33.55,
+            min_lon: -117.25,
+            max_lon: -117.15
+          })
+        }
+      >
+        Select Area
+      </button>
+    );
+  }
 }));
 
 class MockWebSocket {
@@ -42,6 +49,11 @@ class MockWebSocket {
 }
 
 describe("App integration", () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    mocks.mapPanelProps = [];
+  });
+
   it("sanitizes drone payloads during mission creation and supports mission completion flow", async () => {
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
 
@@ -132,6 +144,42 @@ describe("App integration", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Start Mission" })).toBeTruthy();
+    });
+  });
+
+  it("keeps accumulating drone trails across repeated running status updates", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal("fetch", vi.fn());
+
+    render(<App />);
+
+    const socket = MockWebSocket.instances[0];
+    socket.sendMessage({
+      type: "mission_status",
+      mission_id: "m1",
+      status: "running",
+      progress: 0,
+      targets: []
+    });
+    socket.sendMessage({
+      type: "telemetry",
+      drones: [{ id: "d1", lat: 33.5, lon: -117.2 }]
+    });
+    socket.sendMessage({
+      type: "mission_status",
+      mission_id: "m1",
+      status: "running",
+      progress: 5,
+      targets: []
+    });
+    socket.sendMessage({
+      type: "telemetry",
+      drones: [{ id: "d1", lat: 33.51, lon: -117.21 }]
+    });
+
+    await waitFor(() => {
+      const latestProps = mocks.mapPanelProps[mocks.mapPanelProps.length - 1];
+      expect(latestProps.droneTrails["d1"]).toEqual([[33.5, -117.2], [33.51, -117.21]]);
     });
   });
 });
