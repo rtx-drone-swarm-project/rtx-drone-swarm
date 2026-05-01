@@ -120,6 +120,13 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
 
     mission["grid"] = build_search_grid(bounds, n=15).tolist()
 
+    from app.algorithms.base import build_dense_coverage_grid
+    dense = build_dense_coverage_grid(bounds)
+    # Stored as a numpy array (never JSON-serialised — missions_db is in-memory only).
+    # _update_coverage uses this for accurate per-DETECTION_RADIUS-cell tracking.
+    mission["_dense_coverage_grid"] = dense
+    mission["_dense_grid_size"] = len(dense)
+
     targets = []
     for _ in range(random.randint(2, 3)):
         targets.append(
@@ -224,11 +231,12 @@ def get_mission_metrics(mission_id: str):
     found_targets = [t for t in targets if t.get("status") == "found"]
     found_times = [t["found_at"] for t in found_targets if "found_at" in t]
 
-    grid_size = len(mission.get("grid", []))
-    covered = mission.get("covered_grid_indices", [])
-    coverage_pct = round(100.0 * len(covered) / grid_size, 1) if grid_size else 0.0
+    # Use dense coverage if available (accurate); fall back to sparse for old missions.
+    grid_size = mission.get("_dense_grid_size") or len(mission.get("grid", []))
+    covered_count = mission.get("_dense_covered_count", len(mission.get("covered_grid_indices", [])))
+    coverage_pct = round(100.0 * covered_count / grid_size, 1) if grid_size else 0.0
     elapsed = mission.get("elapsed_seconds", 0)
-    coverage_rate = round(len(covered) / elapsed, 2) if elapsed > 0 else 0.0
+    coverage_rate = round(covered_count / elapsed, 2) if elapsed > 0 else 0.0
 
     return {
         "algorithm": mission.get("algorithm", "voronoi"),

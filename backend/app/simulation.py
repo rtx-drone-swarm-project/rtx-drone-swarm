@@ -125,8 +125,9 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], waypoint_map
 
     Priority order is:
     1. actively assigned mission target
-    2. previously queued `target_lat` / `target_lon`
-    3. the latest free-search centroid
+    2. sweep search waypoint, when using the sweep algorithm
+    3. previously queued `target_lat` / `target_lon`
+    4. the latest free-search centroid
     """
     if not live_drone_ids:
         return
@@ -158,6 +159,11 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], waypoint_map
                 sitl_bridge.send_goto(sysid, target["lat"], target["lon"], DEFAULT_DISPATCH_ALT)
                 goto_sent += 1
                 continue
+        waypoint = waypoint_map.get(drone["id"])
+        if mission.get("algorithm") == "sweep" and waypoint is not None:
+            sitl_bridge.send_goto(sysid, float(waypoint[0]), float(waypoint[1]), DEFAULT_DISPATCH_ALT)
+            goto_sent += 1
+            continue
         tlat = drone.get("target_lat")
         tlon = drone.get("target_lon")
         dlat = drone.get("lat", 0)
@@ -167,7 +173,6 @@ def _send_live_drone_gotos(mission: dict, live_drone_ids: set[str], waypoint_map
             sitl_bridge.send_goto(sysid, tlat, tlon, DEFAULT_DISPATCH_ALT)
             goto_sent += 1
             continue
-        waypoint = waypoint_map.get(drone["id"])
         if waypoint is not None:
             sitl_bridge.send_goto(sysid, float(waypoint[0]), float(waypoint[1]), DEFAULT_DISPATCH_ALT)
             goto_sent += 1
@@ -325,27 +330,41 @@ def _update_targets_for_tick(mission: dict, bounds: dict) -> None:
 
 
 def _update_coverage(mission: dict) -> None:
-    """Mark grid cells within ``DETECTION_RADIUS`` of any drone as covered.
+    """Mark dense-grid cells within DETECTION_RADIUS of any drone as covered.
 
-    Algorithm-agnostic so the same metric is comparable across strategies.
+    Uses the DETECTION_RADIUS-spaced grid stored at mission start so that
+    coverage % reflects actual swept area, not hits on the sparse 15×15 grid.
+    Falls back to the sparse grid for missions that lack the dense grid.
     """
-    grid = mission.get("grid")
-    if not grid:
-        return
     drones = mission.get("drones", [])
     if not drones:
         return
-    grid_np = np.array(grid)
-    drone_positions = np.array(
-        [[d.get("lat", 0.0), d.get("lon", 0.0)] for d in drones]
-    )
-    distances = np.linalg.norm(grid_np[:, np.newaxis] - drone_positions, axis=2)
-    min_dist = distances.min(axis=1)
-    newly_covered = np.where(min_dist <= DETECTION_RADIUS)[0]
 
-    covered_set = set(mission.setdefault("covered_grid_indices", []))
-    covered_set.update(int(i) for i in newly_covered)
-    mission["covered_grid_indices"] = sorted(covered_set)
+    grid_np = mission.get("_dense_coverage_grid")
+    if grid_np is None:
+        raw = mission.get("grid")
+        if not raw:
+            return
+        grid_np = np.array(raw)
+
+    covered: set = mission.setdefault("_covered_set", set())
+
+    for drone in drones:
+        dlat = drone.get("lat", 0.0)
+        dlon = drone.get("lon", 0.0)
+        # Bounding-box pre-filter avoids a full distance matrix for large dense grids.
+        lat_mask = np.abs(grid_np[:, 0] - dlat) <= DETECTION_RADIUS
+        lon_mask = np.abs(grid_np[:, 1] - dlon) <= DETECTION_RADIUS
+        candidates = np.where(lat_mask & lon_mask)[0]
+        if len(candidates) == 0:
+            continue
+        sub = grid_np[candidates]
+        within = candidates[
+            np.hypot(sub[:, 0] - dlat, sub[:, 1] - dlon) <= DETECTION_RADIUS
+        ]
+        covered.update(int(i) for i in within)
+
+    mission["_dense_covered_count"] = len(covered)
 
 
 async def _finalize_mission_progress(mission: dict) -> bool:
