@@ -37,6 +37,49 @@ describe("missionClient", () => {
     );
   });
 
+  it("sends algorithm in body when provided", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "running" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMissionClient("http://localhost:8000");
+    await client.startMission("m1", "apf");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/missions/m1/start",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ algorithm: "apf" })
+      })
+    );
+  });
+
+  it("sends voronoi algorithm in body when voronoi is selected", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "running" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMissionClient("http://localhost:8000");
+    await client.startMission("m1", "voronoi");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/missions/m1/start",
+      expect.objectContaining({ body: JSON.stringify({ algorithm: "voronoi" }) })
+    );
+  });
+
+  it("sends no body when algorithm is omitted", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "running" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMissionClient("http://localhost:8000");
+    await client.startMission("m1");
+
+    const callInit = fetchMock.mock.calls[0][1];
+    expect(callInit.body).toBeUndefined();
+  });
+
   it("throws backend response text on error", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, text: async () => "bad request" });
     vi.stubGlobal("fetch", fetchMock);

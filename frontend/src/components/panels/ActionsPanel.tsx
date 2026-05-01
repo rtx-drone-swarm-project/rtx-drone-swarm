@@ -2,9 +2,8 @@ import type { AlgorithmOption, Bounds, MissionRecord } from "../../types/mission
 import CollapsibleSection from "../common/CollapsibleSection";
 
 const ALGORITHM_OPTIONS: { value: AlgorithmOption; label: string }[] = [
-  { value: "default", label: "Default" },
-  { value: "aco", label: "ACO" },
-  { value: "voronoi", label: "Voronoi" }
+  { value: "voronoi", label: "Voronoi (Lloyd's)" },
+  { value: "apf", label: "APF (Potential Fields)" }
 ];
 
 type ActionsPanelProps = {

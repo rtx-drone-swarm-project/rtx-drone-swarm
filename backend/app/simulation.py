@@ -52,6 +52,7 @@ async def _emit_target_found(mission: dict, target: dict, drone_id: Optional[str
     if target["id"] in found_ids:
         return
     found_ids.append(target["id"])
+    target["found_at"] = mission.get("elapsed_seconds", 0)
     await manager.broadcast(
         {
             "type": "target_found",
@@ -59,7 +60,7 @@ async def _emit_target_found(mission: dict, target: dict, drone_id: Optional[str
             "drone_id": drone_id,
             "lat": target["lat"],
             "lon": target["lon"],
-            "found_at": mission.get("elapsed_seconds", 0),
+            "found_at": target["found_at"],
         }
     )
 
@@ -347,6 +348,7 @@ async def _finalize_mission_progress(mission: dict) -> bool:
     if all_targets_found:
         mission["status"] = "complete"
         mission["progress"] = 100.0
+        mission.setdefault("completion_elapsed_seconds", mission.get("elapsed_seconds", 0))
 
     return all_targets_found
 
@@ -397,6 +399,12 @@ async def simulation_loop(mission_id: str):
         #centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
 
         algorithm_name = mission.get("algorithm", "voronoi")
+        
+        logger.info("=========================================")
+        logger.info(f"SIMULATION LOOP STARTING FOR MISSION: {mission_id}")
+        logger.info(f"FRONTEND SELECTED ALGORITHM: {algorithm_name}")
+        logger.info("=========================================")
+
         active_strategy = get_algorithm(algorithm_name)
         waypoints_map = await asyncio.to_thread(active_strategy.get_target_waypoints, mission, free_drones)
 

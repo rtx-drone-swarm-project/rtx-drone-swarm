@@ -214,6 +214,27 @@ async def stop_mission(mission_id: str):
     return mission
 
 
+@router.get("/missions/{mission_id}/metrics")
+def get_mission_metrics(mission_id: str):
+    """Return algorithm performance metrics for a completed or in-progress mission."""
+    if mission_id not in missions_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    mission = missions_db[mission_id]
+    targets = mission.get("targets", [])
+    found_targets = [t for t in targets if t.get("status") == "found"]
+    found_times = [t["found_at"] for t in found_targets if "found_at" in t]
+    return {
+        "algorithm": mission.get("algorithm", "voronoi"),
+        "status": mission.get("status"),
+        "elapsed_seconds": mission.get("elapsed_seconds", 0),
+        "completion_elapsed_seconds": mission.get("completion_elapsed_seconds"),
+        "targets_total": len(targets),
+        "targets_found": len(found_targets),
+        "found_at_seconds": found_times,
+        "avg_find_seconds": round(sum(found_times) / len(found_times), 1) if found_times else None,
+    }
+
+
 @router.delete("/missions/{mission_id}")
 async def delete_mission(mission_id: str):
     """Delete a mission record and notify connected clients that it is gone."""

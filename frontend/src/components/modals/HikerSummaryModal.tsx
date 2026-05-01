@@ -1,13 +1,20 @@
 import type { Target } from "../../types/mission";
 
+const ALGORITHM_LABELS: Record<string, string> = {
+  voronoi: "Voronoi (Lloyd's)",
+  apf: "APF (Potential Fields)"
+};
+
 type HikerSummaryModalProps = {
   isOpen: boolean;
   onClose: () => void;
   targets: Target[];
   getHikerLabel: (targetId: string | number) => string;
+  algorithm?: string;
+  completionElapsedSeconds?: number;
 };
 
-export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLabel }: HikerSummaryModalProps) {
+export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLabel, algorithm, completionElapsedSeconds }: HikerSummaryModalProps) {
   if (!isOpen || !targets.length) return null;
 
   return (
@@ -27,9 +34,27 @@ export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLa
         </div>
 
         <div className="hiker-summary-body">
-          <p className="hiker-summary-intro">
-            All hikers in the selected search area have been found. Final coordinates:
-          </p>
+          {(algorithm || completionElapsedSeconds != null) && (
+            <div className="mission-metrics">
+              <div className="kv-grid">
+                {algorithm && (
+                  <>
+                    <span>Algorithm</span>
+                    <strong>{ALGORITHM_LABELS[algorithm] ?? algorithm}</strong>
+                  </>
+                )}
+                {completionElapsedSeconds != null && completionElapsedSeconds > 0 && (
+                  <>
+                    <span>Mission Duration</span>
+                    <strong>{completionElapsedSeconds}s</strong>
+                  </>
+                )}
+                <span>Hikers Found</span>
+                <strong>{targets.length}</strong>
+              </div>
+            </div>
+          )}
+          <p className="hiker-summary-intro">Final coordinates:</p>
           <ul className="hiker-summary-list">
             {targets.map((target) => (
               <li key={String(target.id)} className="hiker-summary-item">
