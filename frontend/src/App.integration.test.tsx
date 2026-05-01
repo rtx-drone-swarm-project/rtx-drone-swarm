@@ -61,7 +61,7 @@ describe("App integration", () => {
       .fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "idle", progress: 0 }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "running", progress: 0, targets: [] }) })
-      .mockResolvedValue({ ok: true, json: async () => ({ algorithm: "voronoi", coverage_pct: 0, targets_total: 2, targets_found: 2, found_at_seconds: [] }) });
+      .mockResolvedValue({ ok: true, json: async () => ({ algorithm: "sweep", coverage_pct: 0, targets_total: 2, targets_found: 2, found_at_seconds: [] }) });
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -138,6 +138,9 @@ describe("App integration", () => {
       expect(screen.getByText("Found Hikers (2)")).toBeTruthy();
       expect(screen.getAllByText("Hiker 1").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Hiker 2").length).toBeGreaterThan(0);
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText("Sweep (Voronoi + Lawnmower)").length).toBeGreaterThan(1);
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Reset Mission" }));

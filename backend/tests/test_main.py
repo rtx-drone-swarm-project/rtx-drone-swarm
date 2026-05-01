@@ -138,6 +138,14 @@ def test_start_mission():
     assert start_response.status_code == 200
     start_data = start_response.json()
     assert start_data["status"] == "running"
+    assert "_dense_coverage_grid" not in start_data
+    assert "_dense_grid_size" not in start_data
+    assert "_found_target_ids" not in start_data
+
+    get_response = client.get(f"/missions/{mission_id}")
+    get_data = get_response.json()
+    assert "_dense_coverage_grid" not in get_data
+    assert "_dense_grid_size" not in get_data
     
     # Test starting a non-existent mission
     invalid_start_response = client.post("/missions/invalid_id/start")
@@ -175,6 +183,7 @@ def test_stop_mission():
     assert stop_response.status_code == 200
     stop_data = stop_response.json()
     assert stop_data["status"] == "stopped"
+    assert "_dense_coverage_grid" not in stop_data
 
     # Test stopping a non-existent mission
     invalid_stop_response = client.post("/missions/invalid_id/stop")
@@ -1463,6 +1472,41 @@ def test_metrics_endpoint_includes_coverage_and_find_time_fields():
     assert "coverage_rate_per_sec" in payload
     assert "first_find_seconds" in payload
     assert "last_find_seconds" in payload
+
+
+def test_metrics_coverage_rate_is_percent_per_second():
+    mission_id = "metrics-rate-units"
+    missions_db[mission_id] = {
+        "id": mission_id,
+        "algorithm": "sweep",
+        "status": "running",
+        "elapsed_seconds": 10,
+        "_dense_grid_size": 4,
+        "_dense_covered_count": 2,
+        "targets": [],
+    }
+
+    try:
+        response = client.get(f"/missions/{mission_id}/metrics")
+    finally:
+        missions_db.pop(mission_id, None)
+
+    payload = response.json()
+    assert payload["coverage_pct"] == 50.0
+    assert payload["coverage_rate_per_sec"] == 5.0
+
+
+def test_sitl_drone_speed_env_parser_rejects_invalid_values(monkeypatch):
+    from app.settings import _positive_float_env
+
+    monkeypatch.setenv("TEST_SPEED", "nan")
+    assert _positive_float_env("TEST_SPEED", 15.0) == 15.0
+    monkeypatch.setenv("TEST_SPEED", "-1")
+    assert _positive_float_env("TEST_SPEED", 15.0) == 15.0
+    monkeypatch.setenv("TEST_SPEED", "bad")
+    assert _positive_float_env("TEST_SPEED", 15.0) == 15.0
+    monkeypatch.setenv("TEST_SPEED", "12.5")
+    assert _positive_float_env("TEST_SPEED", 15.0) == 12.5
 
 
 def test_finalize_mission_stores_completion_elapsed_seconds():

@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _public_mission(mission: dict) -> dict:
+    """Return a JSON-safe mission payload without internal runtime state."""
+    return {key: value for key, value in mission.items() if not key.startswith("_")}
+
+
 @router.post("/missions")
 def create_mission(mission_data: MissionCreate):
     """Create an in-memory mission record from validated request data."""
@@ -54,7 +59,7 @@ def get_mission(mission_id: str):
     """Return one stored mission or raise ``404`` if the id is unknown."""
     if mission_id not in missions_db:
         raise HTTPException(status_code=404, detail="Mission not found")
-    return missions_db[mission_id]
+    return _public_mission(missions_db[mission_id])
 
 
 async def _background_dispatch(mission: dict, mission_id: str, assignments: List[dict]) -> None:
@@ -122,7 +127,8 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
 
     from app.algorithms.base import build_dense_coverage_grid
     dense = build_dense_coverage_grid(bounds)
-    # Stored as a numpy array (never JSON-serialised — missions_db is in-memory only).
+    # Stored as a numpy array for internal coverage tracking only.
+    # Route responses must use _public_mission so this never gets JSON-encoded.
     # _update_coverage uses this for accurate per-DETECTION_RADIUS-cell tracking.
     mission["_dense_coverage_grid"] = dense
     mission["_dense_grid_size"] = len(dense)
@@ -166,7 +172,7 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
     if dispatch_assignments:
         asyncio.create_task(_background_dispatch(mission, mission_id, dispatch_assignments))
 
-    return mission
+    return _public_mission(mission)
 
 
 @router.post("/missions/{mission_id}/dispatch-targets")
@@ -218,7 +224,7 @@ async def stop_mission(mission_id: str):
     )
     await manager.broadcast({"type": "telemetry", "drones": []})
 
-    return mission
+    return _public_mission(mission)
 
 
 @router.get("/missions/{mission_id}/metrics")
@@ -236,7 +242,7 @@ def get_mission_metrics(mission_id: str):
     covered_count = mission.get("_dense_covered_count", len(mission.get("covered_grid_indices", [])))
     coverage_pct = round(100.0 * covered_count / grid_size, 1) if grid_size else 0.0
     elapsed = mission.get("elapsed_seconds", 0)
-    coverage_rate = round(covered_count / elapsed, 2) if elapsed > 0 else 0.0
+    coverage_rate = round(coverage_pct / elapsed, 3) if elapsed > 0 else 0.0
 
     return {
         "algorithm": mission.get("algorithm", "voronoi"),

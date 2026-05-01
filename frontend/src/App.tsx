@@ -324,18 +324,25 @@ export default function App() {
   }, [mission, summaryMissionId, targets]);
 
   useEffect(() => {
-    if (!hikerSummaryOpen || !summaryMissionId) return;
+    if (!hikerSummaryOpen || !summaryMissionId) {
+      setCompletedMetrics(null);
+      return;
+    }
     let cancelled = false;
-    fetch(`${apiBase}/missions/${summaryMissionId}/metrics`)
+    const controller = new AbortController();
+    setCompletedMetrics(null);
+    fetch(`${apiBase}/missions/${summaryMissionId}/metrics`, { signal: controller.signal })
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
         if (!cancelled && data) setCompletedMetrics(data as MissionMetrics);
       })
-      .catch(() => {
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
         // Mission may have been deleted before fetch completes; ignore.
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [apiBase, hikerSummaryOpen, summaryMissionId]);
 
@@ -491,7 +498,7 @@ export default function App() {
         onClose={() => setHikerSummaryOpen(false)}
         targets={completedTargetsSorted}
         getHikerLabel={getHikerLabel}
-        algorithm={selectedAlgorithm}
+        algorithm={completedMetrics?.algorithm ?? mission?.algorithm ?? selectedAlgorithm}
         completionElapsedSeconds={completionElapsedSeconds}
         metrics={completedMetrics}
       />

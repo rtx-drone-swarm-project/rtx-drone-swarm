@@ -1,6 +1,7 @@
 """Shared backend configuration constants and script paths."""
 
 from pathlib import Path
+import math
 import os
 
 
@@ -24,7 +25,15 @@ DEFAULT_SITL_POLL_INTERVAL_SECONDS = float(os.environ.get("SITL_POLL_INTERVAL_SE
 
 GOTO_TYPE_MASK = 0b110111111000
 
+def _positive_float_env(name: str, default: float) -> float:
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+    return value if math.isfinite(value) and value > 0 else default
+
+
 # Target groundspeed sent to SITL drones via MAV_CMD_DO_CHANGE_SPEED after
 # takeoff. ArduPilot's default WPNAV_SPEED is 500 cm/s (5 m/s); raising this
 # makes GUIDED-mode coverage noticeably faster during simulation.
-SITL_DRONE_SPEED_MS = float(os.environ.get("SITL_DRONE_SPEED_MS", "15.0"))
+SITL_DRONE_SPEED_MS = _positive_float_env("SITL_DRONE_SPEED_MS", 15.0)

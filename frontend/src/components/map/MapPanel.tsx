@@ -95,10 +95,9 @@ export default function MapPanel({
             if (!centroid) return null;
             const rawId = String(drone.id);
             const label = rawId.startsWith("D") ? rawId : `D${rawId || idx + 1}`;
-            const centroidKey = `${rawId}-${centroid[0].toFixed(7)}-${centroid[1].toFixed(7)}-${drone.sweep_phase ?? "unknown"}`;
             return (
               <Marker
-                key={`centroid-${centroidKey}`}
+                key={`centroid-${rawId}`}
                 position={centroid}
                 icon={makeCentroidIcon(`${label} centroid`, drone.sweep_phase)}
                 interactive={false}
