@@ -438,6 +438,12 @@ async def simulation_loop(mission_id: str):
         #centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
 
         algorithm_name = mission.get("algorithm", "voronoi")
+        
+        logger.info("=========================================")
+        logger.info(f"SIMULATION LOOP STARTING FOR MISSION: {mission_id}")
+        logger.info(f"FRONTEND SELECTED ALGORITHM: {algorithm_name}")
+        logger.info("=========================================")
+
         active_strategy = get_algorithm(algorithm_name)
         waypoints_map = await asyncio.to_thread(active_strategy.get_target_waypoints, mission, free_drones)
 
