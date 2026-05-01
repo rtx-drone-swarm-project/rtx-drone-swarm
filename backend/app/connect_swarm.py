@@ -87,6 +87,18 @@ class Drone:
         return result
 
 
+    def set_speed(self, speed_ms: float) -> None:
+        """Request a groundspeed change via MAV_CMD_DO_CHANGE_SPEED (fire-and-forget)."""
+        self.conn.mav.command_long_send(
+            self.sysid, self.comp,
+            mavutil.mavlink.MAV_CMD_DO_CHANGE_SPEED,
+            0,          # confirmation
+            1,          # param1: 1 = groundspeed
+            speed_ms,   # param2: speed in m/s
+            -1,         # param3: throttle, -1 = no change
+            0, 0, 0, 0,
+        )
+
     def goto(self, lat, lon, alt):
         self.target_location = {"lat": lat, "lon": lon, "alt": alt}
         self.target_alt = alt

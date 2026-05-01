@@ -26,18 +26,16 @@ export function createMissionClient(apiBase: string): MissionApiClient {
         body: JSON.stringify(payload)
       }),
 
-    startMission: (missionId, algorithm) => {
-      const hasBody = algorithm && algorithm !== "default";
-      return requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/start`, {
+    startMission: (missionId, algorithm) =>
+      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/start`, {
         method: "POST",
-        ...(hasBody
+        ...(algorithm
           ? {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ algorithm })
             }
           : {})
-      });
-    },
+      }),
 
     stopMission: (missionId) =>
       requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/stop`, {

@@ -1,4 +1,10 @@
-import type { Target } from "../../types/mission";
+import type { MissionMetrics, Target } from "../../types/mission";
+
+const ALGORITHM_LABELS: Record<string, string> = {
+  voronoi: "Voronoi (Lloyd's)",
+  apf: "APF (Potential Fields)",
+  sweep: "Sweep (Voronoi + Lawnmower)"
+};
 
 type SearchSummaryModalProps = {
   isOpen: boolean;
@@ -7,9 +13,12 @@ type SearchSummaryModalProps = {
   getHikerLabel: (targetId: string | number) => string;
   onRecall: () => void;
   onReset: () => void;
+  algorithm?: string;
+  completionElapsedSeconds?: number;
+  metrics?: MissionMetrics | null;
 };
 
-export default function SearchSummaryModal({ isOpen, onClose, targets, getHikerLabel, onRecall, onReset }: SearchSummaryModalProps) {
+export default function SearchSummaryModal({ isOpen, onClose, targets, getHikerLabel, onRecall, onReset, algorithm, completionElapsedSeconds, metrics }: SearchSummaryModalProps) {
   if (!isOpen || !targets.length) return null;
 
   return (
@@ -29,9 +38,45 @@ export default function SearchSummaryModal({ isOpen, onClose, targets, getHikerL
         </div>
 
         <div className="search-summary-body">
-          <p className="search-summary-intro">
-            All hikers in the selected search area have been found. Final coordinates:
-          </p>
+          {(algorithm || completionElapsedSeconds != null || metrics) && (
+            <div className="mission-metrics">
+              <div className="kv-grid">
+                {algorithm && (
+                  <>
+                    <span>Algorithm</span>
+                    <strong>{ALGORITHM_LABELS[algorithm] ?? algorithm}</strong>
+                  </>
+                )}
+                {completionElapsedSeconds != null && completionElapsedSeconds > 0 && (
+                  <>
+                    <span>Mission Duration</span>
+                    <strong>{completionElapsedSeconds}s</strong>
+                  </>
+                )}
+                <span>Hikers Found</span>
+                <strong>{targets.length}</strong>
+                {metrics?.coverage_pct != null && (
+                  <>
+                    <span>Coverage</span>
+                    <strong>{metrics.coverage_pct}%</strong>
+                  </>
+                )}
+                {metrics?.first_find_seconds != null && (
+                  <>
+                    <span>First Find</span>
+                    <strong>{metrics.first_find_seconds}s</strong>
+                  </>
+                )}
+                {metrics?.avg_find_seconds != null && (
+                  <>
+                    <span>Avg Find</span>
+                    <strong>{metrics.avg_find_seconds}s</strong>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+          <p className="search-summary-intro">Final coordinates:</p>
           <ul className="search-summary-list">
             {targets.map((target) => (
               <li key={String(target.id)} className="search-summary-item">

@@ -2,6 +2,7 @@
 
 from typing import Optional, List
 
+from dataclasses import dataclass, field, asdict
 from pydantic import BaseModel
 import numpy as np
 
@@ -56,6 +57,7 @@ class MissionStart(BaseModel):
     algorithm: Optional[str] = None
     hikers: Optional[List[Hiker]] = None
 
+@dataclass
 class Mission:
     id: str
     name: str
@@ -69,6 +71,9 @@ class Mission:
     targets: list[dict]
     algorithm: str
     grid: np.ndarray or None
+    _dense_coverage_grid: np.ndarray or None
+    _dense_covered_count: int
+    _found_target_ids: set[str]
 
     def __init__(self, mission_id: str, mission_data: MissionCreate):
         self.id = mission_id
@@ -83,6 +88,22 @@ class Mission:
         self.targets = []
         self.algorithm = getattr(mission_data, "algorithm", "voronoi")
         self.grid = None
+        self._dense_coverage_grid = None
+        self._dense_covered_count = 0
+        self._found_target_ids = set()
+
+    def to_dict(self):
+        data = asdict(self)
+
+        if self.grid is not None:
+            data["grid"] = self.grid.tolist()
+
+        if self.dense_coverage_grid is not None:
+            data["_dense_coverage_grid"] = (
+                self._dense_coverage_grid.tolist()
+            )
+
+        return data
 
 class DispatchAssignment(BaseModel):
     """Single direct-dispatch target for one drone."""

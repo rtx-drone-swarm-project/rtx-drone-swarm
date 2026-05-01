@@ -15,6 +15,7 @@ from app.settings import (
     DEFAULT_SITL_HOST,
     DEFAULT_SITL_PORT_STEP,
     DEFAULT_RECALL_ALT,
+    SITL_DRONE_SPEED_MS,
 )
 
 logger = logging.getLogger(__name__)
@@ -231,7 +232,7 @@ class SITLTelemetryBridge:
                         "message": "Takeoff ACKed but drone never reached safe goto altitude",
                     }
 
-            # Send the goto command using your new method
+            drone.set_speed(SITL_DRONE_SPEED_MS)
             drone.goto(lat, lon, alt)
 
             return {"drone_id": drone_id, "sysid": sysid, "success": True, "message": "Dispatched via Swarm logic"}
