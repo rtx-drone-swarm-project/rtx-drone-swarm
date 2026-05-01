@@ -162,7 +162,7 @@ def _send_live_drone_gotos(mission: Mission, live_drone_ids: set[str], waypoint_
                 goto_sent += 1
                 continue
         waypoint = waypoint_map.get(drone["id"])
-        if mission.get("algorithm") == "sweep" and waypoint is not None:
+        if mission.algorithm == "sweep" and waypoint is not None:
             sitl_bridge.send_goto(sysid, float(waypoint[0]), float(waypoint[1]), DEFAULT_DISPATCH_ALT)
             goto_sent += 1
             continue
@@ -193,7 +193,7 @@ def _send_live_drone_gotos(mission: Mission, live_drone_ids: set[str], waypoint_
         )
 
 
-async def _update_drones_for_tick(mission: Mission, live_drone_ids: set[str], waypoint_map: dict, bounds: dict) -> None:
+async def _update_drones_for_tick(mission: Mission, live_drone_ids: set[str], waypoint_map: dict) -> None:
     """Advance drone state for one simulation tick using live or simulated movement.
 
     Live drones keep their position from SITL telemetry and mainly receive role
@@ -281,7 +281,7 @@ async def _update_drones_for_tick(mission: Mission, live_drone_ids: set[str], wa
                 drone["lon"] += (d_lon / dist) * SPEED
                 drone["lat"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
                 drone["lon"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
-            _bounce_entity(drone, bounds, d_lat, d_lon)
+            _bounce_entity(drone, mission.bounds, d_lat, d_lon)
         elif not has_live_telemetry:
             # If no centroid exists yet, fall back to bounded random wandering.
             if "vx" not in drone:
@@ -290,10 +290,10 @@ async def _update_drones_for_tick(mission: Mission, live_drone_ids: set[str], wa
                 drone["vy"] = SPEED * math.sin(angle)
             drone["lat"] += drone["vx"]
             drone["lon"] += drone["vy"]
-            _bounce_entity(drone, bounds, drone["vx"], drone["vy"])
+            _bounce_entity(drone, mission.bounds, drone["vx"], drone["vy"])
 
 
-def _update_targets_for_tick(mission: Mission, bounds: dict) -> None:
+def _update_targets_for_tick(mission: Mission) -> None:
     """Move wandering targets and assign a nearby drone when one detects them.
 
     Only targets still in the wandering state move on their own. Detection is a
@@ -312,7 +312,7 @@ def _update_targets_for_tick(mission: Mission, bounds: dict) -> None:
             target["vy"] = SPEED / 2 * math.sin(angle)
         target["lat"] += target["vx"]
         target["lon"] += target["vy"]
-        _bounce_entity(target, bounds, target["vx"], target["vy"])
+        _bounce_entity(target, mission.bounds, target["vx"], target["vy"])
 
         nearest_drone = None
         min_dist = float("inf")
@@ -342,15 +342,13 @@ def _update_coverage(mission: Mission) -> None:
     if not drones:
         return
 
-    grid_np = mission.dense_coverage_grid
+    grid_np = mission._dense_coverage_grid
     if grid_np is None:
         raw = mission.grid
         if not raw:
             return
         grid_np = np.array(raw)
 
-    # covered: set = mission.setdefault("_covered_set", set())
-
     for drone in drones:
         dlat = drone.get("lat", 0.0)
         dlon = drone.get("lon", 0.0)
@@ -364,47 +362,9 @@ def _update_coverage(mission: Mission) -> None:
         within = candidates[
             np.hypot(sub[:, 0] - dlat, sub[:, 1] - dlon) <= DETECTION_RADIUS
         ]
-        covered.update(int(i) for i in within)
+        mission.covered_set.update(int(i) for i in within)
 
-    mission.dense_covered_count = len(covered)
-
-
-def _update_coverage(mission: dict) -> None:
-    """Mark dense-grid cells within DETECTION_RADIUS of any drone as covered.
-
-    Uses the DETECTION_RADIUS-spaced grid stored at mission start so that
-    coverage % reflects actual swept area, not hits on the sparse 15×15 grid.
-    Falls back to the sparse grid for missions that lack the dense grid.
-    """
-    drones = mission.get("drones", [])
-    if not drones:
-        return
-
-    grid_np = mission.get("_dense_coverage_grid")
-    if grid_np is None:
-        raw = mission.get("grid")
-        if not raw:
-            return
-        grid_np = np.array(raw)
-
-    covered: set = mission.setdefault("_covered_set", set())
-
-    for drone in drones:
-        dlat = drone.get("lat", 0.0)
-        dlon = drone.get("lon", 0.0)
-        # Bounding-box pre-filter avoids a full distance matrix for large dense grids.
-        lat_mask = np.abs(grid_np[:, 0] - dlat) <= DETECTION_RADIUS
-        lon_mask = np.abs(grid_np[:, 1] - dlon) <= DETECTION_RADIUS
-        candidates = np.where(lat_mask & lon_mask)[0]
-        if len(candidates) == 0:
-            continue
-        sub = grid_np[candidates]
-        within = candidates[
-            np.hypot(sub[:, 0] - dlat, sub[:, 1] - dlon) <= DETECTION_RADIUS
-        ]
-        covered.update(int(i) for i in within)
-
-    mission["_dense_covered_count"] = len(covered)
+    mission._dense_covered_count = len(mission.covered_set)
 
 
 async def _finalize_mission_progress(mission: Mission) -> bool:
@@ -460,6 +420,11 @@ async def simulation_loop(mission_id: str):
     mission.status = "searching"
     recall_sent = False
 
+    logger.info("=========================================")
+    logger.info(f"SIMULATION LOOP STARTING FOR MISSION: {mission_id}")
+    logger.info(f"FRONTEND SELECTED ALGORITHM: {mission.algorithm}")
+    logger.info("=========================================")
+
     while mission.status != "mission_complete":
         # Pull live SITL state into the mission before making any coverage or
         # targeting decisions for this tick.
@@ -467,34 +432,18 @@ async def simulation_loop(mission_id: str):
 
         if mission.status == "searching":
             mission.elapsed_seconds = getattr(mission, "elapsed_seconds", 0) + 1
-            bounds = mission.bounds
-
-            # Pull live SITL state into the mission before making any coverage or
-            # targeting decisions for this tick.
-            live_drone_ids = _sync_mission_drones_with_sitl(mission)
 
             free_drones = [
                 d for d in mission.drones
                 if not d.get("assigned_target_id") and d.get("role") not in ["finder", "confirmer"]
             ]
 
-            # Pull live SITL state into the mission before making any coverage or
-            # targeting decisions for this tick.
-            live_drone_ids = _sync_mission_drones_with_sitl(mission)
-
-        algorithm_name = mission.algorithm
-        
-        logger.info("=========================================")
-        logger.info(f"SIMULATION LOOP STARTING FOR MISSION: {mission_id}")
-        logger.info(f"FRONTEND SELECTED ALGORITHM: {algorithm_name}")
-        logger.info("=========================================")
-
-        active_strategy = get_algorithm(algorithm_name)
-        waypoints_map = await asyncio.to_thread(active_strategy.get_target_waypoints, mission, free_drones)
+            active_strategy = get_algorithm(mission.algorithm)
+            waypoints_map = await asyncio.to_thread(active_strategy.get_target_waypoints, mission, free_drones)
 
             _send_live_drone_gotos(mission, live_drone_ids, waypoints_map)
-            await _update_drones_for_tick(mission, live_drone_ids, waypoints_map, bounds)
-            _update_targets_for_tick(mission, bounds)
+            await _update_drones_for_tick(mission, live_drone_ids, waypoints_map)
+            _update_targets_for_tick(mission)
             _update_coverage(mission)
             
             all_targets_found = await _finalize_mission_progress(mission)
@@ -509,7 +458,7 @@ async def simulation_loop(mission_id: str):
         
         elif mission.status == "recalling":
             if not recall_sent:
-                recall_results = run_direct_recall(mission)
+                run_direct_recall(mission)
                 recall_sent = True
 
             all_drones_recall_completed = check_recall_completion()

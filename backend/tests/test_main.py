@@ -327,10 +327,7 @@ def test_target_detection_uses_expanded_radius_before_icons_overlap():
         ],
     }
 
-    simulation_module._update_targets_for_tick(
-        mission,
-        mission.bounds,
-    )
+    simulation_module._update_targets_for_tick(mission)
 
     target = mission.targets[0]
     drone = mission.drones[0]
@@ -983,7 +980,7 @@ def test_metrics_endpoint_returns_404_for_missing_mission():
 
 def test_emit_target_found_stores_found_at_on_target():
     mission_id = "emit-found-at-test"
-    missions_db[mission_id] = {
+    mission_db[mission_id] = {
         "id": mission_id,
         "status": "running",
         "elapsed_seconds": 42,
@@ -1000,10 +997,10 @@ def test_emit_target_found_stores_found_at_on_target():
     original_broadcast = manager.broadcast
     manager.broadcast = fake_broadcast
     try:
-        asyncio.run(simulation_module._emit_target_found(missions_db[mission_id], target))
+        asyncio.run(simulation_module._emit_target_found(mission_db[mission_id], target))
     finally:
         manager.broadcast = original_broadcast
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
     assert target["found_at"] == 42
 
@@ -1476,7 +1473,7 @@ def test_metrics_endpoint_includes_coverage_and_find_time_fields():
 
 def test_metrics_coverage_rate_is_percent_per_second():
     mission_id = "metrics-rate-units"
-    missions_db[mission_id] = {
+    mission_db[mission_id] = {
         "id": mission_id,
         "algorithm": "sweep",
         "status": "running",
@@ -1489,7 +1486,7 @@ def test_metrics_coverage_rate_is_percent_per_second():
     try:
         response = client.get(f"/missions/{mission_id}/metrics")
     finally:
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
     payload = response.json()
     assert payload["coverage_pct"] == 50.0
@@ -1589,7 +1586,7 @@ def test_metrics_endpoint_returns_404_for_missing_mission():
 
 def test_emit_target_found_stores_found_at_on_target():
     mission_id = "emit-found-at-test"
-    missions_db[mission_id] = {
+    mission_db[mission_id] = {
         "id": mission_id,
         "status": "running",
         "elapsed_seconds": 42,
@@ -1606,10 +1603,10 @@ def test_emit_target_found_stores_found_at_on_target():
     original_broadcast = manager.broadcast
     manager.broadcast = fake_broadcast
     try:
-        asyncio.run(simulation_module._emit_target_found(missions_db[mission_id], target))
+        asyncio.run(simulation_module._emit_target_found(mission_db[mission_id], target))
     finally:
         manager.broadcast = original_broadcast
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
     assert target["found_at"] == 42
 
@@ -2082,7 +2079,7 @@ def test_metrics_endpoint_includes_coverage_and_find_time_fields():
 
 def test_metrics_coverage_rate_is_percent_per_second():
     mission_id = "metrics-rate-units"
-    missions_db[mission_id] = {
+    mission_db[mission_id] = {
         "id": mission_id,
         "algorithm": "sweep",
         "status": "running",
@@ -2095,7 +2092,7 @@ def test_metrics_coverage_rate_is_percent_per_second():
     try:
         response = client.get(f"/missions/{mission_id}/metrics")
     finally:
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
     payload = response.json()
     assert payload["coverage_pct"] == 50.0

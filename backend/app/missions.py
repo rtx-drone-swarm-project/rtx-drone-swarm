@@ -21,7 +21,7 @@ from app.algorithms.base import build_search_grid
 from app.models import MissionCreate, Mission
 
 
-mission_db: Dict[str, dict] = {}
+mission_db: Dict[str, Mission] = {}
 
 
 def _coerce_sysid(value: object) -> Optional[int]:

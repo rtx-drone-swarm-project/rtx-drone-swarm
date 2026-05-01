@@ -36,7 +36,7 @@ def create_mission(mission_data: MissionCreate):
     mission_id = str(uuid.uuid4())
     mission = Mission(mission_id, mission_data)
     mission_db[mission_id] = mission
-    return mission
+    return mission.to_dict()
 
 
 @router.get("/missions/{mission_id}")
@@ -44,7 +44,7 @@ def get_mission(mission_id: str):
     """Return one stored mission or raise ``404`` if the id is unknown."""
     if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
-    return mission_db[mission_id]
+    return mission_db[mission_id].to_dict()
 
 
 async def _background_dispatch(mission: Mission, mission_id: str, assignments: List[dict]) -> None:
@@ -104,8 +104,6 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
 
     bounds = mission.bounds
     startup_note = await _ensure_sitl_running_for_mission(mission)
-    # if startup_note:
-    #     mission["sitl_startup_note"] = startup_note
 
     targets = []
     for _ in range(random.randint(2, 3)):
@@ -120,8 +118,8 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
         )
     mission.targets = targets
     mission.grid = build_search_grid(bounds, n=15).tolist()
-    mission.dense_coverage_grid = build_search_grid(bounds)
-    mission.dense_grid_size = len(mission.dense_coverage_grid)
+    mission._dense_coverage_grid = build_search_grid(bounds)
+    mission._dense_grid_size = len(mission._dense_coverage_grid)
 
     dispatch_assignments = _build_start_dispatch_assignments(mission)
     if not dispatch_assignments:
@@ -149,7 +147,7 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
     if dispatch_assignments:
         asyncio.create_task(_background_dispatch(mission, mission_id, dispatch_assignments))
 
-    return _public_mission(mission)
+    return mission.to_dict()
 
 
 @router.post("/missions/{mission_id}/dispatch-targets")
@@ -199,31 +197,31 @@ async def stop_mission(mission_id: str):
     )
     await manager.broadcast({"type": "telemetry", "drones": []})
 
-    return _public_mission(mission)
+    return mission.to_dict()
 
 
 @router.get("/missions/{mission_id}/metrics")
 def get_mission_metrics(mission_id: str):
     """Return algorithm performance metrics for a completed or in-progress mission."""
-    if mission_id not in missions_db:
+    if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
-    mission = missions_db[mission_id]
-    targets = mission.get("targets", [])
+    mission = mission_db[mission_id]
+    targets = mission.targets
     found_targets = [t for t in targets if t.get("status") == "found"]
     found_times = [t["found_at"] for t in found_targets if "found_at" in t]
 
     # Use dense coverage if available (accurate); fall back to sparse for old missions.
-    grid_size = mission.get("_dense_grid_size") or len(mission.get("grid", []))
-    covered_count = mission.get("_dense_covered_count", len(mission.get("covered_grid_indices", [])))
+    grid_size = mission._dense_grid_size or len(mission.grid)
+    covered_count = mission._dense_covered_count
     coverage_pct = round(100.0 * covered_count / grid_size, 1) if grid_size else 0.0
-    elapsed = mission.get("elapsed_seconds", 0)
+    elapsed = mission.elapsed_seconds
     coverage_rate = round(coverage_pct / elapsed, 3) if elapsed > 0 else 0.0
 
     return {
-        "algorithm": mission.get("algorithm", "voronoi"),
-        "status": mission.get("status"),
+        "algorithm": mission.algorithm,
+        "status": mission.status,
         "elapsed_seconds": elapsed,
-        "completion_elapsed_seconds": mission.get("completion_elapsed_seconds"),
+        "completion_elapsed_seconds": mission.completion_elapsed_seconds,
         "targets_total": len(targets),
         "targets_found": len(found_targets),
         "found_at_seconds": found_times,
@@ -280,4 +278,4 @@ async def recall_mission(mission_id: str):
         }
     )
 
-    return mission
+    return mission.to_dict()

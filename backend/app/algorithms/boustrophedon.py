@@ -33,6 +33,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from app.algorithms.base import BaseSearchAlgorithm, DETECTION_RADIUS, build_dense_coverage_grid
+from app.models import Mission
 
 logger = logging.getLogger(__name__)
 
@@ -161,9 +162,9 @@ def _row_endpoints_lawnmower(cell_points: np.ndarray) -> List[Tuple[float, float
 class VoronoiBoustrophedon(BaseSearchAlgorithm):
     """Voronoi partitioning (dense grid) + per-cell lawnmower coverage."""
 
-    def _initialize_paths(self, mission: dict) -> None:
-        all_drones = mission.get("drones", [])
-        bounds = mission.get("bounds")
+    def _initialize_paths(self, mission: Mission) -> None:
+        all_drones = mission.drones
+        bounds = mission.bounds
         if not all_drones or not bounds:
             return
 
@@ -207,23 +208,22 @@ class VoronoiBoustrophedon(BaseSearchAlgorithm):
                 drone["id"], seed_idx, len(cell_points), centroid[0], centroid[1],
             )
 
-        mission["sweep_paths"] = sweep_paths
-        mission["sweep_centroids"] = sweep_centroids
-        mission["sweep_phase"] = sweep_phase
-        mission["sweep_reached_radius"] = _REACH_RADIUS
+        mission.sweep_paths = sweep_paths
+        mission.sweep_centroids = sweep_centroids
+        mission.sweep_phase = sweep_phase
+        mission.sweep_reached_radius = _REACH_RADIUS
 
     def get_target_waypoints(
-        self, mission: dict, free_drones: List[dict]
+        self, mission: Mission, free_drones: List[dict]
     ) -> Dict[str, Tuple[float, float]]:
         if not free_drones:
             return {}
 
-        if "sweep_paths" not in mission:
-            self._initialize_paths(mission)
+        self._initialize_paths(mission)
 
-        sweep_paths: Dict[str, List[Tuple[float, float]]] = mission.get("sweep_paths", {})
-        sweep_phase: Dict[str, str] = mission.setdefault("sweep_phase", {})
-        reached_radius: float = mission.get("sweep_reached_radius", _REACH_RADIUS)
+        sweep_paths: Dict[str, List[Tuple[float, float]]] = mission.sweep_paths
+        sweep_phase: Dict[str, str] = mission.sweep_phase
+        reached_radius: float = mission.sweep_reached_radius
         waypoint_map: Dict[str, Tuple[float, float]] = {}
 
         for drone in free_drones:
