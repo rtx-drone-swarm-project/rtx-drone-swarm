@@ -1,3 +1,4 @@
+import { algorithmDisplayLabel } from "../../types/mission";
 import { formatElapsed, statusLabel } from "../../utils/format";
 import CollapsibleSection from "../common/CollapsibleSection";
 import SearchingLabel from "../common/SearchingLabel";
@@ -23,12 +24,7 @@ export default function SwarmStatusPanel({
   telemetryMode,
   selectedAlgorithm
 }: SwarmStatusPanelProps) {
-  const ALGORITHM_LABELS: Record<string, string> = {
-    voronoi: "Voronoi",
-    apf: "APF",
-    sweep: "Sweep"
-  };
-  const algorithmLabel = ALGORITHM_LABELS[selectedAlgorithm] ?? selectedAlgorithm;
+  const algorithmLabel = algorithmDisplayLabel(selectedAlgorithm);
   return (
     <CollapsibleSection title="Swarm Status">
       <div className="kv-grid">

@@ -47,3 +47,11 @@ def lloyd_step(grid_points: np.ndarray, centroids: np.ndarray):
             new_centroids.append(centroids[i])
 
     return np.array(new_centroids), labels
+
+def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5):
+    """ACO-augmented Lloyd step; single implementation lives in ``app.algorithms.voronoi``."""
+    from app.algorithms import voronoi as algo_voronoi
+
+    return algo_voronoi.lloyd_step_aco(
+        X, centroids, old_centroids, pheromone, decay=decay, deposit=deposit
+    )
