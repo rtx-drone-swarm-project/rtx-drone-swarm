@@ -71,6 +71,7 @@ class VoronoiACOCoverage(BaseSearchAlgorithm):
         """
         self.old_centroids: np.ndarray | None = None
         self.pheromone_matrix: np.ndarray | None = None
+        self._drone_order: list[str] = []
 
     def get_target_waypoints(self, mission: dict, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
         """Run every simulation tick to get the next Voronoi centroid."""
@@ -97,18 +98,34 @@ class VoronoiACOCoverage(BaseSearchAlgorithm):
                 pos_list.append([dlat, dlon])
                 
         positions = np.asarray(pos_list, dtype=float)
+        drone_ids = [str(d["id"]) for d in free_drones]
         k = positions.shape[0]
 
-        if (
-            self.pheromone_matrix is None
-            or self.pheromone_matrix.shape != (len(grid_np), k)
-        ):
+        # Preserve pheromone/history by drone id when free-drone membership/order changes.
+        if self.pheromone_matrix is None or self.pheromone_matrix.shape[0] != len(grid_np):
             self.pheromone_matrix = np.ones((len(grid_np), k))
+        elif self.pheromone_matrix.shape[1] != k or self._drone_order != drone_ids:
+            remapped = np.ones((len(grid_np), k))
+            old_index = {drone_id: idx for idx, drone_id in enumerate(self._drone_order)}
+            for new_idx, drone_id in enumerate(drone_ids):
+                idx = old_index.get(drone_id)
+                if idx is not None and idx < self.pheromone_matrix.shape[1]:
+                    remapped[:, new_idx] = self.pheromone_matrix[:, idx]
+            self.pheromone_matrix = remapped
 
-        # voronoi_vis.py after each frame: old_centroids = centroids (the input to
-        # lloyd_step_aco), not new_centroids — path deposit uses (old_centroids, centroids).
-        if self.old_centroids is None or self.old_centroids.shape[0] != k:
-            self.old_centroids = positions.copy()
+        # Keep previous-tick positions keyed by drone id to avoid state drifting
+        # to the wrong drone when the free set changes.
+        if self.old_centroids is None or self.old_centroids.shape[0] != len(self._drone_order):
+            old_by_id: dict[str, np.ndarray] = {}
+        else:
+            old_by_id = {
+                drone_id: self.old_centroids[idx]
+                for idx, drone_id in enumerate(self._drone_order)
+            }
+        self.old_centroids = np.vstack(
+            [old_by_id.get(drone_id, positions[idx]) for idx, drone_id in enumerate(drone_ids)]
+        )
+        self._drone_order = drone_ids
 
         new_centroids, _, self.pheromone_matrix = lloyd_step_aco(
             grid_np, positions, self.old_centroids, self.pheromone_matrix

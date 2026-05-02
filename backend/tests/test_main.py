@@ -1364,6 +1364,54 @@ def test_voronoi_aco_coverage_initialize_and_waypoints():
     assert len(waypoints2) == 2
 
 
+def test_voronoi_aco_preserves_state_by_drone_id_when_membership_changes():
+    from app.algorithms.voronoi import VoronoiACOCoverage
+    from app.algorithms.base import build_search_grid
+    from unittest.mock import patch
+    import numpy as np
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+    grid = build_search_grid(bounds, n=5).tolist()
+    mission = {"bounds": bounds, "grid": grid, "drones": []}
+    algo = VoronoiACOCoverage()
+    algo.initialize(mission)
+
+    tick1 = [
+        {"id": "d0", "lat": 0.01, "lon": 0.01},
+        {"id": "d1", "lat": 0.02, "lon": 0.02},
+    ]
+    tick2 = [
+        {"id": "d1", "lat": 0.03, "lon": 0.03},
+        {"id": "d2", "lat": 0.035, "lon": 0.035},
+    ]
+
+    captures = []
+    call_count = {"n": 0}
+
+    def fake_lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5):
+        call_count["n"] += 1
+        captures.append((old_centroids.copy(), pheromone.copy()))
+        if call_count["n"] == 1:
+            pheromone[:, 0] = 5.0
+            pheromone[:, 1] = 9.0
+        labels = np.zeros(len(X), dtype=int)
+        return centroids.copy(), labels, pheromone
+
+    with patch("app.algorithms.voronoi.lloyd_step_aco", side_effect=fake_lloyd_step_aco):
+        algo.get_target_waypoints(mission, tick1)
+        algo.get_target_waypoints(mission, tick2)
+
+    old_centroids_2, pheromone_2 = captures[1]
+    # d1 existed on tick 1; its prior position should be reused after reordering.
+    assert np.allclose(old_centroids_2[0], [0.02, 0.02])
+    # d2 is new on tick 2; it should initialize with current position.
+    assert np.allclose(old_centroids_2[1], [0.035, 0.035])
+    # d1 moved from index 1 -> 0; its pheromone column must move with it.
+    assert np.allclose(pheromone_2[:, 0], 9.0)
+    # d2 is newly introduced, so it starts with baseline pheromone.
+    assert np.allclose(pheromone_2[:, 1], 1.0)
+
+
 def test_get_algorithm_returns_distinct_voronoi_aco_instances():
     from app.algorithms import get_algorithm
 
