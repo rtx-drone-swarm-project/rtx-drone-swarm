@@ -109,6 +109,7 @@ export default function useMissionActions({
         name: `SAR-${new Date().toISOString()}`,
         bounds: selectedBounds,
         drones: missionDrones,
+        algorithm: selectedAlgorithm,
         hikers: [
           {
             id: "hiker-1",

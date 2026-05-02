@@ -422,6 +422,15 @@ async def simulation_loop(mission_id: str):
     mission.setdefault("_found_target_ids", [])
     mission.setdefault("elapsed_seconds", 0)
 
+    algorithm_name = mission.get("algorithm", "voronoi")
+    active_strategy = get_algorithm(algorithm_name)
+    active_strategy.initialize(mission)
+    logger.info(
+        "simulation_loop mission=%s algorithm_key=%s implementation=%s",
+        mission_id,
+        algorithm_name,
+        type(active_strategy).__name__,
+    )
 
     while mission["status"] == "running":
         mission["elapsed_seconds"] = mission.get("elapsed_seconds", 0) + 1
@@ -438,14 +447,6 @@ async def simulation_loop(mission_id: str):
 
         #centroid_map =  await asyncio.to_thread(_build_centroid_map, mission) # DELETE THREAD IF NOT NECESSARY
 
-        algorithm_name = mission.get("algorithm", "voronoi")
-        
-        logger.info("=========================================")
-        logger.info(f"SIMULATION LOOP STARTING FOR MISSION: {mission_id}")
-        logger.info(f"FRONTEND SELECTED ALGORITHM: {algorithm_name}")
-        logger.info("=========================================")
-
-        active_strategy = get_algorithm(algorithm_name)
         waypoints_map = await asyncio.to_thread(active_strategy.get_target_waypoints, mission, free_drones)
 
         _send_live_drone_gotos(mission, live_drone_ids, waypoints_map)
