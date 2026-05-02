@@ -1,6 +1,18 @@
 export type MissionStatus = "idle" | "running" | "stopped" | "complete";
 
-export type AlgorithmOption = "voronoi" | "apf";
+export type AlgorithmOption = "voronoi" | "voronoi_aco" | "apf";
+
+/** Keys supported by backend `ALGORITHMS` — keep in sync with `backend/app/algorithms/__init__.py`. */
+export const ALGORITHM_OPTIONS: { value: AlgorithmOption; label: string }[] = [
+  { value: "voronoi", label: "Voronoi (Lloyd's)" },
+  { value: "voronoi_aco", label: "Voronoi (ACO)" },
+  { value: "apf", label: "APF (Potential Fields)" }
+];
+
+export function algorithmDisplayLabel(id: AlgorithmOption | string): string {
+  const match = ALGORITHM_OPTIONS.find((o) => o.value === id);
+  return match?.label ?? id;
+}
 
 export type EntityId = string | number;
 
@@ -89,6 +101,8 @@ export type MissionCreateRequest = {
   name: string;
   bounds: Bounds;
   drones: MissionDroneInput[];
+  /** Must match backend `ALGORITHMS` keys; echoed on the mission until start overrides. */
+  algorithm?: AlgorithmOption;
   hikers?: Array<{
     id: string;
     lat: number;

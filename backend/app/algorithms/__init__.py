@@ -1,11 +1,11 @@
 # app/algorithms/__init__.py
-from app.algorithms.voronoi import VoronoiCoverage
+from app.algorithms.voronoi import VoronoiCoverage, VoronoiACOCoverage
 from app.algorithms.apf import PotentialFieldsCoverage
 
 ALGORITHMS = {
     "voronoi": VoronoiCoverage(), #Temporary to test apf file, didnt want to mess with front end yet
     "apf": PotentialFieldsCoverage(),
-    #aco,
+    "voronoi_aco": VoronoiACOCoverage(),
     #etc.
 }
 

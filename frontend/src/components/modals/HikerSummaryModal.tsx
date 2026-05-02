@@ -1,9 +1,4 @@
-import type { Target } from "../../types/mission";
-
-const ALGORITHM_LABELS: Record<string, string> = {
-  voronoi: "Voronoi (Lloyd's)",
-  apf: "APF (Potential Fields)"
-};
+import { algorithmDisplayLabel, type Target } from "../../types/mission";
 
 type HikerSummaryModalProps = {
   isOpen: boolean;
@@ -40,7 +35,7 @@ export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLa
                 {algorithm && (
                   <>
                     <span>Algorithm</span>
-                    <strong>{ALGORITHM_LABELS[algorithm] ?? algorithm}</strong>
+                    <strong>{algorithmDisplayLabel(algorithm)}</strong>
                   </>
                 )}
                 {completionElapsedSeconds != null && completionElapsedSeconds > 0 && (
