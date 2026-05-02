@@ -49,6 +49,8 @@ async def _emit_target_found(mission: dict, target: dict, drone_id: Optional[str
         return
     found_ids.append(target["id"])
     target["found_at"] = mission.get("elapsed_seconds", 0)
+    if mission.get("_suppress_broadcasts"):
+        return
     await manager.broadcast(
         {
             "type": "target_found",
@@ -224,12 +226,10 @@ async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], waypo
 
             
             if dist > TARGET_STOP_RADIUS:
-                
-                '''if not has_live_telemetry:
+                if not has_live_telemetry and mission.get("_move_assigned_sim_drones"):
                     drone["lat"] += (d_lat / dist) * SPEED
-                    drone["lon"] += (d_lon / dist) * SPEED 
-                    drone["lat"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)        #ONLY FOR USING MOCK DATA, NOT NEEDED?
-                    drone["lon"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)'''
+                    drone["lon"] += (d_lon / dist) * SPEED
+                    _bounce_entity(drone, bounds, d_lat, d_lon)
                     
                 continue
 
@@ -304,13 +304,14 @@ def _update_targets_for_tick(mission: dict, bounds: dict) -> None:
     for target in mission["targets"]:
         if target.get("status", "wandering") != "wandering":
             continue
-        if "vx" not in target:
-            angle = random.uniform(0, 2 * math.pi)
-            target["vx"] = SPEED / 2 * math.cos(angle)
-            target["vy"] = SPEED / 2 * math.sin(angle)
-        target["lat"] += target["vx"]
-        target["lon"] += target["vy"]
-        _bounce_entity(target, bounds, target["vx"], target["vy"])
+        if not mission.get("_static_targets"):
+            if "vx" not in target:
+                angle = random.uniform(0, 2 * math.pi)
+                target["vx"] = SPEED / 2 * math.cos(angle)
+                target["vy"] = SPEED / 2 * math.sin(angle)
+            target["lat"] += target["vx"]
+            target["lon"] += target["vy"]
+            _bounce_entity(target, bounds, target["vx"], target["vy"])
 
         nearest_drone = None
         min_dist = float("inf")

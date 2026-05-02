@@ -1,8 +1,8 @@
-"""Pydantic models shared across mission and dispatch endpoints."""
+"""Pydantic models shared across mission, benchmark, and dispatch endpoints."""
 
 from typing import Optional, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class Bounds(BaseModel):
     """Latitude and longitude bounds for a mission search area."""
@@ -54,6 +54,18 @@ class MissionStart(BaseModel):
     drones: Optional[List[Drone]] = None
     algorithm: Optional[str] = None
     hikers: Optional[List[Hiker]] = None
+
+
+class BenchmarkRequest(BaseModel):
+    """Configuration for a paired headless algorithm benchmark run."""
+
+    algorithms: List[str] = Field(default_factory=lambda: ["voronoi", "apf", "sweep"])
+    iterations: int = Field(default=50, ge=1, le=500)
+    bounds: Bounds
+    drone_count: int = Field(default=5, ge=1, le=50)
+    target_count: int = Field(default=3, ge=1, le=20)
+    timeout_seconds: int = Field(default=120, ge=1, le=3600)
+    seed: Optional[int] = None
 
 
 class DispatchAssignment(BaseModel):
