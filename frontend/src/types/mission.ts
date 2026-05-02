@@ -1,12 +1,13 @@
 export type MissionStatus = "idle" | "running" | "stopped" | "complete";
 
-export type AlgorithmOption = "voronoi" | "voronoi_aco" | "apf";
+export type AlgorithmOption = "voronoi" | "voronoi_aco" | "apf" | "sweep" ;
 
 /** Keys supported by backend `ALGORITHMS` — keep in sync with `backend/app/algorithms/__init__.py`. */
 export const ALGORITHM_OPTIONS: { value: AlgorithmOption; label: string }[] = [
   { value: "voronoi", label: "Voronoi (Lloyd's)" },
   { value: "voronoi_aco", label: "Voronoi (ACO)" },
-  { value: "apf", label: "APF (Potential Fields)" }
+  { value: "apf", label: "APF (Potential Fields)" },
+  { value: "sweep", label: "Voronoi + Lawnmower Sweep"}
 ];
 
 export function algorithmDisplayLabel(id: AlgorithmOption | string): string {
@@ -38,6 +39,8 @@ export type TelemetryDrone = {
   target_lat?: number | string | null;
   target_lon?: number | string | null;
   role?: string | null;
+  sweep_centroid?: [number, number] | null;
+  sweep_phase?: string | null;
 };
 
 export type Target = {
@@ -82,6 +85,8 @@ export type ValidDrone = {
   target_lat?: number;
   target_lon?: number;
   role?: string | null;
+  sweep_centroid?: [number, number];
+  sweep_phase?: string;
 };
 
 export type MissionDroneInput = {
