@@ -1320,6 +1320,58 @@ def test_voronoi_algorithm_handles_small_drone_counts():
             assert bounds["min_lon"] <= lon <= bounds["max_lon"]
 
 
+def test_app_voronoi_lloyd_step_aco_matches_algorithms_module():
+    import numpy as np
+
+    from app import voronoi as legacy_voronoi
+    from app.algorithms import voronoi as algo_voronoi
+
+    rng = np.random.default_rng(0)
+    X = rng.random((20, 2))
+    centroids = rng.random((3, 2))
+    old_centroids = centroids.copy()
+    pheromone = np.ones((20, 3))
+    p2 = pheromone.copy()
+
+    nc1, lb1, ph1 = legacy_voronoi.lloyd_step_aco(X, centroids, old_centroids, pheromone)
+    nc2, lb2, ph2 = algo_voronoi.lloyd_step_aco(X, centroids, old_centroids, p2)
+
+    assert np.allclose(nc1, nc2)
+    assert np.array_equal(lb1, lb2)
+    assert np.allclose(ph1, ph2)
+
+
+def test_voronoi_aco_coverage_initialize_and_waypoints():
+    from app.algorithms.voronoi import VoronoiACOCoverage
+    from app.algorithms.base import build_search_grid
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+    grid = build_search_grid(bounds, n=5).tolist()
+    drones = [
+        {"id": "d0", "lat": 0.01, "lon": 0.01},
+        {"id": "d1", "lat": 0.02, "lon": 0.02},
+    ]
+    mission = {"bounds": bounds, "grid": grid, "drones": drones}
+    algo = VoronoiACOCoverage()
+    algo.initialize(mission)
+    waypoints = algo.get_target_waypoints(mission, drones)
+    assert set(waypoints.keys()) == {"d0", "d1"}
+    for lat, lon in waypoints.values():
+        assert bounds["min_lat"] <= lat <= bounds["max_lat"]
+        assert bounds["min_lon"] <= lon <= bounds["max_lon"]
+    # Second tick: pheromone state should exist and still return two waypoints
+    waypoints2 = algo.get_target_waypoints(mission, drones)
+    assert len(waypoints2) == 2
+
+
+def test_get_algorithm_returns_distinct_voronoi_aco_instances():
+    from app.algorithms import get_algorithm
+
+    a = get_algorithm("voronoi_aco")
+    b = get_algorithm("voronoi_aco")
+    assert a is not b
+
+
 def test_row_endpoints_lawnmower_alternates_direction():
     from app.algorithms.boustrophedon import _row_endpoints_lawnmower
     import numpy as np

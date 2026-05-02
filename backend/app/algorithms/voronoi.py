@@ -29,7 +29,6 @@ def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.
     avoidance = np.exp(-1 * pheromone)
     scores = similarity * avoidance
 
-    distance_labels = np.argmin(distances, axis=1) 
     labels = np.argmax(scores, axis=1)
 
     new_centroids = []
