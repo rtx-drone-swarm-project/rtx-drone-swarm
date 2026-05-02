@@ -1,4 +1,4 @@
-import type { MissionCreateRequest, MissionRecord } from "../types/mission";
+import type { BenchmarkRequestPayload, BenchmarkRun, MissionCreateRequest, MissionRecord } from "../types/mission";
 
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
@@ -13,6 +13,9 @@ export type MissionApiClient = {
   startMission: (missionId: string | number, algorithm?: string) => Promise<MissionRecord>;
   stopMission: (missionId: string | number) => Promise<MissionRecord>;
   deleteMission: (missionId: string | number) => Promise<void>;
+  startBenchmark: (payload: BenchmarkRequestPayload) => Promise<BenchmarkRun>;
+  getBenchmarkRun: (runId: string) => Promise<BenchmarkRun>;
+  listBenchmarkRuns: () => Promise<{ runs: BenchmarkRun[] }>;
 };
 
 export function createMissionClient(apiBase: string): MissionApiClient {
@@ -43,6 +46,18 @@ export function createMissionClient(apiBase: string): MissionApiClient {
     deleteMission: (missionId) =>
       requestJson<void>(`${apiBase}/missions/${missionId}`, {
         method: "DELETE"
-      })
+      }),
+
+    startBenchmark: (payload) =>
+      requestJson<BenchmarkRun>(`${apiBase}/benchmark`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }),
+
+    getBenchmarkRun: (runId) =>
+      requestJson<BenchmarkRun>(`${apiBase}/benchmark/${runId}`),
+
+    listBenchmarkRuns: () => requestJson<{ runs: BenchmarkRun[] }>(`${apiBase}/benchmark/runs`)
   };
 }

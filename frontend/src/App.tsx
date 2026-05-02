@@ -6,6 +6,7 @@ import DroneModal from "./components/modals/DroneModal";
 import HikerSummaryModal from "./components/modals/HikerSummaryModal";
 import AlertsPanel from "./components/panels/AlertsPanel";
 import ActionsPanel from "./components/panels/ActionsPanel";
+import BenchmarkPanel from "./components/panels/BenchmarkPanel";
 import FoundHikersPanel from "./components/panels/FoundHikersPanel";
 import LegendPanel from "./components/panels/LegendPanel";
 import NavigationPanel from "./components/panels/NavigationPanel";
@@ -23,7 +24,13 @@ import type {
   TelemetryDrone,
   ValidDrone
 } from "./types/mission";
-import type { MissionProgressMessage, MissionStatusMessage, TargetFoundMessage, TelemetryMessage } from "./types/ws";
+import type {
+  BenchmarkProgressMessage,
+  MissionProgressMessage,
+  MissionStatusMessage,
+  TargetFoundMessage,
+  TelemetryMessage
+} from "./types/ws";
 import { normalizeMissionStatus } from "./utils/format";
 import { customAreaBounds } from "./utils/geo";
 import { parseCoordinate } from "./utils/validate";
@@ -57,6 +64,7 @@ export default function App() {
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<AlgorithmOption>("voronoi");
   const [completionElapsedSeconds, setCompletionElapsedSeconds] = useState<number>(0);
   const [completedMetrics, setCompletedMetrics] = useState<MissionMetrics | null>(null);
+  const [benchmarkProgress, setBenchmarkProgress] = useState<BenchmarkProgressMessage | null>(null);
 
   // Ref so onMissionStatus can read current elapsed without it being a dep,
   // which would recreate the callback every second and reconnect the WebSocket.
@@ -281,7 +289,8 @@ export default function App() {
     onTelemetry,
     onMissionStatus,
     onMissionProgress,
-    onTargetFound
+    onTargetFound,
+    onBenchmarkProgress: setBenchmarkProgress
   });
 
   const { startMission, stopMission, resetMissionLock } = useMissionActions({
@@ -487,6 +496,12 @@ export default function App() {
             onStartMission={startMission}
             onStopMission={stopMission}
             onResetMission={onResetMission}
+          />
+          <BenchmarkPanel
+            apiBase={apiBase}
+            selectedBounds={selectedBounds}
+            validDroneCount={validDroneCount}
+            progressMessage={benchmarkProgress}
           />
           <FoundHikersPanel hikers={foundHikersSorted} getHikerLabel={getHikerLabel} />
         </aside>

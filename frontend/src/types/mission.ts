@@ -17,6 +17,48 @@ export type MissionMetrics = {
   coverage_rate_per_sec?: number;
 };
 
+export type BenchmarkMetricStats = {
+  mean: number | null;
+  min: number | null;
+  max: number | null;
+  stddev: number | null;
+};
+
+export type BenchmarkAlgorithmSummary = {
+  count: number;
+  [metric: string]: BenchmarkMetricStats | number;
+};
+
+export type BenchmarkSummary = Record<string, BenchmarkAlgorithmSummary>;
+
+export type BenchmarkRun = {
+  run_id: string;
+  status: "running" | "complete" | "failed" | string;
+  created_at?: string;
+  completed_at?: string | null;
+  total_trials: number;
+  completed_trials: number;
+  request?: {
+    algorithms?: string[];
+    iterations?: number;
+    drone_count?: number;
+    target_count?: number;
+    timeout_seconds?: number;
+  };
+  summary?: BenchmarkSummary;
+  error?: string | null;
+};
+
+export type BenchmarkRequestPayload = {
+  algorithms: AlgorithmOption[];
+  iterations: number;
+  bounds: Bounds;
+  drone_count: number;
+  target_count: number;
+  timeout_seconds: number;
+  seed?: number;
+};
+
 export type EntityId = string | number;
 
 export type Bounds = {

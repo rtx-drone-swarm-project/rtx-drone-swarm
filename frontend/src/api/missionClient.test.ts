@@ -108,4 +108,42 @@ describe("missionClient", () => {
       })
     ).rejects.toThrow("bad request");
   });
+
+  it("starts and reads benchmark runs", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ run_id: "b1", status: "running" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ run_id: "b1", status: "complete" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ runs: [{ run_id: "b1" }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMissionClient("http://localhost:8000");
+    await client.startBenchmark({
+      algorithms: ["voronoi", "sweep"],
+      iterations: 50,
+      bounds: { min_lat: 1, max_lat: 2, min_lon: 3, max_lon: 4 },
+      drone_count: 5,
+      target_count: 3,
+      timeout_seconds: 120
+    });
+    await client.getBenchmarkRun("b1");
+    await client.listBenchmarkRuns();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8000/benchmark",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          algorithms: ["voronoi", "sweep"],
+          iterations: 50,
+          bounds: { min_lat: 1, max_lat: 2, min_lon: 3, max_lon: 4 },
+          drone_count: 5,
+          target_count: 3,
+          timeout_seconds: 120
+        })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://localhost:8000/benchmark/b1", undefined);
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "http://localhost:8000/benchmark/runs", undefined);
+  });
 });

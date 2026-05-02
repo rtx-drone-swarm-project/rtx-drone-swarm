@@ -57,11 +57,19 @@ describe("App integration", () => {
   it("sanitizes drone payloads during mission creation and supports mission completion flow", async () => {
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
 
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "idle", progress: 0 }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "running", progress: 0, targets: [] }) })
-      .mockResolvedValue({ ok: true, json: async () => ({ algorithm: "sweep", coverage_pct: 0, targets_total: 2, targets_found: 2, found_at_seconds: [] }) });
+    const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/benchmark/runs")) {
+        return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
+      }
+      if (url.endsWith("/missions")) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m1", status: "idle", progress: 0 }) });
+      }
+      if (url.endsWith("/missions/m1/start")) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m1", status: "running", progress: 0, targets: [] }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ algorithm: "sweep", coverage_pct: 0, targets_total: 2, targets_found: 2, found_at_seconds: [] }) });
+    });
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -94,11 +102,15 @@ describe("App integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start Mission" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m1/start"))).toBe(true);
     });
 
-    const createMissionRequest = fetchMock.mock.calls[0];
-    const init = createMissionRequest[1] as RequestInit;
+    const createMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions"));
+    expect(createMissionRequest).toBeTruthy();
+    if (!createMissionRequest) throw new Error("missing create mission request");
+    const init = createMissionRequest[1];
+    expect(init).toBeTruthy();
+    if (!init) throw new Error("missing create mission init");
     const body = JSON.parse(String(init.body));
 
     expect(body.drones).toEqual([

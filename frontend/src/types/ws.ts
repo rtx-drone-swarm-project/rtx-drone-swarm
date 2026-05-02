@@ -27,6 +27,15 @@ export type TargetFoundMessage = {
   found_at?: number;
 };
 
+export type BenchmarkProgressMessage = {
+  type: "benchmark_progress";
+  run_id?: string;
+  completed?: number;
+  total?: number;
+  status?: string;
+  error?: string;
+};
+
 export type UnknownMessage = {
   type?: string;
   [key: string]: unknown;
@@ -37,4 +46,5 @@ export type WsMessage =
   | MissionStatusMessage
   | MissionProgressMessage
   | TargetFoundMessage
+  | BenchmarkProgressMessage
   | UnknownMessage;

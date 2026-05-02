@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { getWsUrl } from "../api/runtime";
 import type {
+  BenchmarkProgressMessage,
   MissionProgressMessage,
   MissionStatusMessage,
   TelemetryMessage,
@@ -14,6 +15,7 @@ type UseMissionSocketArgs = {
   onMissionStatus: (message: MissionStatusMessage) => void;
   onMissionProgress: (message: MissionProgressMessage) => void;
   onTargetFound: (message: TargetFoundMessage) => void;
+  onBenchmarkProgress?: (message: BenchmarkProgressMessage) => void;
 };
 
 function isMessageWithType(payload: unknown): payload is { type: string } {
@@ -26,7 +28,8 @@ export default function useMissionSocket({
   onTelemetry,
   onMissionStatus,
   onMissionProgress,
-  onTargetFound
+  onTargetFound,
+  onBenchmarkProgress
 }: UseMissionSocketArgs) {
   useEffect(() => {
     const ws = new WebSocket(getWsUrl(apiPort));
@@ -65,6 +68,11 @@ export default function useMissionSocket({
 
         if (payload.type === "target_found") {
           onTargetFound(payload as TargetFoundMessage);
+          return;
+        }
+
+        if (payload.type === "benchmark_progress") {
+          onBenchmarkProgress?.(payload as BenchmarkProgressMessage);
         }
       } catch {
         console.warn("Failed to parse websocket payload.");
@@ -72,5 +80,5 @@ export default function useMissionSocket({
     };
 
     return () => ws.close();
-  }, [apiPort, onConnectedChange, onMissionProgress, onMissionStatus, onTargetFound, onTelemetry]);
+  }, [apiPort, onBenchmarkProgress, onConnectedChange, onMissionProgress, onMissionStatus, onTargetFound, onTelemetry]);
 }

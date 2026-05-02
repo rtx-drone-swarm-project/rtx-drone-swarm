@@ -421,6 +421,131 @@ body,
   color: #4ade80;
 }
 
+.benchmark-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.benchmark-checks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.benchmark-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid rgb(71 85 105 / 0.9);
+  border-radius: 8px;
+  background: rgb(15 23 42 / 0.65);
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.benchmark-check input {
+  flex: 0 0 auto;
+}
+
+.benchmark-check span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.benchmark-input-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.benchmark-input-grid .field {
+  margin-bottom: 0;
+}
+
+.benchmark-progress-block {
+  display: grid;
+  gap: 6px;
+}
+
+.benchmark-progress-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #94a3b8;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.benchmark-progress-row strong {
+  color: #e2e8f0;
+}
+
+.benchmark-progress {
+  margin-top: 0;
+}
+
+.benchmark-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgb(71 85 105 / 0.75);
+  border-radius: 8px;
+}
+
+.benchmark-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+  font-size: 11px;
+}
+
+.benchmark-table th,
+.benchmark-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid rgb(51 65 85 / 0.8);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.benchmark-table th:first-child,
+.benchmark-table td:first-child {
+  text-align: left;
+}
+
+.benchmark-table thead th {
+  color: #93c5fd;
+  background: rgb(15 23 42 / 0.9);
+}
+
+.benchmark-table tbody th {
+  color: #f1f5f9;
+}
+
+.benchmark-table tbody td {
+  color: #cbd5e1;
+}
+
+.benchmark-table tr:last-child th,
+.benchmark-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.benchmark-export {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid rgb(96 165 250 / 0.5);
+  border-radius: 8px;
+  color: #bfdbfe;
+  text-align: center;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.benchmark-export:hover {
+  background: rgb(30 58 138 / 0.35);
+}
+
 .legend-item {
   display: flex;
   align-items: center;
