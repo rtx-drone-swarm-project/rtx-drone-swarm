@@ -1,4 +1,4 @@
-import { algorithmDisplayLabel, type Target } from "../../types/mission";
+import { algorithmDisplayLabel, type MissionMetrics, type Target } from "../../types/mission";
 
 type HikerSummaryModalProps = {
   isOpen: boolean;
