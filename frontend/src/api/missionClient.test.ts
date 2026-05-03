@@ -146,4 +146,19 @@ describe("missionClient", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, "http://localhost:8000/benchmark/b1", undefined);
     expect(fetchMock).toHaveBeenNthCalledWith(3, "http://localhost:8000/benchmark/runs", undefined);
   });
+
+  it("lists discovered algorithms", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ algorithms: [{ key: "voronoi_aco", label: "Voronoi (ACO)" }] })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMissionClient("http://localhost:8000");
+    const payload = await client.listAlgorithms();
+
+    expect(payload.algorithms[0].key).toBe("voronoi_aco");
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:8000/algorithms", undefined);
+  });
 });

@@ -1,17 +1,24 @@
 export type MissionStatus = "idle" | "running" | "stopped" | "complete";
 
-export type AlgorithmOption = "voronoi" | "voronoi_aco" | "apf" | "sweep" ;
+export type AlgorithmOption = string;
 
-/** Keys supported by backend `ALGORITHMS` — keep in sync with `backend/app/algorithms/__init__.py`. */
-export const ALGORITHM_OPTIONS: { value: AlgorithmOption; label: string }[] = [
+export type AlgorithmMetadata = {
+  key: AlgorithmOption;
+  label: string;
+  description?: string | null;
+  module?: string;
+  class_name?: string;
+};
+
+export const DEFAULT_ALGORITHM_OPTIONS: AlgorithmMetadata[] = [
   { value: "voronoi", label: "Voronoi (Lloyd's)" },
   { value: "voronoi_aco", label: "Voronoi (ACO)" },
   { value: "apf", label: "APF (Potential Fields)" },
   { value: "sweep", label: "Sweep (Voronoi + Lawnmower)" }
-];
+].map((item) => ({ key: item.value, label: item.label }));
 
-export function algorithmDisplayLabel(id: AlgorithmOption | string): string {
-  const match = ALGORITHM_OPTIONS.find((o) => o.value === id);
+export function algorithmDisplayLabel(id: AlgorithmOption | string, options = DEFAULT_ALGORITHM_OPTIONS): string {
+  const match = options.find((o) => o.key === id);
   return match?.label ?? id;
 }
 
@@ -48,7 +55,7 @@ export type BenchmarkRun = {
 };
 
 export type BenchmarkRequestPayload = {
-  algorithms: AlgorithmOption[];
+  algorithms: string[];
   iterations: number;
   bounds: Bounds;
   drone_count: number;
@@ -163,7 +170,7 @@ export type MissionCreateRequest = {
   name: string;
   bounds: Bounds;
   drones: MissionDroneInput[];
-  /** Must match backend `ALGORITHMS` keys; echoed on the mission until start overrides. */
+  /** Must match backend-discovered algorithm keys; echoed on the mission until start overrides. */
   algorithm?: AlgorithmOption;
   hikers?: Array<{
     id: string;

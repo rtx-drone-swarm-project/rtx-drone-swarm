@@ -1,4 +1,4 @@
-import type { BenchmarkRequestPayload, BenchmarkRun, MissionCreateRequest, MissionRecord } from "../types/mission";
+import type { AlgorithmMetadata, BenchmarkRequestPayload, BenchmarkRun, MissionCreateRequest, MissionRecord } from "../types/mission";
 
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
@@ -13,6 +13,7 @@ export type MissionApiClient = {
   startMission: (missionId: string | number, algorithm?: string) => Promise<MissionRecord>;
   stopMission: (missionId: string | number) => Promise<MissionRecord>;
   deleteMission: (missionId: string | number) => Promise<void>;
+  listAlgorithms: () => Promise<{ algorithms: AlgorithmMetadata[] }>;
   startBenchmark: (payload: BenchmarkRequestPayload) => Promise<BenchmarkRun>;
   getBenchmarkRun: (runId: string) => Promise<BenchmarkRun>;
   listBenchmarkRuns: () => Promise<{ runs: BenchmarkRun[] }>;
@@ -47,6 +48,8 @@ export function createMissionClient(apiBase: string): MissionApiClient {
       requestJson<void>(`${apiBase}/missions/${missionId}`, {
         method: "DELETE"
       }),
+
+    listAlgorithms: () => requestJson<{ algorithms: AlgorithmMetadata[] }>(`${apiBase}/algorithms`),
 
     startBenchmark: (payload) =>
       requestJson<BenchmarkRun>(`${apiBase}/benchmark`, {

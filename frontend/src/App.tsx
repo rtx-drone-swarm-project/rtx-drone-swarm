@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createMissionClient } from "./api/missionClient";
 import { getApiBase, getApiPort } from "./api/runtime";
 import TopBar from "./components/layout/TopBar";
 import MapPanel from "./components/map/MapPanel";
@@ -13,8 +14,10 @@ import NavigationPanel from "./components/panels/NavigationPanel";
 import SwarmStatusPanel from "./components/panels/SwarmStatusPanel";
 import useMissionActions from "./hooks/useMissionActions";
 import useMissionSocket from "./hooks/useMissionSocket";
+import { DEFAULT_ALGORITHM_OPTIONS } from "./types/mission";
 import type {
   AlgorithmOption,
+  AlgorithmMetadata,
   Bounds,
   FoundHiker,
   MissionMetrics,
@@ -41,6 +44,7 @@ const DEFAULT_ZOOM = 13;
 export default function App() {
   const apiPort = getApiPort();
   const apiBase = useMemo(() => getApiBase(apiPort), [apiPort]);
+  const apiClient = useMemo(() => createMissionClient(apiBase), [apiBase]);
 
   const [telemetry, setTelemetry] = useState<TelemetryDrone[]>([]);
   const [mission, setMission] = useState<MissionState>(null);
@@ -62,6 +66,7 @@ export default function App() {
   const [completedTargets, setCompletedTargets] = useState<Target[]>([]);
   const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<AlgorithmOption>("voronoi");
+  const [algorithmOptions, setAlgorithmOptions] = useState<AlgorithmMetadata[]>(DEFAULT_ALGORITHM_OPTIONS);
   const [completionElapsedSeconds, setCompletionElapsedSeconds] = useState<number>(0);
   const [completedMetrics, setCompletedMetrics] = useState<MissionMetrics | null>(null);
   const [benchmarkProgress, setBenchmarkProgress] = useState<BenchmarkProgressMessage | null>(null);
@@ -141,6 +146,24 @@ export default function App() {
   );
 
   const validDroneCount = validDrones.length;
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.listAlgorithms()
+      .then((payload) => {
+        if (cancelled || !Array.isArray(payload.algorithms) || payload.algorithms.length === 0) return;
+        setAlgorithmOptions(payload.algorithms);
+        setSelectedAlgorithm((current) =>
+          payload.algorithms.some((option) => option.key === current) ? current : payload.algorithms[0].key
+        );
+      })
+      .catch(() => {
+        // Keep built-in fallback options if the backend is not reachable yet.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient]);
 
   const getHikerLabel = useCallback(
     (targetId: string | number) => {
@@ -471,6 +494,7 @@ export default function App() {
             lostHikerCount={lostHikerCount}
             telemetryMode={telemetryMode}
             selectedAlgorithm={selectedAlgorithm}
+            algorithmOptions={algorithmOptions}
           />
           <LegendPanel />
         </aside>
@@ -492,6 +516,7 @@ export default function App() {
             validDroneCount={validDroneCount}
             mission={mission}
             selectedAlgorithm={selectedAlgorithm}
+            algorithmOptions={algorithmOptions}
             onAlgorithmChange={onAlgorithmChange}
             onStartMission={startMission}
             onStopMission={stopMission}
@@ -502,6 +527,7 @@ export default function App() {
             selectedBounds={selectedBounds}
             validDroneCount={validDroneCount}
             progressMessage={benchmarkProgress}
+            algorithmOptions={algorithmOptions}
           />
           <FoundHikersPanel hikers={foundHikersSorted} getHikerLabel={getHikerLabel} />
         </aside>
@@ -514,6 +540,7 @@ export default function App() {
         targets={completedTargetsSorted}
         getHikerLabel={getHikerLabel}
         algorithm={completedMetrics?.algorithm ?? mission?.algorithm ?? selectedAlgorithm}
+        algorithmOptions={algorithmOptions}
         completionElapsedSeconds={completionElapsedSeconds}
         metrics={completedMetrics}
       />

@@ -2,18 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createMissionClient } from "../../api/missionClient";
 import type {
   AlgorithmOption,
+  AlgorithmMetadata,
   BenchmarkMetricStats,
   BenchmarkRun,
   Bounds
 } from "../../types/mission";
 import type { BenchmarkProgressMessage } from "../../types/ws";
 import CollapsibleSection from "../common/CollapsibleSection";
-
-const ALGORITHMS: { value: AlgorithmOption; label: string }[] = [
-  { value: "voronoi", label: "Voronoi" },
-  { value: "apf", label: "APF" },
-  { value: "sweep", label: "Sweep" }
-];
 
 const METRICS: { key: string; label: string; suffix?: string }[] = [
   { key: "first_find_seconds", label: "First Find", suffix: "s" },
@@ -28,6 +23,7 @@ type BenchmarkPanelProps = {
   selectedBounds: Bounds | null;
   validDroneCount: number;
   progressMessage: BenchmarkProgressMessage | null;
+  algorithmOptions: AlgorithmMetadata[];
 };
 
 function metricStats(value: unknown): BenchmarkMetricStats | null {
@@ -51,14 +47,11 @@ export default function BenchmarkPanel({
   apiBase,
   selectedBounds,
   validDroneCount,
-  progressMessage
+  progressMessage,
+  algorithmOptions
 }: BenchmarkPanelProps) {
   const client = useMemo(() => createMissionClient(apiBase), [apiBase]);
-  const [selectedAlgorithms, setSelectedAlgorithms] = useState<Record<AlgorithmOption, boolean>>({
-    voronoi: true,
-    apf: true,
-    sweep: true
-  });
+  const [selectedAlgorithms, setSelectedAlgorithms] = useState<Record<AlgorithmOption, boolean>>({});
   const [iterations, setIterations] = useState(50);
   const [targetCount, setTargetCount] = useState(3);
   const [timeoutSeconds, setTimeoutSeconds] = useState(120);
@@ -68,8 +61,8 @@ export default function BenchmarkPanel({
   const [error, setError] = useState<string | null>(null);
 
   const algorithms = useMemo(
-    () => ALGORITHMS.filter((option) => selectedAlgorithms[option.value]).map((option) => option.value),
-    [selectedAlgorithms]
+    () => algorithmOptions.filter((option) => selectedAlgorithms[option.key]).map((option) => option.key),
+    [algorithmOptions, selectedAlgorithms]
   );
   const activeRunId = run?.run_id ?? null;
   const isRunning = run?.status === "running";
@@ -97,6 +90,16 @@ export default function BenchmarkPanel({
       setRuns([]);
     });
   }, [loadRuns]);
+
+  useEffect(() => {
+    setSelectedAlgorithms((prev) => {
+      const next: Record<AlgorithmOption, boolean> = {};
+      for (const option of algorithmOptions) {
+        next[option.key] = prev[option.key] ?? true;
+      }
+      return next;
+    });
+  }, [algorithmOptions]);
 
   useEffect(() => {
     if (!activeRunId || !isRunning) return;
@@ -157,13 +160,13 @@ export default function BenchmarkPanel({
     <CollapsibleSection title="Benchmark" defaultOpen={false}>
       <div className="benchmark-stack">
         <div className="benchmark-checks" aria-label="Benchmark algorithms">
-          {ALGORITHMS.map((option) => (
-            <label key={option.value} className="benchmark-check">
+          {algorithmOptions.map((option) => (
+            <label key={option.key} className="benchmark-check">
               <input
                 type="checkbox"
-                checked={selectedAlgorithms[option.value]}
+                checked={selectedAlgorithms[option.key] ?? true}
                 onChange={(event) =>
-                  setSelectedAlgorithms((prev) => ({ ...prev, [option.value]: event.target.checked }))
+                  setSelectedAlgorithms((prev) => ({ ...prev, [option.key]: event.target.checked }))
                 }
                 disabled={isRunning}
               />
