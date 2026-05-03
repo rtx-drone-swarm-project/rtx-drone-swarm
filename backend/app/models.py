@@ -110,10 +110,10 @@ class Mission:
     def to_dict(self):
         data = asdict(self)
 
-        if self.grid is not None:
+        if self.grid is not None and type(self.grid) is np.ndarray:
             data["grid"] = self.grid.tolist()
 
-        if self._dense_coverage_grid is not None:
+        if self._dense_coverage_grid is not None and type(self._dense_coverage_grid) is np.ndarray:
             data["_dense_coverage_grid"] = (
                 self._dense_coverage_grid.tolist()
             )

@@ -218,8 +218,9 @@ class VoronoiBoustrophedon(BaseSearchAlgorithm):
     ) -> Dict[str, Tuple[float, float]]:
         if not free_drones:
             return {}
-
-        self._initialize_paths(mission)
+            
+        if not mission.sweep_paths:
+            self._initialize_paths(mission)
 
         sweep_paths: Dict[str, List[Tuple[float, float]]] = mission.sweep_paths
         sweep_phase: Dict[str, str] = mission.sweep_phase

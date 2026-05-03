@@ -345,7 +345,7 @@ def _update_coverage(mission: Mission) -> None:
     grid_np = mission._dense_coverage_grid
     if grid_np is None:
         raw = mission.grid
-        if not raw:
+        if raw is None or raw.size == 0:
             return
         grid_np = np.array(raw)
 

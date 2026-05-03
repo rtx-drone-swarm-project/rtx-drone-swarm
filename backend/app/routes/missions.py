@@ -182,7 +182,7 @@ async def stop_mission(mission_id: str):
         raise HTTPException(status_code=404, detail="Mission not found")
 
     mission = mission_db[mission_id]
-    if mission.status in ["idle", "search_complete", "mission_complete"]:
+    if mission.status in ["idle", "search_complete", "paused", "mission_complete"]:
         raise HTTPException(status_code=400, detail="Drones are not in motion")
 
     mission.status = "paused"

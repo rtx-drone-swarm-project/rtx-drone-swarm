@@ -31,7 +31,7 @@ class VoronoiCoverage(BaseSearchAlgorithm):
     def get_target_waypoints(self, mission: Mission, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
         """Run every simulation tick to get the next Voronoi centroid."""
         centroid_map = {}
-        if not free_drones or not mission.grid:
+        if not free_drones or mission.grid is None or mission.grid.size == 0:
             return centroid_map
 
         grid_np = np.array(mission.grid)
