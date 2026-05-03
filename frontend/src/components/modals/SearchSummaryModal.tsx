@@ -1,10 +1,4 @@
-import type { MissionMetrics, Target } from "../../types/mission";
-
-const ALGORITHM_LABELS: Record<string, string> = {
-  voronoi: "Voronoi (Lloyd's)",
-  apf: "APF (Potential Fields)",
-  sweep: "Sweep (Voronoi + Lawnmower)"
-};
+import { algorithmDisplayLabel, type MissionMetrics, type Target } from "../../types/mission";
 
 type SearchSummaryModalProps = {
   isOpen: boolean;
@@ -44,7 +38,7 @@ export default function SearchSummaryModal({ isOpen, onClose, targets, getHikerL
                 {algorithm && (
                   <>
                     <span>Algorithm</span>
-                    <strong>{ALGORITHM_LABELS[algorithm] ?? algorithm}</strong>
+                    <strong>{algorithmDisplayLabel(algorithm)}</strong>
                   </>
                 )}
                 {completionElapsedSeconds != null && completionElapsedSeconds > 0 && (

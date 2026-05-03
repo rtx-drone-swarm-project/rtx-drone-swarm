@@ -420,10 +420,14 @@ async def simulation_loop(mission_id: str):
     mission.status = "searching"
     recall_sent = False
 
-    logger.info("=========================================")
-    logger.info(f"SIMULATION LOOP STARTING FOR MISSION: {mission_id}")
-    logger.info(f"FRONTEND SELECTED ALGORITHM: {mission.algorithm}")
-    logger.info("=========================================")
+    active_strategy = get_algorithm(mission.algorithm)
+    active_strategy.initialize(mission)
+    logger.info(
+        "simulation_loop mission=%s algorithm_key=%s implementation=%s",
+        mission_id,
+        mission.algorithm,
+        type(active_strategy).__name__,
+    )
 
     while mission.status != "mission_complete":
         # Pull live SITL state into the mission before making any coverage or
@@ -438,7 +442,6 @@ async def simulation_loop(mission_id: str):
                 if not d.get("assigned_target_id") and d.get("role") not in ["finder", "confirmer"]
             ]
 
-            active_strategy = get_algorithm(mission.algorithm)
             waypoints_map = await asyncio.to_thread(active_strategy.get_target_waypoints, mission, free_drones)
 
             _send_live_drone_gotos(mission, live_drone_ids, waypoints_map)

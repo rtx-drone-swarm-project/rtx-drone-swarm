@@ -1136,6 +1136,106 @@ def test_voronoi_algorithm_handles_small_drone_counts():
             assert bounds["min_lon"] <= lon <= bounds["max_lon"]
 
 
+def test_app_voronoi_lloyd_step_aco_matches_algorithms_module():
+    import numpy as np
+
+    from app import voronoi as legacy_voronoi
+    from app.algorithms import voronoi as algo_voronoi
+
+    rng = np.random.default_rng(0)
+    X = rng.random((20, 2))
+    centroids = rng.random((3, 2))
+    old_centroids = centroids.copy()
+    pheromone = np.ones((20, 3))
+    p2 = pheromone.copy()
+
+    nc1, lb1, ph1 = legacy_voronoi.lloyd_step_aco(X, centroids, old_centroids, pheromone)
+    nc2, lb2, ph2 = algo_voronoi.lloyd_step_aco(X, centroids, old_centroids, p2)
+
+    assert np.allclose(nc1, nc2)
+    assert np.array_equal(lb1, lb2)
+    assert np.allclose(ph1, ph2)
+
+
+def test_voronoi_aco_coverage_initialize_and_waypoints():
+    from app.algorithms.voronoi import VoronoiACOCoverage
+    from app.algorithms.base import build_search_grid
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+    grid = build_search_grid(bounds, n=5).tolist()
+    drones = [
+        {"id": "d0", "lat": 0.01, "lon": 0.01},
+        {"id": "d1", "lat": 0.02, "lon": 0.02},
+    ]
+    mission = {"bounds": bounds, "grid": grid, "drones": drones}
+    algo = VoronoiACOCoverage()
+    algo.initialize(mission)
+    waypoints = algo.get_target_waypoints(mission, drones)
+    assert set(waypoints.keys()) == {"d0", "d1"}
+    for lat, lon in waypoints.values():
+        assert bounds["min_lat"] <= lat <= bounds["max_lat"]
+        assert bounds["min_lon"] <= lon <= bounds["max_lon"]
+    # Second tick: pheromone state should exist and still return two waypoints
+    waypoints2 = algo.get_target_waypoints(mission, drones)
+    assert len(waypoints2) == 2
+
+
+def test_voronoi_aco_preserves_state_by_drone_id_when_membership_changes():
+    from app.algorithms.voronoi import VoronoiACOCoverage
+    from app.algorithms.base import build_search_grid
+    from unittest.mock import patch
+    import numpy as np
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+    grid = build_search_grid(bounds, n=5).tolist()
+    mission = {"bounds": bounds, "grid": grid, "drones": []}
+    algo = VoronoiACOCoverage()
+    algo.initialize(mission)
+
+    tick1 = [
+        {"id": "d0", "lat": 0.01, "lon": 0.01},
+        {"id": "d1", "lat": 0.02, "lon": 0.02},
+    ]
+    tick2 = [
+        {"id": "d1", "lat": 0.03, "lon": 0.03},
+        {"id": "d2", "lat": 0.035, "lon": 0.035},
+    ]
+
+    captures = []
+    call_count = {"n": 0}
+
+    def fake_lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5):
+        call_count["n"] += 1
+        captures.append((old_centroids.copy(), pheromone.copy()))
+        if call_count["n"] == 1:
+            pheromone[:, 0] = 5.0
+            pheromone[:, 1] = 9.0
+        labels = np.zeros(len(X), dtype=int)
+        return centroids.copy(), labels, pheromone
+
+    with patch("app.algorithms.voronoi.lloyd_step_aco", side_effect=fake_lloyd_step_aco):
+        algo.get_target_waypoints(mission, tick1)
+        algo.get_target_waypoints(mission, tick2)
+
+    old_centroids_2, pheromone_2 = captures[1]
+    # d1 existed on tick 1; its prior position should be reused after reordering.
+    assert np.allclose(old_centroids_2[0], [0.02, 0.02])
+    # d2 is new on tick 2; it should initialize with current position.
+    assert np.allclose(old_centroids_2[1], [0.035, 0.035])
+    # d1 moved from index 1 -> 0; its pheromone column must move with it.
+    assert np.allclose(pheromone_2[:, 0], 9.0)
+    # d2 is newly introduced, so it starts with baseline pheromone.
+    assert np.allclose(pheromone_2[:, 1], 1.0)
+
+
+def test_get_algorithm_returns_distinct_voronoi_aco_instances():
+    from app.algorithms import get_algorithm
+
+    a = get_algorithm("voronoi_aco")
+    b = get_algorithm("voronoi_aco")
+    assert a is not b
+
+
 def test_row_endpoints_lawnmower_alternates_direction():
     pts = np.array([
         [0.0, 0.0], [0.0, 0.002], [0.0, 0.004],
