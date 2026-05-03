@@ -94,6 +94,21 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
             }
         )
         return summary
+    except asyncio.CancelledError:
+        summary = aggregate_trials(trials)
+        await asyncio.to_thread(
+            finish_run, run_id, "cancelled", summary=summary, error="Stopped by user"
+        )
+        await manager.broadcast(
+            {
+                "type": "benchmark_progress",
+                "run_id": run_id,
+                "completed": completed,
+                "total": total,
+                "status": "cancelled",
+            }
+        )
+        return summary
     except Exception as exc:
         await asyncio.to_thread(finish_run, run_id, "failed", summary=aggregate_trials(trials), error=str(exc))
         await manager.broadcast(

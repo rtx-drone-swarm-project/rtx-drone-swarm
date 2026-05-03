@@ -58,6 +58,7 @@ export default function BenchmarkPanel({
   const [run, setRun] = useState<BenchmarkRun | null>(null);
   const [runs, setRuns] = useState<BenchmarkRun[]>([]);
   const [loading, setLoading] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const algorithms = useMemo(
@@ -111,7 +112,11 @@ export default function BenchmarkPanel({
 
   useEffect(() => {
     if (!progressMessage?.run_id || progressMessage.run_id !== activeRunId) return;
-    if (progressMessage.status === "complete" || progressMessage.status === "failed") {
+    if (
+      progressMessage.status === "complete" ||
+      progressMessage.status === "failed" ||
+      progressMessage.status === "cancelled"
+    ) {
       refreshRun(progressMessage.run_id).then(() => loadRuns()).catch(() => undefined);
     }
   }, [activeRunId, loadRuns, progressMessage, refreshRun]);
@@ -137,6 +142,21 @@ export default function BenchmarkPanel({
       setLoading(false);
     }
   }, [algorithms, client, iterations, loadRuns, selectedBounds, targetCount, timeoutSeconds, validDroneCount]);
+
+  const onStop = useCallback(async () => {
+    if (!activeRunId || !isRunning) return;
+    setStopping(true);
+    setError(null);
+    try {
+      await client.stopBenchmark(activeRunId);
+      await refreshRun(activeRunId);
+      await loadRuns();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not stop benchmark");
+    } finally {
+      setStopping(false);
+    }
+  }, [activeRunId, client, isRunning, loadRuns, refreshRun]);
 
   const onSelectRun = useCallback(
     async (runId: string) => {
@@ -199,7 +219,7 @@ export default function BenchmarkPanel({
             />
           </label>
           <label className="field">
-            Timeout
+            Timeout (seconds)
             <input
               type="number"
               min={1}
@@ -207,6 +227,7 @@ export default function BenchmarkPanel({
               value={timeoutSeconds}
               onChange={(event) => setTimeoutSeconds(Number(event.target.value))}
               disabled={isRunning}
+              aria-label="Timeout per trial in seconds"
             />
           </label>
           <label className="field">
@@ -215,14 +236,24 @@ export default function BenchmarkPanel({
           </label>
         </div>
 
-        <button
-          type="button"
-          className="action-btn start"
-          onClick={onStart}
-          disabled={!selectedBounds || !algorithms.length || loading || isRunning}
-        >
-          {isRunning ? "Benchmark Running" : "Run Benchmark"}
-        </button>
+        <div className="benchmark-actions">
+          <button
+            type="button"
+            className="action-btn start"
+            onClick={onStart}
+            disabled={!selectedBounds || !algorithms.length || loading || isRunning}
+          >
+            {isRunning ? "Benchmark Running" : "Run Benchmark"}
+          </button>
+          <button
+            type="button"
+            className="action-btn stop"
+            onClick={onStop}
+            disabled={!activeRunId || !isRunning || stopping}
+          >
+            {stopping ? "Stopping…" : "Stop Benchmark"}
+          </button>
+        </div>
 
         {!selectedBounds && <div className="hint-text warning-text">Set a search area before benchmarking.</div>}
         {error && <div className="error-text">{error}</div>}

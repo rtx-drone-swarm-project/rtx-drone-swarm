@@ -14,6 +14,7 @@ from app.models import BenchmarkRequest
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/benchmark", tags=["benchmark"])
 _benchmark_tasks: set[asyncio.Task] = set()
+_benchmark_run_tasks: dict[str, asyncio.Task] = {}
 
 
 @router.post("")
@@ -27,15 +28,17 @@ async def start_benchmark(request: BenchmarkRequest):
     run = await asyncio.to_thread(create_run, run_id, request.model_dump(), total_trials(request))
     task = asyncio.create_task(run_benchmark_job(run_id, request))
     _benchmark_tasks.add(task)
+    _benchmark_run_tasks[run_id] = task
 
-    def _log_failure(done: asyncio.Task) -> None:
+    def _on_benchmark_done(done: asyncio.Task) -> None:
         _benchmark_tasks.discard(done)
+        _benchmark_run_tasks.pop(run_id, None)
         try:
             done.result()
         except Exception:
             logger.exception("Benchmark run %s failed", run_id)
 
-    task.add_done_callback(_log_failure)
+    task.add_done_callback(_on_benchmark_done)
     return run
 
 
@@ -43,6 +46,32 @@ async def start_benchmark(request: BenchmarkRequest):
 def get_benchmark_runs():
     """List recent benchmark runs with progress and stored summaries."""
     return {"runs": list_runs()}
+
+
+@router.post("/{run_id}/stop")
+async def stop_benchmark(run_id: str):
+    """Cancel an in-process benchmark run on this server (between trials)."""
+    if run_id in {"runs", "export"}:
+        raise HTTPException(status_code=404, detail="Not found")
+    task = _benchmark_run_tasks.get(run_id)
+    if task is None:
+        run = await asyncio.to_thread(get_run, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Benchmark run not found")
+        if run["status"] != "running":
+            raise HTTPException(status_code=400, detail="Benchmark is not running")
+        raise HTTPException(
+            status_code=409,
+            detail="Benchmark is not active on this server (process may have restarted)",
+        )
+    if task.done():
+        _benchmark_run_tasks.pop(run_id, None)
+        run = await asyncio.to_thread(get_run, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Benchmark run not found")
+        return run
+    task.cancel()
+    return {"run_id": run_id, "stopping": True}
 
 
 @router.get("/export")
