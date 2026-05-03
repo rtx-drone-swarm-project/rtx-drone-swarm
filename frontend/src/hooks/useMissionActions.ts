@@ -109,6 +109,7 @@ export default function useMissionActions({
         name: `SAR-${new Date().toISOString()}`,
         bounds: selectedBounds,
         drones: missionDrones,
+        algorithm: selectedAlgorithm,
         hikers: [
           {
             id: "hiker-1",
@@ -121,10 +122,7 @@ export default function useMissionActions({
 
       setMission(created);
 
-      const started = await missionClient.startMission(
-        created.id,
-        selectedAlgorithm !== "default" ? selectedAlgorithm : undefined
-      );
+      const started = await missionClient.startMission(created.id, selectedAlgorithm);
       setMission(started);
       setSearchStatus(normalizeMissionStatus(started.status ?? "running"));
       setProgress(started.progress ?? 0);

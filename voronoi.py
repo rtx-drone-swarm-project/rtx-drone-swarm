@@ -38,6 +38,47 @@ def lloyd_step(X, centroids):
     
     return new_centroids, labels
 
+def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5):
+    k = len(centroids)
+
+    distances = np.linalg.norm(X[:, np.newaxis] - centroids, axis=2)
+    similarity = 1 / (distances + 1e-8)
+    avoidance = np.exp(-1 * pheromone)
+    scores = similarity * avoidance
+
+    distance_labels = np.argmin(distances, axis=1) 
+    labels = np.argmax(scores, axis=1)
+
+    new_centroids = []
+    for i in range(k):
+        cluster_points = X[labels == i]
+
+        if len(cluster_points) > 0:
+            target = cluster_points.mean(axis=0)
+        else:
+            target = X[np.random.randint(0, len(X))]
+
+        new_centroids.append(target)
+
+    new_centroids = np.array(new_centroids)
+
+    pheromone *= decay
+
+    for i in range(k):
+        start = old_centroids[i]
+        end = centroids[i]
+
+        path = np.linspace(start, end, 30)
+
+        for p in path:
+            weights = np.exp(-np.linalg.norm(X - p, axis=1))
+            pheromone[:, i] += weights * deposit
+
+    # pheromone_intensity = pheromone.sum(axis=1)
+    # pheromone_intensity = pheromone_intensity / (pheromone_intensity.max() + 1e-8)
+
+    return new_centroids, labels, pheromone
+
 def run_lloyd(X, drones, lat, lon, n_iters=100, epsilon=0.1):
     """
     Runs Lloyd until convergence (centroid movement < epsilon) or max iterations.

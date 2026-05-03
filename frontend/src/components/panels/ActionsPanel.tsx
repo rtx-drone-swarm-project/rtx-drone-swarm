@@ -1,11 +1,5 @@
-import type { AlgorithmOption, Bounds, MissionRecord } from "../../types/mission";
+import { ALGORITHM_OPTIONS, type AlgorithmOption, type Bounds, type MissionRecord } from "../../types/mission";
 import CollapsibleSection from "../common/CollapsibleSection";
-
-const ALGORITHM_OPTIONS: { value: AlgorithmOption; label: string }[] = [
-  { value: "default", label: "Default" },
-  { value: "aco", label: "ACO" },
-  { value: "voronoi", label: "Voronoi" }
-];
 
 type ActionsPanelProps = {
   selectedBounds: Bounds | null;

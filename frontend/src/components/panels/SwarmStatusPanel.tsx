@@ -1,3 +1,4 @@
+import { algorithmDisplayLabel } from "../../types/mission";
 import { formatElapsed, statusLabel } from "../../utils/format";
 import CollapsibleSection from "../common/CollapsibleSection";
 import SearchingLabel from "../common/SearchingLabel";
@@ -23,7 +24,7 @@ export default function SwarmStatusPanel({
   telemetryMode,
   selectedAlgorithm
 }: SwarmStatusPanelProps) {
-  const algorithmLabel = selectedAlgorithm === "default" ? "Default" : selectedAlgorithm.toUpperCase();
+  const algorithmLabel = algorithmDisplayLabel(selectedAlgorithm);
   return (
     <CollapsibleSection title="Swarm Status">
       <div className="kv-grid">
