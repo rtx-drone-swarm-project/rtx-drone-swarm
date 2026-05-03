@@ -21,8 +21,17 @@ def lloyd_step(grid_points: np.ndarray, centroids: np.ndarray):
 
     return np.array(new_centroids), labels
 
-def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5):
+def _rng_int(rng, high: int) -> int:
+    if hasattr(rng, "integers"):
+        return int(rng.integers(0, high))
+    if hasattr(rng, "randrange"):
+        return int(rng.randrange(high))
+    return int(rng.randint(0, high))
+
+
+def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5, rng=None):
     k = len(centroids)
+    rng = rng or np.random.default_rng()
 
     distances = np.linalg.norm(X[:, np.newaxis] - centroids, axis=2)
     similarity = 1 / (distances + 1e-8)
@@ -38,7 +47,7 @@ def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.
         if len(cluster_points) > 0:
             target = cluster_points.mean(axis=0)
         else:
-            target = X[np.random.randint(0, len(X))]
+            target = X[_rng_int(rng, len(X))]
 
         new_centroids.append(target)
 
@@ -74,6 +83,7 @@ class VoronoiACOCoverage(BaseSearchAlgorithm):
         self.old_centroids: np.ndarray | None = None
         self.pheromone_matrix: np.ndarray | None = None
         self._drone_order: list[str] = []
+        self._np_rng = np.random.default_rng()
 
     def initialize(self, mission: dict) -> None:
         """Run once when the mission starts.
@@ -139,7 +149,11 @@ class VoronoiACOCoverage(BaseSearchAlgorithm):
         self._drone_order = drone_ids
 
         new_centroids, _, self.pheromone_matrix = lloyd_step_aco(
-            grid_np, positions, self.old_centroids, self.pheromone_matrix
+            grid_np,
+            positions,
+            self.old_centroids,
+            self.pheromone_matrix,
+            rng=mission.get("_np_rng", self._np_rng),
         )
 
         self.old_centroids = positions.copy()

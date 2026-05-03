@@ -15,6 +15,7 @@ from app.settings import BENCHMARK_DB_PATH
 
 
 DB_PATH = BENCHMARK_DB_PATH
+_INITIALIZED_DB_PATH: Path | None = None
 
 METRIC_FIELDS = [
     "first_find_seconds",
@@ -64,6 +65,9 @@ def _connect() -> sqlite3.Connection:
 
 def init_db() -> None:
     """Create benchmark tables if this server has not run benchmarks before."""
+    global _INITIALIZED_DB_PATH
+    if _INITIALIZED_DB_PATH == DB_PATH and DB_PATH.exists():
+        return
     with _connect() as conn:
         conn.executescript(
             """
@@ -116,6 +120,24 @@ def init_db() -> None:
             ON benchmark_trials(run_id, algorithm);
             """
         )
+    _INITIALIZED_DB_PATH = DB_PATH
+
+
+def mark_interrupted_runs() -> int:
+    """Mark rows left running by a previous server process as failed."""
+    init_db()
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE benchmark_runs
+            SET status = 'failed',
+                completed_at = ?,
+                error = COALESCE(error, 'Server restarted before benchmark completed')
+            WHERE status = 'running'
+            """,
+            (_now_iso(),),
+        )
+        return cursor.rowcount
 
 
 def create_run(run_id: str, request_payload: dict[str, Any], total_trials: int) -> dict[str, Any]:
@@ -227,7 +249,7 @@ def get_run(run_id: str) -> dict[str, Any] | None:
 
 
 def aggregate_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
-    """Return per-algorithm mean/min/max/stddev summaries for stored trials."""
+    """Return per-algorithm mean/min/max/population-stddev summaries."""
     grouped: dict[str, list[dict[str, Any]]] = {}
     for trial in trials:
         grouped.setdefault(str(trial["algorithm"]), []).append(trial)

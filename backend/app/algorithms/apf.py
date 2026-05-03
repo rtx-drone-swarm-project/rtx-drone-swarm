@@ -18,6 +18,7 @@ class PotentialFieldsCoverage(BaseSearchAlgorithm):
             return waypoint_map
 
         bounds = mission["bounds"]
+        rng = mission.get("_rng", random)
         
         REPULSION_DRONE = 0.0002  # How strongly drones push each other away
         REPULSION_WALL = 0.0005   # How strongly the boundaries push drones back in
@@ -56,8 +57,8 @@ class PotentialFieldsCoverage(BaseSearchAlgorithm):
             force_lon += REPULSION_WALL / (dist_west**2)   # Push east from west wall
 
             # 3. Add a tiny bit of random jitter so they don't get stuck in a perfect tie
-            force_lat += random.uniform(-0.0001, 0.0001)
-            force_lon += random.uniform(-0.0001, 0.0001)
+            force_lat += rng.uniform(-0.0001, 0.0001)
+            force_lon += rng.uniform(-0.0001, 0.0001)
 
             # 4. Calculate the final waypoint coordinate
             force_mag = math.hypot(force_lat, force_lon)

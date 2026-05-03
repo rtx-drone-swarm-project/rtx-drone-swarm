@@ -20,7 +20,7 @@ from app.settings import DEFAULT_DISPATCH_HOST, DEFAULT_DISPATCH_TIMEOUT_SECONDS
 from app.simulation import simulation_loop
 from app.sitl import idle_sitl_telemetry_loop, sitl_bridge
 from app.ws import manager
-from app.benchmark_db import init_db
+from app.benchmark_db import init_db, mark_interrupted_runs
 
 from app.routes import algorithms, benchmark, health, missions, sitl as sitl_routes, ws as ws_routes
 
@@ -31,6 +31,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(messag
 async def lifespan(_app: FastAPI):
     """Start background SITL telemetry on startup and stop it during shutdown."""
     init_db()
+    mark_interrupted_runs()
     sitl_bridge.start()
     idle_task = asyncio.create_task(idle_sitl_telemetry_loop())
     try:

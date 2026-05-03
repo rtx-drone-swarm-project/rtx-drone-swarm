@@ -201,6 +201,7 @@ async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], waypo
     state either toward an assigned target, toward a centroid, or with simple
     bounded wandering when they have no coverage point yet.
     """
+    rng = mission.get("_rng", random)
     for drone in mission["drones"]:
         has_live_telemetry = str(drone.get("id")) in live_drone_ids
         target_id = drone.get("assigned_target_id")
@@ -277,13 +278,13 @@ async def _update_drones_for_tick(mission: dict, live_drone_ids: set[str], waypo
             if dist > TARGET_STOP_RADIUS:
                 drone["lat"] += (d_lat / dist) * SPEED
                 drone["lon"] += (d_lon / dist) * SPEED
-                drone["lat"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
-                drone["lon"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+                drone["lat"] += rng.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+                drone["lon"] += rng.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
             _bounce_entity(drone, bounds, d_lat, d_lon)
         elif not has_live_telemetry:
             # If no centroid exists yet, fall back to bounded random wandering.
             if "vx" not in drone:
-                angle = random.uniform(0, 2 * math.pi)
+                angle = rng.uniform(0, 2 * math.pi)
                 drone["vx"] = SPEED * math.cos(angle)
                 drone["vy"] = SPEED * math.sin(angle)
             drone["lat"] += drone["vx"]
@@ -301,12 +302,13 @@ def _update_targets_for_tick(mission: dict, bounds: dict) -> None:
     if "targets" not in mission:
         return
 
+    rng = mission.get("_rng", random)
     for target in mission["targets"]:
         if target.get("status", "wandering") != "wandering":
             continue
         if not mission.get("_static_targets"):
             if "vx" not in target:
-                angle = random.uniform(0, 2 * math.pi)
+                angle = rng.uniform(0, 2 * math.pi)
                 target["vx"] = SPEED / 2 * math.cos(angle)
                 target["vy"] = SPEED / 2 * math.sin(angle)
             target["lat"] += target["vx"]

@@ -1388,7 +1388,7 @@ def test_voronoi_aco_preserves_state_by_drone_id_when_membership_changes():
     captures = []
     call_count = {"n": 0}
 
-    def fake_lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5):
+    def fake_lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5, rng=None):
         call_count["n"] += 1
         captures.append((old_centroids.copy(), pheromone.copy()))
         if call_count["n"] == 1:
@@ -1789,6 +1789,46 @@ def test_headless_benchmark_trial_supports_voronoi_aco():
     assert 0.0 <= result["coverage_pct"] <= 100.0
 
 
+def test_headless_benchmark_trial_is_deterministic_without_global_rng_mutation():
+    import random
+    import numpy as np
+
+    from app.benchmark import run_headless_trial
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01}
+    kwargs = {
+        "run_id": "bench-rng-test",
+        "algorithm": "apf",
+        "iteration": 1,
+        "scenario_seed": 789,
+        "bounds": bounds,
+        "drone_starts": [{"id": "d1", "lat": 0.001, "lon": 0.001, "status": "idle"}],
+        "target_starts": [
+            {
+                "id": "t1",
+                "lat": 0.009,
+                "lon": 0.009,
+                "status": "wandering",
+                "assigned_drone_id": None,
+            }
+        ],
+        "timeout_seconds": 5,
+    }
+
+    random.seed(12345)
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    result_a = asyncio.run(run_headless_trial(**kwargs))
+    result_b = asyncio.run(run_headless_trial(**kwargs))
+
+    assert result_a == result_b
+    assert random.getstate() == python_state
+    current_numpy_state = np.random.get_state()
+    assert current_numpy_state[0] == numpy_state[0]
+    assert np.array_equal(current_numpy_state[1], numpy_state[1])
+    assert current_numpy_state[2:] == numpy_state[2:]
+
+
 def test_benchmark_run_routes_read_sqlite_rows(tmp_path, monkeypatch):
     import app.benchmark_db as benchmark_db
 
@@ -1851,6 +1891,63 @@ def test_benchmark_run_routes_read_sqlite_rows(tmp_path, monkeypatch):
     assert "bench-route-test" in export_response.text
 
 
+def test_benchmark_export_requires_run_scope():
+    response = client.get("/benchmark/export")
+    assert response.status_code == 400
+    assert "run_id" in response.json()["detail"]
+
+
+def test_mark_interrupted_benchmark_runs_failed(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+
+    monkeypatch.setattr(benchmark_db, "DB_PATH", tmp_path / "benchmarks.db")
+    benchmark_db.create_run(
+        "bench-stale-test",
+        {
+            "algorithms": ["sweep"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+        },
+        total_trials=1,
+    )
+
+    assert benchmark_db.mark_interrupted_runs() == 1
+    run = benchmark_db.get_run("bench-stale-test")
+    assert run is not None
+    assert run["status"] == "failed"
+    assert "restarted" in run["error"]
+
+
+def test_benchmark_db_reinitializes_if_file_is_deleted(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+
+    db_path = tmp_path / "benchmarks.db"
+    monkeypatch.setattr(benchmark_db, "DB_PATH", db_path)
+    benchmark_db.init_db()
+    assert db_path.exists()
+
+    db_path.unlink()
+    benchmark_db.create_run(
+        "bench-recreated-db",
+        {
+            "algorithms": ["sweep"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+        },
+        total_trials=1,
+    )
+
+    run = benchmark_db.get_run("bench-recreated-db")
+    assert run is not None
+    assert run["status"] == "running"
+
+
 def test_benchmark_job_persists_paired_algorithm_trials(tmp_path, monkeypatch):
     import app.benchmark_db as benchmark_db
     from app.benchmark import run_benchmark_job, total_trials
@@ -1893,3 +1990,36 @@ def test_benchmark_rejects_unknown_algorithm():
     )
     assert response.status_code == 400
     assert "Unknown algorithm" in response.json()["detail"]
+
+
+def test_benchmark_rejects_empty_algorithm_list():
+    response = client.post(
+        "/benchmark",
+        json={
+            "algorithms": [],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_benchmark_rejects_negative_seed():
+    response = client.post(
+        "/benchmark",
+        json={
+            "algorithms": ["sweep"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+            "seed": -1,
+        },
+    )
+
+    assert response.status_code == 422

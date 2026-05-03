@@ -23,6 +23,9 @@ from app.simulation import (
 from app.ws import manager
 
 
+# Algorithms with internal randomness get deterministic, distinct local RNG
+# streams for each paired scenario. Unknown future algorithms still get a stable
+# default offset, but adding a named offset makes report/debug output clearer.
 ALGORITHM_SEED_OFFSETS = {
     "voronoi": 101,
     "voronoi_aco": 151,
@@ -66,7 +69,7 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
                     target_starts=scenario["targets"],
                     timeout_seconds=request.timeout_seconds,
                 )
-                insert_trial(trial)
+                await asyncio.to_thread(insert_trial, trial)
                 trials.append(trial)
                 completed += 1
                 await manager.broadcast(
@@ -80,7 +83,7 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
                 )
 
         summary = aggregate_trials(trials)
-        finish_run(run_id, "complete", summary=summary)
+        await asyncio.to_thread(finish_run, run_id, "complete", summary=summary)
         await manager.broadcast(
             {
                 "type": "benchmark_progress",
@@ -92,7 +95,7 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
         )
         return summary
     except Exception as exc:
-        finish_run(run_id, "failed", summary=aggregate_trials(trials), error=str(exc))
+        await asyncio.to_thread(finish_run, run_id, "failed", summary=aggregate_trials(trials), error=str(exc))
         await manager.broadcast(
             {
                 "type": "benchmark_progress",
@@ -118,7 +121,7 @@ async def run_headless_trial(
     timeout_seconds: int,
 ) -> dict[str, Any]:
     """Run one algorithm/scenario pair without SITL commands or WS tick broadcasts."""
-    random.seed(scenario_seed + ALGORITHM_SEED_OFFSETS.get(algorithm, 909))
+    algorithm_seed = scenario_seed + ALGORITHM_SEED_OFFSETS.get(algorithm, 909)
     dense_grid = build_dense_coverage_grid(bounds)
     mission = {
         "id": f"{run_id}-{algorithm}-{iteration}",
@@ -137,6 +140,8 @@ async def run_headless_trial(
         "_suppress_broadcasts": True,
         "_static_targets": True,
         "_move_assigned_sim_drones": True,
+        "_rng": random.Random(algorithm_seed),
+        "_np_rng": np.random.default_rng(algorithm_seed),
     }
     strategy = get_algorithm(algorithm)
     strategy.initialize(mission)

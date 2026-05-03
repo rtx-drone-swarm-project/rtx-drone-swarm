@@ -36,6 +36,38 @@ export type BenchmarkAlgorithmSummary = {
 
 export type BenchmarkSummary = Record<string, BenchmarkAlgorithmSummary>;
 
+export type BenchmarkTrial = {
+  id?: number;
+  run_id: string;
+  algorithm: string;
+  iteration: number;
+  scenario_seed: number;
+  bounds?: Bounds;
+  drone_count: number;
+  target_count: number;
+  timeout_seconds: number;
+  elapsed_seconds: number;
+  first_find_seconds?: number | null;
+  avg_find_seconds?: number | null;
+  last_find_seconds?: number | null;
+  completion_elapsed_seconds?: number | null;
+  coverage_pct: number;
+  miss_pct: number;
+  redundant_coverage_pct: number;
+  coverage_per_drone_second: number;
+  hiker_find_rate: number;
+  total_distance_traveled_m: number;
+  avg_distance_per_drone_m: number;
+  max_distance_single_drone_m: number;
+  time_to_50_coverage?: number | null;
+  time_to_80_coverage?: number | null;
+  time_to_95_coverage?: number | null;
+  targets_found: number;
+  targets_total: number;
+  status: string;
+  created_at?: string;
+};
+
 export type BenchmarkRun = {
   run_id: string;
   status: "running" | "complete" | "failed" | string;
@@ -51,6 +83,7 @@ export type BenchmarkRun = {
     timeout_seconds?: number;
   };
   summary?: BenchmarkSummary;
+  trials?: BenchmarkTrial[];
   error?: string | null;
 };
 

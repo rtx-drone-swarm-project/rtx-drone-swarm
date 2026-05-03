@@ -72,7 +72,7 @@ At runtime the flow looks like this:
 | `POST /benchmark` | Starts a background headless benchmark and returns a persisted `run_id`. |
 | `GET /benchmark/runs` | Lists recent benchmark runs. |
 | `GET /benchmark/{run_id}` | Returns one run, raw trials, and aggregate metric summaries. |
-| `GET /benchmark/export` | Exports all benchmark trials, or one run with `?run_id=...`, as CSV. |
+| `GET /benchmark/export?run_id=...` | Exports one benchmark run as CSV. Full local export requires explicit `?all_runs=true`. |
 
 ### WebSocket endpoint
 
@@ -128,6 +128,7 @@ These are the functions worth reading first if you need to change behavior.
 
 - Mission state lives in the in-memory `missions_db` dictionary in `app/missions.py`.
 - Benchmark trial history lives in local SQLite at `backend/data/benchmarks.db`; that file is ignored by git.
+- Benchmark runs left `running` by a backend restart are marked `failed` on startup so the UI does not poll stale jobs forever.
 - Live drone telemetry lives in the bridge cache inside `app/sitl.py`.
 - During each simulation tick, live SITL state is copied into the mission's drone list so the frontend receives one coherent mission view.
 - The backend does not currently persist missions to a database; a restart clears mission state. Benchmark history persists locally unless `backend/data/benchmarks.db` is deleted.

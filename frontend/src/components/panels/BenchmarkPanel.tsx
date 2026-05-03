@@ -284,12 +284,14 @@ export default function BenchmarkPanel({
           </div>
         )}
 
-        <a
-          className="benchmark-export"
-          href={`${apiBase}/benchmark/export${run?.run_id ? `?run_id=${encodeURIComponent(run.run_id)}` : ""}`}
-        >
-          Export CSV
-        </a>
+        {run?.run_id && (
+          <a
+            className="benchmark-export"
+            href={`${apiBase}/benchmark/export?run_id=${encodeURIComponent(run.run_id)}`}
+          >
+            Export CSV
+          </a>
+        )}
       </div>
     </CollapsibleSection>
   );

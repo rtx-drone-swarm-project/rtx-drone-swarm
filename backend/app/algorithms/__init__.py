@@ -8,7 +8,6 @@ metadata after backend restart. For stable API keys and good UI labels, set
 
 from __future__ import annotations
 
-from backend.app.algorithms.base import BaseSearchAlgorithm
 import importlib
 import inspect
 import logging
