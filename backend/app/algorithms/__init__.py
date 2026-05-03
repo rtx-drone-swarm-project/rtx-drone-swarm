@@ -6,6 +6,8 @@ from app.algorithms.apf import PotentialFieldsCoverage
 from app.algorithms.base import BaseSearchAlgorithm
 from app.algorithms.boustrophedon import VoronoiBoustrophedon
 from app.algorithms.voronoi import VoronoiACOCoverage, VoronoiCoverage
+from backend.app.algorithms.vaco import VoronoiACOHybridCoverage
+
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,7 @@ _ALGORITHM_CLASSES: Dict[str, Type[BaseSearchAlgorithm]] = {
     "apf": PotentialFieldsCoverage,
     "voronoi_aco": VoronoiACOCoverage,
     "sweep": VoronoiBoustrophedon,
+    "acs": VoronoiACOHybridCoverage,
 }
 
 
