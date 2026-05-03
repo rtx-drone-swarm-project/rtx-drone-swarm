@@ -62,6 +62,19 @@ def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.
     return new_centroids, labels, pheromone
 
 class VoronoiACOCoverage(BaseSearchAlgorithm):
+    algorithm_key = "voronoi_aco"
+    display_name = "Voronoi (ACO)"
+    description = "Voronoi centroid coverage with ant-colony pheromone avoidance."
+    display_order = 20
+
+    def __init__(self) -> None:
+        self._reset_state()
+
+    def _reset_state(self) -> None:
+        self.old_centroids: np.ndarray | None = None
+        self.pheromone_matrix: np.ndarray | None = None
+        self._drone_order: list[str] = []
+
     def initialize(self, mission: dict) -> None:
         """Run once when the mission starts.
 
@@ -69,9 +82,7 @@ class VoronoiACOCoverage(BaseSearchAlgorithm):
         (same count as ``lloyd_step_aco`` centroids), matching ``voronoi_vis.py`` setup
         where the pheromone matrix is ``(len(grid), k)`` for k active centroids.
         """
-        self.old_centroids: np.ndarray | None = None
-        self.pheromone_matrix: np.ndarray | None = None
-        self._drone_order: list[str] = []
+        self._reset_state()
 
     def get_target_waypoints(self, mission: dict, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
         """Run every simulation tick to get the next Voronoi centroid."""
@@ -140,6 +151,11 @@ class VoronoiACOCoverage(BaseSearchAlgorithm):
         return centroid_map
 
 class VoronoiCoverage(BaseSearchAlgorithm):
+    algorithm_key = "voronoi"
+    display_name = "Voronoi (Lloyd's)"
+    description = "Lloyd-relaxed Voronoi centroid positioning."
+    display_order = 10
+
     def initialize(self, mission: dict) -> None:
         """Run once when the mission starts to generate the search grid."""
         pass

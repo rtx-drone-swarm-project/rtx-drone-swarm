@@ -22,7 +22,7 @@ from app.sitl import idle_sitl_telemetry_loop, sitl_bridge
 from app.ws import manager
 from app.benchmark_db import init_db
 
-from app.routes import benchmark, health, missions, sitl as sitl_routes, ws as ws_routes
+from app.routes import algorithms, benchmark, health, missions, sitl as sitl_routes, ws as ws_routes
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
 
@@ -58,6 +58,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(algorithms.router)
 app.include_router(missions.router)
 app.include_router(benchmark.router)
 app.include_router(ws_routes.router)

@@ -16,13 +16,13 @@ Layer 2 — Deploy-then-sweep:
     are emitted: (lat, min_lon) and (lat, max_lon). The drone sweeps the full row
     in continuous flight; the simulation detects targets within DETECTION_RADIUS
     every tick, so coverage is identical to navigating every grid point but waypoint
-    count drops from O(N_rows × N_cols) to O(N_rows × 2). Phase transitions and
+    count drops from O(N_rows * N_cols) to O(N_rows * 2). Phase transitions and
     completion are logged per drone.
 
 Why not bbox?
-    The old approach computed each drone's bounding box from the sparse 15×15
+    The old approach computed each drone's bounding box from the sparse 15*15
     coverage grid (spacing ~0.007°). Adjacent bboxes ended at their outermost
-    sparse grid point, leaving a ~0.007° = 3.5× DETECTION_RADIUS gap between
+    sparse grid point, leaving a ~0.007° = 3.5x DETECTION_RADIUS gap between
     them that was never swept.
 """
 
@@ -160,6 +160,10 @@ def _row_endpoints_lawnmower(cell_points: np.ndarray) -> List[Tuple[float, float
 
 class VoronoiBoustrophedon(BaseSearchAlgorithm):
     """Voronoi partitioning (dense grid) + per-cell lawnmower coverage."""
+    algorithm_key = "sweep"
+    display_name = "Sweep (Voronoi + Lawnmower)"
+    description = "Balanced Voronoi partitions with boustrophedon coverage paths."
+    display_order = 40
 
     def _initialize_paths(self, mission: dict) -> None:
         all_drones = mission.get("drones", [])

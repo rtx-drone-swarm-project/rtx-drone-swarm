@@ -13,6 +13,7 @@ The backend has three main jobs:
 At runtime the flow looks like this:
 
 - `app/main.py` starts FastAPI, mounts routes, initializes benchmark storage, starts the SITL telemetry bridge, and launches idle telemetry broadcasting.
+- `app/routes/algorithms.py` exposes dynamically discovered search algorithms for frontend controls.
 - `app/routes/missions.py` creates missions, starts them, and triggers background dispatch plus `simulation_loop`.
 - `app/routes/benchmark.py` starts headless algorithm comparisons, reads persisted benchmark history, and exports trial rows as CSV.
 - `app/benchmark.py` runs paired algorithm scenarios without SITL commands or per-tick broadcasts.
@@ -30,6 +31,7 @@ At runtime the flow looks like this:
 | `app/main.py` | FastAPI app wiring, CORS setup, lifespan hooks, and symbol re-exports used by tests. |
 | `app/settings.py` | Shared constants, helper script paths, SITL host/port defaults, dispatch defaults, and concurrency limits. |
 | `app/models.py` | Pydantic request/response models for missions, benchmarks, and dispatch payloads. |
+| `app/algorithms/__init__.py` | Dynamic algorithm discovery and registry used by missions, benchmarks, and UI metadata. |
 | `app/benchmark.py` | Headless paired-scenario benchmark runner for algorithm comparison. |
 | `app/benchmark_db.py` | SQLite schema, persistence helpers, aggregation, and CSV export. |
 | `app/missions.py` | Mission-state helpers: sysid resolution, script result normalization, coverage-point assignment, SITL sync, and dispatch preflight shaping. |
@@ -43,6 +45,7 @@ At runtime the flow looks like this:
 
 | Path | Responsibility |
 |------|----------------|
+| `app/routes/algorithms.py` | Discovered search algorithm metadata endpoint. |
 | `app/routes/health.py` | Lightweight liveness endpoint. |
 | `app/routes/benchmark.py` | Algorithm benchmark start/history/detail/export endpoints. |
 | `app/routes/missions.py` | Mission create/read/start/dispatch/stop/delete endpoints. |
@@ -56,6 +59,7 @@ At runtime the flow looks like this:
 | Route | Purpose |
 |------|---------|
 | `GET /health` | Returns `{"ok": true}` when the backend is up. |
+| `GET /algorithms` | Returns discovered algorithm keys, labels, descriptions, modules, and class names. |
 | `POST /missions` | Creates an in-memory mission from bounds, drones, and optional hikers. |
 | `GET /missions/{mission_id}` | Returns the stored mission object. |
 | `POST /missions/{mission_id}/start` | Marks a mission running, seeds targets and grid points, optionally starts SITL, and launches simulation plus startup dispatch. |
@@ -112,6 +116,13 @@ These are the functions worth reading first if you need to change behavior.
   Moves wandering targets and assigns a nearby drone when one detects a target.
 - `app/simulation.py:_finalize_mission_progress`
   Derives progress from the number of found targets and completes the mission once every target is found.
+
+### Algorithms
+
+- `app/algorithms/__init__.py:discover_algorithms`
+  Imports modules in `backend/app/algorithms/` and registers concrete `BaseSearchAlgorithm` subclasses. Set `algorithm_key`, `display_name`, `description`, and `display_order` on the class for stable API keys and clean UI labels.
+- `app/routes/algorithms.py:get_algorithms`
+  Feeds the Actions panel, Benchmark panel, status labels, and summary labels. Frontend algorithm controls should consume this endpoint rather than maintaining a second hardcoded list.
 
 ## State and Data Ownership
 

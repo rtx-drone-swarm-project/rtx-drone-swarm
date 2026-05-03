@@ -1420,6 +1420,71 @@ def test_get_algorithm_returns_distinct_voronoi_aco_instances():
     assert a is not b
 
 
+def test_algorithms_endpoint_lists_discovered_registry_metadata():
+    response = client.get("/algorithms")
+    assert response.status_code == 200
+    algorithms = response.json()["algorithms"]
+    by_key = {item["key"]: item for item in algorithms}
+
+    assert {"voronoi", "voronoi_aco", "apf", "sweep"}.issubset(by_key.keys())
+    assert by_key["voronoi"]["label"] == "Voronoi (Lloyd's)"
+    assert by_key["voronoi_aco"]["label"] == "Voronoi (ACO)"
+
+
+def test_algorithm_discovery_picks_up_drop_in_module(tmp_path):
+    import importlib
+    import sys
+
+    import app.algorithms as registry
+
+    original_path = list(registry.__path__)
+    module_name = "plugplay_temp_algorithm"
+    qualified_module = f"app.algorithms.{module_name}"
+    plugin_dir = tmp_path / "algorithm_plugins"
+    plugin_dir.mkdir()
+    (plugin_dir / f"{module_name}.py").write_text(
+        """
+from app.algorithms.base import BaseSearchAlgorithm
+
+
+class PlugPlayTempAlgorithm(BaseSearchAlgorithm):
+    algorithm_key = "plugplay_temp"
+    display_name = "Plug Play Temp"
+    description = "Temporary pytest algorithm proving registry discovery."
+    display_order = 999
+
+    def get_target_waypoints(self, mission, free_drones):
+        return {
+            drone["id"]: (float(drone["lat"]), float(drone["lon"]))
+            for drone in free_drones
+        }
+""",
+        encoding="utf-8",
+    )
+
+    try:
+        registry.__path__ = original_path + [str(plugin_dir)]
+        sys.modules.pop(qualified_module, None)
+        importlib.invalidate_caches()
+
+        discovered = registry.discover_algorithms(force=True)
+        assert "plugplay_temp" in discovered
+
+        algo = registry.get_algorithm("plugplay_temp")
+        assert type(algo).__name__ == "PlugPlayTempAlgorithm"
+        assert algo.get_target_waypoints({}, [{"id": "d1", "lat": 1, "lon": 2}]) == {"d1": (1.0, 2.0)}
+
+        response = client.get("/algorithms")
+        assert response.status_code == 200
+        by_key = {item["key"]: item for item in response.json()["algorithms"]}
+        assert by_key["plugplay_temp"]["label"] == "Plug Play Temp"
+    finally:
+        registry.__path__ = original_path
+        sys.modules.pop(qualified_module, None)
+        importlib.invalidate_caches()
+        registry.discover_algorithms(force=True)
+
+
 def test_row_endpoints_lawnmower_alternates_direction():
     from app.algorithms.boustrophedon import _row_endpoints_lawnmower
     import numpy as np
@@ -1692,6 +1757,36 @@ def test_headless_benchmark_trial_returns_search_metrics():
     assert 0.0 <= result["coverage_pct"] <= 100.0
     assert "coverage_per_drone_second" in result
     assert "redundant_coverage_pct" in result
+
+
+def test_headless_benchmark_trial_supports_voronoi_aco():
+    from app.benchmark import run_headless_trial
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01}
+    result = asyncio.run(
+        run_headless_trial(
+            run_id="bench-aco-test",
+            algorithm="voronoi_aco",
+            iteration=1,
+            scenario_seed=456,
+            bounds=bounds,
+            drone_starts=[{"id": "d1", "lat": 0.005, "lon": 0.005, "status": "idle"}],
+            target_starts=[
+                {
+                    "id": "t1",
+                    "lat": 0.005,
+                    "lon": 0.005,
+                    "status": "wandering",
+                    "assigned_drone_id": None,
+                }
+            ],
+            timeout_seconds=5,
+        )
+    )
+
+    assert result["algorithm"] == "voronoi_aco"
+    assert result["targets_total"] == 1
+    assert 0.0 <= result["coverage_pct"] <= 100.0
 
 
 def test_benchmark_run_routes_read_sqlite_rows(tmp_path, monkeypatch):

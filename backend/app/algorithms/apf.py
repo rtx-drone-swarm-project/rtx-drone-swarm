@@ -4,6 +4,11 @@ from typing import List, Dict, Tuple
 from app.algorithms.base import BaseSearchAlgorithm
 
 class PotentialFieldsCoverage(BaseSearchAlgorithm):
+    algorithm_key = "apf"
+    display_name = "APF (Potential Fields)"
+    description = "Artificial potential fields with drone and boundary repulsion."
+    display_order = 30
+
     def initialize(self, mission: dict) -> None:
         pass
 

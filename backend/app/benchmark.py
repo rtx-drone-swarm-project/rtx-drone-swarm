@@ -25,6 +25,7 @@ from app.ws import manager
 
 ALGORITHM_SEED_OFFSETS = {
     "voronoi": 101,
+    "voronoi_aco": 151,
     "apf": 202,
     "sweep": 303,
 }
@@ -128,8 +129,8 @@ async def run_headless_trial(
         "algorithm": algorithm,
         "bounds": bounds,
         "grid": build_search_grid(bounds, n=15).tolist(),
-        "drones": [dict(drone) for drone in drone_starts],
-        "targets": [dict(target) for target in target_starts],
+        "drones": [dict[str, Any](drone) for drone in drone_starts],
+        "targets": [dict[str, Any](target) for target in target_starts],
         "_dense_coverage_grid": dense_grid,
         "_dense_grid_size": len(dense_grid),
         "_found_target_ids": [],
@@ -137,6 +138,8 @@ async def run_headless_trial(
         "_static_targets": True,
         "_move_assigned_sim_drones": True,
     }
+    strategy = get_algorithm(algorithm)
+    strategy.initialize(mission)
 
     distance_by_drone = {str(drone["id"]): 0.0 for drone in mission["drones"]}
     visit_drones_by_cell: dict[int, set[str]] = {}
@@ -153,7 +156,6 @@ async def run_headless_trial(
             if not drone.get("assigned_target_id") and drone.get("role") not in ["finder", "confirmer"]
         ]
 
-        strategy = get_algorithm(algorithm)
         waypoints = await asyncio.to_thread(strategy.get_target_waypoints, mission, free_drones)
 
         previous_positions = {
