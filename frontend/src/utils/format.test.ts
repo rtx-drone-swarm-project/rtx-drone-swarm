@@ -14,8 +14,9 @@ describe("format utilities", () => {
   });
 
   it("returns operator label for mission status", () => {
-    expect(statusLabel("searching")).toBe("Mission searching");
-    expect(statusLabel("paused")).toBe("Mission paused");
+    expect(statusLabel("searching")).toBe("Searching");
+    expect(statusLabel("search_complete")).toBe("Search completed");
+    expect(statusLabel("paused")).toBe("Paused");
     expect(statusLabel("mission_complete")).toBe("Mission completed");
     expect(statusLabel("anything-else")).toBe("Idle");
   });
