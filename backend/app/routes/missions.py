@@ -117,7 +117,7 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
             }
         )
     mission.targets = targets
-    mission.grid = build_search_grid(bounds, n=15).tolist()
+    mission.grid = build_search_grid(bounds, n=15)
     mission._dense_coverage_grid = build_search_grid(bounds)
     mission._dense_grid_size = len(mission._dense_coverage_grid)
 
