@@ -282,7 +282,7 @@ export default function App() {
     onTargetFound
   });
 
-  const { startMission, stopMission, resetMissionLock, recallDrones, resetDrones } = useMissionActions({
+  const { startMission, stopMission, resetMissionLock, recallDrones } = useMissionActions({
     apiBase,
     missionLocked,
     selectedBounds,
@@ -467,7 +467,6 @@ export default function App() {
         targets={completedTargetsSorted}
         getHikerLabel={getHikerLabel}
         onRecall={recallDrones}
-        onReset={resetDrones}
         algorithm={completedMetrics?.algorithm ?? mission?.algorithm ?? selectedAlgorithm}
         completionElapsedSeconds={completionElapsedSeconds}
         metrics={completedMetrics}

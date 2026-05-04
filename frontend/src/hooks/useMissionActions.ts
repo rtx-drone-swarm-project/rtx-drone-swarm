@@ -174,16 +174,10 @@ export default function useMissionActions({
     await missionClient.recallMission(mission.id);
   };
 
-  const resetDrones = async () => {
-    if (!mission?.id) return;
-    await missionClient.resetMission(mission.id);
-  };
-
   return {
     startMission,
     stopMission,
     resetMissionLock,
     recallDrones,
-    resetDrones,
   };
 }
