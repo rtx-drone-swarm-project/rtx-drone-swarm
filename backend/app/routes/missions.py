@@ -118,7 +118,7 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
         )
     mission.targets = targets
     mission.grid = build_search_grid(bounds, n=15)
-    mission._dense_coverage_grid = build_search_grid(bounds)
+    mission._dense_coverage_grid = build_dense_coverage_grid(bounds)
     mission._dense_grid_size = len(mission._dense_coverage_grid)
 
     dispatch_assignments = _build_start_dispatch_assignments(mission)
@@ -211,7 +211,8 @@ def get_mission_metrics(mission_id: str):
     found_times = [t["found_at"] for t in found_targets if "found_at" in t]
 
     # Use dense coverage if available (accurate); fall back to sparse for old missions.
-    grid_size = mission._dense_grid_size or len(mission.grid)
+    sparse_grid_size = len(mission.grid) if mission.grid is not None else 0
+    grid_size = getattr(mission, "_dense_grid_size", 0) or sparse_grid_size
     covered_count = mission._dense_covered_count
     coverage_pct = round(100.0 * covered_count / grid_size, 1) if grid_size else 0.0
     elapsed = mission.elapsed_seconds

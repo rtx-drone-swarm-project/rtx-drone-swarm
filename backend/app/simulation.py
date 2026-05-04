@@ -429,7 +429,12 @@ async def simulation_loop(mission_id: str):
         type(active_strategy).__name__,
     )
 
-    while mission.status != "mission_complete":
+    while True:
+        if mission_db.get(mission_id) is not mission:
+            break
+        if mission.status in ["idle", "paused", "mission_complete"]:
+            break
+
         # Pull live SITL state into the mission before making any coverage or
         # targeting decisions for this tick.
         live_drone_ids = _sync_mission_drones_with_sitl(mission)
