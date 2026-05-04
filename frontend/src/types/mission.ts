@@ -1,5 +1,3 @@
-export type MissionStatus = "idle" | "running" | "stopped" | "complete";
-
 export type AlgorithmOption = "voronoi" | "voronoi_aco" | "apf" | "sweep" ;
 
 /** Keys supported by backend `ALGORITHMS` — keep in sync with `backend/app/algorithms/__init__.py`. */

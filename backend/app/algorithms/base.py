@@ -1,6 +1,7 @@
 from typing import List, Dict, Tuple
 import numpy as np
 import math
+from app.models import Mission
 
 # Distance (degrees) within which a drone detects a target.
 # Algorithms use this for sweep row density.  simulation.py imports from here
@@ -43,10 +44,10 @@ def build_dense_coverage_grid(bounds: dict) -> np.ndarray:
     return np.column_stack([ll.ravel(), lo.ravel()])
 
 class BaseSearchAlgorithm:
-    def initialize(self, mission: dict) -> None:
+    def initialize(self, mission: Mission) -> None:
         """Run once when the mission starts (generate grids or waypoints)"""
         pass
 
-    def get_target_waypoints(self, mission: dict, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
+    def get_target_waypoints(self, mission: Mission, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
         """Run every simulation tick to get the next target coordinate for each free drone."""
         raise NotImplementedError("Every algorithm must implement get_target_waypoints()")

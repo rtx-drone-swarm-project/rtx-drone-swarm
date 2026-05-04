@@ -1,16 +1,18 @@
 import { algorithmDisplayLabel, type MissionMetrics, type Target } from "../../types/mission";
 
-type HikerSummaryModalProps = {
+type SearchSummaryModalProps = {
   isOpen: boolean;
   onClose: () => void;
   targets: Target[];
   getHikerLabel: (targetId: string | number) => string;
+  onRecall: () => void;
+  onReset: () => void;
   algorithm?: string;
   completionElapsedSeconds?: number;
   metrics?: MissionMetrics | null;
 };
 
-export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLabel, algorithm, completionElapsedSeconds, metrics }: HikerSummaryModalProps) {
+export default function SearchSummaryModal({ isOpen, onClose, targets, getHikerLabel, onRecall, onReset, algorithm, completionElapsedSeconds, metrics }: SearchSummaryModalProps) {
   if (!isOpen || !targets.length) return null;
 
   return (
@@ -19,17 +21,17 @@ export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLa
         className="modal-panel"
         role="dialog"
         aria-modal="true"
-        aria-label="Hiker summary"
+        aria-label= "Search summary"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2>Mission Complete - Hikers Found</h2>
+          <h2>Search Complete - Hikers Found</h2>
           <button type="button" className="icon-close" onClick={onClose} aria-label="Close dialog">
             &#x2715;
           </button>
         </div>
 
-        <div className="hiker-summary-body">
+        <div className="search-summary-body">
           {(algorithm || completionElapsedSeconds != null || metrics) && (
             <div className="mission-metrics">
               <div className="kv-grid">
@@ -68,12 +70,12 @@ export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLa
               </div>
             </div>
           )}
-          <p className="hiker-summary-intro">Final coordinates:</p>
-          <ul className="hiker-summary-list">
+          <p className="search-summary-intro">Final coordinates:</p>
+          <ul className="search-summary-list">
             {targets.map((target) => (
-              <li key={String(target.id)} className="hiker-summary-item">
-                <div className="hiker-summary-label">{getHikerLabel(target.id)}</div>
-                <div className="hiker-summary-coords">
+              <li key={String(target.id)} className="search-summary-item">
+                <div className="search-summary-label">{getHikerLabel(target.id)}</div>
+                <div className="search-summary-coords">
                   {target.lat.toFixed(6)}, {target.lon.toFixed(6)}
                 </div>
               </li>
@@ -81,10 +83,9 @@ export default function HikerSummaryModal({ isOpen, onClose, targets, getHikerLa
           </ul>
         </div>
 
-        <div className="hiker-summary-footer">
-          <button type="button" className="action-btn start" onClick={onClose}>
-            Close
-          </button>
+        <div className="search-summary-footer">
+          <button type="button" className="action-btn start" onClick={() => { onRecall(); onClose(); }}>Recall Drones</button>
+          <button type="button" className="action-btn start" onClick={() => { onReset(); onClose(); }}>Reset Simulation</button>
         </div>
       </div>
     </div>

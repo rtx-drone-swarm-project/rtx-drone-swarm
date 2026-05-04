@@ -2,6 +2,7 @@ import math
 import numpy as np
 from typing import List, Dict, Tuple
 from app.algorithms.base import BaseSearchAlgorithm
+from app.models import Mission
 
 def lloyd_step(grid_points: np.ndarray, centroids: np.ndarray):
     """
@@ -62,7 +63,7 @@ def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.
     return new_centroids, labels, pheromone
 
 class VoronoiACOCoverage(BaseSearchAlgorithm):
-    def initialize(self, mission: dict) -> None:
+    def initialize(self, mission: Mission) -> None:
         """Run once when the mission starts.
 
         Centroid and pheromone state are sized on the first tick from ``free_drones``
@@ -73,13 +74,22 @@ class VoronoiACOCoverage(BaseSearchAlgorithm):
         self.pheromone_matrix: np.ndarray | None = None
         self._drone_order: list[str] = []
 
-    def get_target_waypoints(self, mission: dict, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
+    def get_target_waypoints(self, mission: Mission, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
         """Run every simulation tick to get the next Voronoi centroid."""
         centroid_map = {}
-        if not free_drones or "grid" not in mission:
+        if not free_drones:
             return centroid_map
 
-        grid_np = np.array(mission["grid"])
+        raw_grid = getattr(mission, "grid", None)
+        if raw_grid is None and isinstance(mission, dict):
+            raw_grid = mission.get("grid")
+        if raw_grid is None:
+            return centroid_map
+
+        grid_np = np.array(raw_grid)
+        if grid_np.size == 0:
+            return centroid_map
+
         pos_list = []
         
         for drone in free_drones:
@@ -140,17 +150,17 @@ class VoronoiACOCoverage(BaseSearchAlgorithm):
         return centroid_map
 
 class VoronoiCoverage(BaseSearchAlgorithm):
-    def initialize(self, mission: dict) -> None:
+    def initialize(self, mission: Mission) -> None:
         """Run once when the mission starts to generate the search grid."""
         pass
 
-    def get_target_waypoints(self, mission: dict, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
+    def get_target_waypoints(self, mission: Mission, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
         """Run every simulation tick to get the next Voronoi centroid."""
         centroid_map = {}
-        if not free_drones or "grid" not in mission:
+        if not free_drones or mission.grid is None or mission.grid.size == 0:
             return centroid_map
 
-        grid_np = np.array(mission["grid"])
+        grid_np = np.array(mission.grid)
         pos_list = []
         
         for drone in free_drones:

@@ -104,7 +104,7 @@ These are the functions worth reading first if you need to change behavior.
 
 ## State and Data Ownership
 
-- Mission state lives in the in-memory `missions_db` dictionary in `app/missions.py`.
+- Mission state lives in the in-memory `mission_db` dictionary in `app/missions.py`.
 - Live drone telemetry lives in the bridge cache inside `app/sitl.py`.
 - During each simulation tick, live SITL state is copied into the mission's drone list so the frontend receives one coherent mission view.
 - The backend does not currently persist missions to a database; a restart clears mission state.

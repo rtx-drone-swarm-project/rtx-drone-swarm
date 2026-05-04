@@ -3,7 +3,7 @@ import { getApiBase, getApiPort } from "./api/runtime";
 import TopBar from "./components/layout/TopBar";
 import MapPanel from "./components/map/MapPanel";
 import DroneModal from "./components/modals/DroneModal";
-import HikerSummaryModal from "./components/modals/HikerSummaryModal";
+import SearchSummaryModal from "./components/modals/SearchSummaryModal";
 import AlertsPanel from "./components/panels/AlertsPanel";
 import ActionsPanel from "./components/panels/ActionsPanel";
 import FoundHikersPanel from "./components/panels/FoundHikersPanel";
@@ -24,7 +24,6 @@ import type {
   ValidDrone
 } from "./types/mission";
 import type { MissionProgressMessage, MissionStatusMessage, TargetFoundMessage, TelemetryMessage } from "./types/ws";
-import { normalizeMissionStatus } from "./utils/format";
 import { customAreaBounds } from "./utils/geo";
 import { parseCoordinate } from "./utils/validate";
 
@@ -38,7 +37,7 @@ export default function App() {
   const [telemetry, setTelemetry] = useState<TelemetryDrone[]>([]);
   const [mission, setMission] = useState<MissionState>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [searchStatus, setSearchStatus] = useState("idle");
+  const [missionStatus, setMissionStatus] = useState("idle");
   const [progress, setProgress] = useState(0);
   const [targets, setTargets] = useState<Target[]>([]);
   const [foundHikers, setFoundHikers] = useState<FoundHiker[]>([]);
@@ -51,7 +50,7 @@ export default function App() {
   const [selectedBounds, setSelectedBounds] = useState<Bounds | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [selectedDrone, setSelectedDrone] = useState<SelectedDrone>(null);
-  const [hikerSummaryOpen, setHikerSummaryOpen] = useState(false);
+  const [searchSummaryOpen, setSearchSummaryOpen] = useState(false);
   const [completedTargets, setCompletedTargets] = useState<Target[]>([]);
   const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<AlgorithmOption>("voronoi");
@@ -184,12 +183,12 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (normalizeMissionStatus(searchStatus) !== "running") return;
+    if (missionStatus !== "searching") return;
     const interval = window.setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(interval);
-  }, [searchStatus]);
+  }, [missionStatus]);
 
   const onTelemetry = useCallback((message: TelemetryMessage) => {
     const drones = Array.isArray(message.drones) ? message.drones : [];
@@ -224,20 +223,19 @@ export default function App() {
 
   const onMissionStatus = useCallback(
     (message: MissionStatusMessage) => {
-      const statusText = normalizeMissionStatus(typeof message.status === "string" ? message.status : "idle");
-      setSearchStatus(statusText);
-      if (typeof message.progress === "number") setProgress(statusText === "complete" ? 100 : message.progress);
+      setMissionStatus(message.status);
+      if (typeof message.progress === "number") setProgress(message.status === "search_complete" ? 100 : message.progress);
       if (Array.isArray(message.targets)) {
         assignHikerLabels(message.targets.map((target) => target.id));
         setTargets(message.targets);
       }
 
-      if (statusText === "complete") {
+      if (message.status === "mission_complete") {
         setCompletionElapsedSeconds(elapsedSecondsRef.current);
         setElapsedSeconds(0);
         setMissionLocked(true);
       }
-      if (statusText === "running") {
+      if (message.status === "searching") {
         const runningMissionId = message.mission_id != null ? String(message.mission_id) : "__unknown_running_mission__";
         if (runningMissionIdRef.current !== runningMissionId) {
           runningMissionIdRef.current = runningMissionId;
@@ -284,7 +282,7 @@ export default function App() {
     onTargetFound
   });
 
-  const { startMission, stopMission, resetMissionLock } = useMissionActions({
+  const { startMission, stopMission, resetMissionLock, recallDrones, resetDrones } = useMissionActions({
     apiBase,
     missionLocked,
     selectedBounds,
@@ -293,58 +291,29 @@ export default function App() {
     validDroneCount,
     mission,
     setMission,
-    setSearchStatus,
+    setMissionStatus,
     setProgress,
     setTargets,
     setElapsedSeconds,
     setMissionLocked,
     setFoundHikers,
-    setHikerSummaryOpen,
+    setSearchSummaryOpen,
     setCompletedTargets,
     setSummaryMissionId,
     setHikerLabelById
   });
 
   useEffect(() => {
-    if (!mission || !targets.length) return;
+  if (!mission || !targets.length) return;
+  const allFound = targets.every(t => t.status === "found");
+  if (!allFound) return;
+  if (summaryMissionId === mission.id) return;
 
-    const allFound = targets.every((target) => target.status === "found");
-    if (!allFound) return;
-
-    if (summaryMissionId === mission.id) return;
-
-    setProgress(100);
-    setSearchStatus("complete");
-    setMissionLocked(true);
     setCompletionElapsedSeconds(elapsedSeconds);
-    setElapsedSeconds(0);
     setCompletedTargets(targets);
     setSummaryMissionId(mission.id);
-    setHikerSummaryOpen(true);
+    setSearchSummaryOpen(true);
   }, [mission, summaryMissionId, targets]);
-
-  useEffect(() => {
-    if (!hikerSummaryOpen || !summaryMissionId) {
-      setCompletedMetrics(null);
-      return;
-    }
-    let cancelled = false;
-    const controller = new AbortController();
-    setCompletedMetrics(null);
-    fetch(`${apiBase}/missions/${summaryMissionId}/metrics`, { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (!cancelled && data) setCompletedMetrics(data as MissionMetrics);
-      })
-      .catch((err) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        // Mission may have been deleted before fetch completes; ignore.
-      });
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [apiBase, hikerSummaryOpen, summaryMissionId]);
 
   useEffect(() => {
     if (!targets.length) return;
@@ -421,9 +390,8 @@ export default function App() {
     resetMissionLock();
   }, [resetMissionLock]);
 
-  const normalizedSearchStatus = normalizeMissionStatus(searchStatus);
-  const missionActive = normalizedSearchStatus === "running";
-  const missionComplete = normalizedSearchStatus === "complete";
+  const missionActive = missionStatus !== "idle" && missionStatus !== "mission_complete";
+  const missionComplete = missionStatus === "mission_complete";
   const lostHikerCount = targets.filter((target) => target.status !== "found").length;
 
   return (
@@ -449,7 +417,7 @@ export default function App() {
         <aside className="left-rail">
           <AlertsPanel
             missionComplete={missionComplete}
-            normalizedSearchStatus={normalizedSearchStatus}
+            missionStatus={missionStatus}
             selectedBounds={selectedBounds}
             wsConnected={wsConnected}
           />
@@ -458,7 +426,7 @@ export default function App() {
             telemetryCount={telemetry.length}
             validDroneCount={validDroneCount}
             missionActive={missionActive}
-            searchStatus={searchStatus}
+            missionStatus={missionStatus}
             lostHikerCount={lostHikerCount}
             telemetryMode={telemetryMode}
             selectedAlgorithm={selectedAlgorithm}
@@ -493,11 +461,13 @@ export default function App() {
       </main>
 
       <DroneModal drone={selectedDrone} onClose={() => setSelectedDrone(null)} />
-      <HikerSummaryModal
-        isOpen={hikerSummaryOpen}
-        onClose={() => setHikerSummaryOpen(false)}
+      <SearchSummaryModal
+        isOpen={searchSummaryOpen}
+        onClose={() => setSearchSummaryOpen(false)}
         targets={completedTargetsSorted}
         getHikerLabel={getHikerLabel}
+        onRecall={recallDrones}
+        onReset={resetDrones}
         algorithm={completedMetrics?.algorithm ?? mission?.algorithm ?? selectedAlgorithm}
         completionElapsedSeconds={completionElapsedSeconds}
         metrics={completedMetrics}

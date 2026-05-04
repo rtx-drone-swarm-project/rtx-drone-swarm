@@ -161,6 +161,16 @@ async def run_direct_dispatch(assignments: List[dict]) -> List[dict]:
             for item in assignments
         ]
 
+    for drone in sitl_bridge.swarm.drones:
+        home_location = drone.capture_home_location_if_unset()
+        logger.info(
+            "Captured pre-arm home for sysid=%s: lat=%s lon=%s alt=%s",
+            drone.sysid,
+            home_location.get("lat"),
+            home_location.get("lon"),
+            home_location.get("alt"),
+        )
+
     
     logger.info("Pre-flight checks passed! Executing swarm takeoff in thread pool.")
 

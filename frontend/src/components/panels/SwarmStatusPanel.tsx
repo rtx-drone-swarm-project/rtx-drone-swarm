@@ -8,7 +8,7 @@ type SwarmStatusPanelProps = {
   telemetryCount: number;
   validDroneCount: number;
   missionActive: boolean;
-  searchStatus: string;
+  missionStatus: string;
   lostHikerCount: number;
   telemetryMode: string;
   selectedAlgorithm: string;
@@ -19,7 +19,7 @@ export default function SwarmStatusPanel({
   telemetryCount,
   validDroneCount,
   missionActive,
-  searchStatus,
+  missionStatus,
   lostHikerCount,
   telemetryMode,
   selectedAlgorithm
@@ -35,7 +35,7 @@ export default function SwarmStatusPanel({
         <span>Valid Drones</span>
         <strong>{validDroneCount}</strong>
         <span>Search Status</span>
-        <strong>{missionActive ? <SearchingLabel text="Searching" /> : statusLabel(searchStatus)}</strong>
+        <strong>{statusLabel(missionStatus)}</strong>
         <span>Telemetry</span>
         <strong className={telemetryMode === "LIVE SITL" ? "success" : telemetryMode === "SIMULATED" ? "warning-text" : ""}>
           {telemetryMode}

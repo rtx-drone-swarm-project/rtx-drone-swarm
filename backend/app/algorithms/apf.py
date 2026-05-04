@@ -2,17 +2,18 @@ import math
 import random
 from typing import List, Dict, Tuple
 from app.algorithms.base import BaseSearchAlgorithm
+from app.models import Mission
 
 class PotentialFieldsCoverage(BaseSearchAlgorithm):
-    def initialize(self, mission: dict) -> None:
+    def initialize(self, mission: Mission) -> None:
         pass
 
-    def get_target_waypoints(self, mission: dict, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
+    def get_target_waypoints(self, mission: Mission, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
         waypoint_map = {}
         if not free_drones:
             return waypoint_map
 
-        bounds = mission["bounds"]
+        bounds = mission.bounds
         
         REPULSION_DRONE = 0.0002  # How strongly drones push each other away
         REPULSION_WALL = 0.0005   # How strongly the boundaries push drones back in

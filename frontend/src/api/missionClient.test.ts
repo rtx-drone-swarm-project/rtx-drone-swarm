@@ -5,8 +5,8 @@ describe("missionClient", () => {
   it("creates, starts, and stops missions with expected requests", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "idle" }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "running" }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "stopped" }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "searching" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "paused" }) });
 
     vi.stubGlobal("fetch", fetchMock);
 
