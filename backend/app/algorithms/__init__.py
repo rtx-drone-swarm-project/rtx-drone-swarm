@@ -6,7 +6,7 @@ from app.algorithms.apf import PotentialFieldsCoverage
 from app.algorithms.base import BaseSearchAlgorithm
 from app.algorithms.boustrophedon import VoronoiBoustrophedon
 from app.algorithms.voronoi import VoronoiACOCoverage, VoronoiCoverage
-from backend.app.algorithms.vaco import VoronoiACOHybridCoverage
+from app.algorithms.vaco import VoronoiACOHybridCoverage
 
 
 logger = logging.getLogger(__name__)
