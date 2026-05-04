@@ -481,6 +481,9 @@ async def simulation_loop(mission_id: str):
             all_targets_found = await _finalize_mission_progress(mission)
             if all_targets_found:
                 mission.status = "search_complete"
+                if not hover_sent:
+                    _send_live_drone_modes(mission, live_drone_ids, "LOITER")
+                    hover_sent = True
 
         elif mission.status == "search_complete":
             if not hover_sent:
