@@ -23,39 +23,66 @@ body,
 
 .topbar {
   z-index: 1000;
-  padding: 14px 20px;
-  background: #1f2937;
-  border-bottom: 1px solid #334155;
-  box-shadow: 0 1px 10px rgb(0 0 0 / 0.3);
+  padding: 12px 40px; 
+  
+  background: rgba(28, 28, 30, 0.65); 
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 0.5px solid rgba(255, 255, 255, 0.15); 
+  
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px; 
+}
+
+.title-icon {
+  width: 20px;
+  height: 20px;
+  color: #0A84FF;
 }
 
 .topbar h1 {
   margin: 0;
-  text-align: center;
-  font-size: 30px;
+  font-size: 17px; 
   font-weight: 600;
-  color: #f9fafb;
+  letter-spacing: -0.4px; 
+  color: #ffffff;
+}
+
+/* --- Progress Section Layout --- */
+.progress-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .progress-label {
-  margin-top: 8px;
-  color: #cbd5e1;
-  text-align: center;
+  margin: 0;
+  color: rgba(235, 235, 245, 0.6); 
   font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums; 
 }
 
 .progress-bar {
-  margin-top: 6px;
-  height: 10px;
-  background: #374151;
+  width: 120px;
+  height: 4px; 
+  background: rgba(255, 255, 255, 0.15); 
   border-radius: 999px;
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #3b82f6, #60a5fa);
-  transition: width 1.2s ease;
+  background: #0A84FF; 
+  border-radius: 999px;
+  transition: width 0.3s ease-out;
 }
 
 .control-layout {

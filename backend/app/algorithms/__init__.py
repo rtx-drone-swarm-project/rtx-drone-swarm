@@ -117,6 +117,8 @@ def get_algorithm(name: str) -> BaseSearchAlgorithm:
             sorted(classes.keys()),
         )
         cls = classes["voronoi"]
+
+    logger.info("Using algorithm: %s (%s.%s)", name, cls.__module__, cls.__name__)
     return cls()
 
 

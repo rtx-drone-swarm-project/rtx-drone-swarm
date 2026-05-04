@@ -1,7 +1,8 @@
 import math
 import numpy as np
 from typing import List, Dict, Tuple
-from app.algorithms.base import BaseSearchAlgorithm
+from app.algorithms.base import BaseSearchAlgorithm, build_dense_coverage_grid
+from app.algorithms.boustrophedon import _balanced_partition_seeds, _match_drones_to_seeds
 from app.models import Mission
 
 def lloyd_step(grid_points: np.ndarray, centroids: np.ndarray):
@@ -182,7 +183,16 @@ class VoronoiCoverage(BaseSearchAlgorithm):
 
     def initialize(self, mission: Mission) -> None:
         """Run once when the mission starts to generate the search grid."""
-        pass
+        if isinstance(mission, dict):
+            mission.pop("virtual_centroids", None)
+            bounds = mission.get("bounds")
+            if bounds:
+                mission["grid"] = build_dense_coverage_grid(bounds).tolist()
+            return
+        if hasattr(mission, "virtual_centroids"):
+            delattr(mission, "virtual_centroids")
+        if mission.bounds:
+            mission.grid = build_dense_coverage_grid(mission.bounds)
 
     def get_target_waypoints(self, mission: Mission, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
         """Run every simulation tick to get the next Voronoi centroid."""
@@ -193,34 +203,56 @@ class VoronoiCoverage(BaseSearchAlgorithm):
         raw_grid = getattr(mission, "grid", None)
         if raw_grid is None and isinstance(mission, dict):
             raw_grid = mission.get("grid")
+        bounds = getattr(mission, "bounds", None)
+        if bounds is None and isinstance(mission, dict):
+            bounds = mission.get("bounds")
+
         if raw_grid is None:
             return centroid_map
 
         grid_np = np.array(raw_grid)
         if grid_np.size == 0:
             return centroid_map
-        pos_list = []
-        
-        for drone in free_drones:
-            tlat = drone.get("target_lat")
-            tlon = drone.get("target_lon")
-            dlat = drone.get("lat", 0)
-            dlon = drone.get("lon", 0)
-            
-            if tlat is not None and tlon is not None:
-                dist_to_target = math.hypot(dlat - tlat, dlon - tlon)
-                if dist_to_target > 0.005:
-                    pos_list.append([tlat, tlon])
-                else:
-                    pos_list.append([dlat, dlon])
+        k = len(free_drones)
+
+        # Initialize virtual centroids
+        # If they don't exist yet, or if a drone dropped out and swarm size changed
+        current_virtual = getattr(mission, "virtual_centroids", None)
+        if current_virtual is None and isinstance(mission, dict):
+            current_virtual = mission.get("virtual_centroids")
+        if current_virtual is None or len(current_virtual) != k:
+            if not bounds:
+                return centroid_map
+            seeds = _balanced_partition_seeds(bounds, k)
+            virtual_np = seeds
+            for _ in range(100):
+                virtual_np, _ = lloyd_step(grid_np, virtual_np)
+            if isinstance(mission, dict):
+                mission["virtual_centroids"] = virtual_np.tolist()
             else:
-                pos_list.append([dlat, dlon])
-                
-        positions = np.array(pos_list)
-        new_centroids, _ = lloyd_step(grid_np, positions)
+                setattr(mission, "virtual_centroids", virtual_np.tolist())
+            current_virtual = virtual_np.tolist()
+
+        virtual_np = np.array(current_virtual)
+
+
+        new_centroids, _ = lloyd_step(grid_np, virtual_np)
         
-        for drone, centroid in zip(free_drones, new_centroids):
-            # Ensure we return standard Python floats, not numpy types, so it's JSON serializable
-            centroid_map[drone["id"]] = (float(centroid[0]), float(centroid[1]))
+        # Save the updated optimized points back into the mission dictionary
+        if isinstance(mission, dict):
+            mission["virtual_centroids"] = new_centroids.tolist()
+        else:
+            setattr(mission, "virtual_centroids", new_centroids.tolist())
+
+        # Extract the current physical locations of the drones
+        drone_positions = np.array([[d.get("lat", 0.0), d.get("lon", 0.0)] for d in free_drones])
+        
+        # Use greedy nearest-neighbor matching
+        drone_to_seed_indices = _match_drones_to_seeds(drone_positions, new_centroids)
+
+        # Build the final waypoint map
+        for drone, seed_idx in zip(free_drones, drone_to_seed_indices):
+            target = new_centroids[seed_idx]
+            centroid_map[drone["id"]] = (float(target[0]), float(target[1]))
             
         return centroid_map
