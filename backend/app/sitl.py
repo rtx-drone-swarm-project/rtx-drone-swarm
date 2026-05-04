@@ -331,10 +331,15 @@ class SITLTelemetryBridge:
         drone = self._get_drone(sysid)
         if drone:
             state = drone.get_state()
-            print("rel_alt:", state["rel_alt"])
-            print("armed:", state["armed"])
-            print("mode:", state["mode"])
-            
+            logger.debug(
+                "send_mode sysid=%s target_mode=%s rel_alt=%s armed=%s current_mode=%s",
+                sysid,
+                mode,
+                state["rel_alt"],
+                state["armed"],
+                state["mode"],
+            )
+
             drone.set_mode(mode)
 
     def _handle_returning(self, drone, recall: dict):
