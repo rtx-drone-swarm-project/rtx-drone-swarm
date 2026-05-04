@@ -228,7 +228,7 @@ def test_pause_mission():
     # Test pausing an already paused mission
     second_pause_response = client.post(f"/missions/{mission_id}/pause")
     assert second_pause_response.status_code == 400
-    assert second_pause_response.json() == {"detail": "Drones are not in motion"}
+    assert second_pause_response.json() == {"detail": "Drones are not searching, cannot pause"}
 
 
 def test_simulation_progress_only_advances_when_targets_are_found():

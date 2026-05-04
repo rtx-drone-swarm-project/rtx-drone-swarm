@@ -421,6 +421,7 @@ async def simulation_loop(mission_id: str):
     if not getattr(mission, "status", None):
         mission.status = "searching"
     recall_sent = mission.status == "recalling"
+    pause_sent = mission.status == "paused"
 
     active_strategy = get_algorithm(mission.algorithm)
     active_strategy.initialize(mission)
@@ -434,7 +435,7 @@ async def simulation_loop(mission_id: str):
     while True:
         if mission_db.get(mission_id) is not mission:
             break
-        if mission.status in ["idle", "paused", "mission_complete"]:
+        if mission.status in ["idle", "mission_complete"]:
             break
 
         # Pull live SITL state into the mission before making any coverage or
@@ -443,6 +444,9 @@ async def simulation_loop(mission_id: str):
 
         if mission.status == "searching":
             mission.elapsed_seconds = getattr(mission, "elapsed_seconds", 0) + 1
+
+            if pause_sent:
+                pause_sent = False
 
             free_drones = [
                 d for d in mission.drones
@@ -460,11 +464,13 @@ async def simulation_loop(mission_id: str):
             if all_targets_found:
                 mission.status = "search_complete"
 
+        elif mission.status == "paused":
+            if not pause_sent:  
+                # run pause
+                pause_sent = True
+
         elif mission.status == "search_complete":
             pass       
-
-        elif mission.status == "paused":
-            pass
         
         elif mission.status == "recalling":
             if not recall_sent:

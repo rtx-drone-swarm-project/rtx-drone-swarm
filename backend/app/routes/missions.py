@@ -184,10 +184,36 @@ async def pause_mission(mission_id: str):
 
     mission = mission_db[mission_id]
     if mission.status in ["idle", "search_complete", "paused", "mission_complete"]:
-        raise HTTPException(status_code=400, detail="Drones are not in motion")
+        raise HTTPException(status_code=400, detail="Drones are not searching, cannot pause")
 
     _sync_mission_drones_with_sitl(mission)
     mission.status = "paused"
+
+    await manager.broadcast(
+        {
+            "type": "mission_status",
+            "mission_id": mission_id,
+            "status": mission.status,
+            "progress": mission.progress,
+        }
+    )
+    await manager.broadcast({"type": "telemetry", "drones": mission.drones})
+
+    return mission.to_dict()
+
+
+@router.post("/missions/{mission_id}/resume")
+async def resume_mission(mission_id: str):
+    """Resume a paused mission and broadcast that it is running again."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    if mission.status != "paused":
+        raise HTTPException(status_code=400, detail="Mission is not paused, cannot resume")
+
+    _sync_mission_drones_with_sitl(mission)
+    mission.status = "searching"
 
     await manager.broadcast(
         {
