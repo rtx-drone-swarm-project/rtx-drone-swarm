@@ -15,6 +15,7 @@ export type MissionApiClient = {
   deleteMission: (missionId: string | number) => Promise<void>;
   listAlgorithms: () => Promise<{ algorithms: AlgorithmMetadata[] }>;
   startBenchmark: (payload: BenchmarkRequestPayload) => Promise<BenchmarkRun>;
+  stopBenchmark: (runId: string) => Promise<BenchmarkRun | { run_id: string; stopping: boolean }>;
   getBenchmarkRun: (runId: string) => Promise<BenchmarkRun>;
   listBenchmarkRuns: () => Promise<{ runs: BenchmarkRun[] }>;
 };
@@ -56,6 +57,11 @@ export function createMissionClient(apiBase: string): MissionApiClient {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
+      }),
+
+    stopBenchmark: (runId) =>
+      requestJson<BenchmarkRun | { run_id: string; stopping: boolean }>(`${apiBase}/benchmark/${runId}/stop`, {
+        method: "POST"
       }),
 
     getBenchmarkRun: (runId) =>
