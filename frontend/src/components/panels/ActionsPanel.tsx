@@ -71,7 +71,11 @@ export default function ActionsPanel({
         <div className="hint-text warning-text">Warning: only {validDroneCount} valid drones (15 recommended).</div>
       )}
 
-      <button className="action-btn stop" onClick={onStopMission} disabled={!mission?.id || !(missionStatus === "searching")}>
+      <button
+        className="action-btn stop"
+        onClick={onStopMission}
+        disabled={!mission?.id || !["searching", "recalling"].includes(missionStatus)}
+      >
         Stop Mission
       </button>
 

@@ -347,6 +347,70 @@ def test_simulation_uses_voronoi_centroid_for_unassigned_simulated_drones():
     assert drone["lon"] > 0.1
 
 
+def test_simulation_loiters_live_drones_before_immediate_recall():
+    mission_id = "sim-loiter-before-immediate-recall"
+    mission = create_test_mission(
+        id=mission_id,
+        name="Loiter Before Immediate Recall Test",
+        bounds={"min_lat": 34.0, "max_lat": 35.0, "min_lon": -118.0, "max_lon": -117.0},
+        drones=[Drone(id="drone-1", sysid=1, lat=34.5, lon=-117.5, alt=20.0)],
+    )
+    mission.status = "searching"
+    mission.drones[0]["role"] = "finder"
+    mission.targets = [{"id": "t1", "lat": 34.5, "lon": -117.5, "status": "found"}]
+    mission_db[mission_id] = mission
+
+    sent_modes = []
+    recall_calls = []
+
+    async def recall_on_search_complete(message):
+        if message.get("type") == "mission_status" and message.get("status") == "search_complete":
+            mission.status = "recalling"
+
+    original_broadcast = manager.broadcast
+    original_get_states = sitl_bridge.get_states_by_sysid
+    original_is_dispatching = sitl_bridge.is_dispatching
+    original_send_mode = sitl_bridge.send_mode
+    original_run_direct_recall = simulation_module.run_direct_recall
+    original_check_recall_completion = simulation_module.check_recall_completion
+    original_sleep = simulation_module.SLEEP_BETWEEN_DISPATCH_SECONDS
+
+    manager.broadcast = recall_on_search_complete
+    sitl_bridge.get_states_by_sysid = lambda: {
+        1: {
+            "sysid": 1,
+            "lat": 34.5,
+            "lon": -117.5,
+            "alt": 20.0,
+            "groundspeed": 0.0,
+            "heading": 0.0,
+            "armed": True,
+            "mode": "GUIDED",
+            "has_position": True,
+        }
+    }
+    sitl_bridge.is_dispatching = lambda _sysid: False
+    sitl_bridge.send_mode = lambda sysid, mode: sent_modes.append((sysid, mode))
+    simulation_module.run_direct_recall = lambda _mission: recall_calls.append(list(sent_modes))
+    simulation_module.check_recall_completion = lambda: True
+    simulation_module.SLEEP_BETWEEN_DISPATCH_SECONDS = 0
+
+    try:
+        asyncio.run(simulation_loop(mission_id))
+    finally:
+        manager.broadcast = original_broadcast
+        sitl_bridge.get_states_by_sysid = original_get_states
+        sitl_bridge.is_dispatching = original_is_dispatching
+        sitl_bridge.send_mode = original_send_mode
+        simulation_module.run_direct_recall = original_run_direct_recall
+        simulation_module.check_recall_completion = original_check_recall_completion
+        simulation_module.SLEEP_BETWEEN_DISPATCH_SECONDS = original_sleep
+        mission_db.pop(mission_id, None)
+
+    assert sent_modes == [(1, "LOITER")]
+    assert recall_calls == [[(1, "LOITER")]]
+
+
 def test_start_mission_runs_dispatch_bridge_when_targets_present():
     mission_data = {
         "name": "Dispatch Start Mission",
