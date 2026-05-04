@@ -446,6 +446,7 @@ export default function App() {
           />
           <ActionsPanel
             selectedBounds={selectedBounds}
+            missionStatus={missionStatus}
             missionActive={missionActive}
             missionLocked={missionLocked}
             validDroneCount={validDroneCount}
@@ -454,6 +455,7 @@ export default function App() {
             onAlgorithmChange={onAlgorithmChange}
             onStartMission={startMission}
             onStopMission={stopMission}
+            onRecallDrones={recallDrones}
             onResetMission={onResetMission}
           />
           <FoundHikersPanel hikers={foundHikersSorted} getHikerLabel={getHikerLabel} />

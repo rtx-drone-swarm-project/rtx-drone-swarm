@@ -3,6 +3,7 @@ import CollapsibleSection from "../common/CollapsibleSection";
 
 type ActionsPanelProps = {
   selectedBounds: Bounds | null;
+  missionStatus: string;
   missionActive: boolean;
   missionLocked: boolean;
   validDroneCount: number;
@@ -11,11 +12,13 @@ type ActionsPanelProps = {
   onAlgorithmChange: (algorithm: AlgorithmOption) => void;
   onStartMission: () => void;
   onStopMission: () => void;
+  onRecallDrones: () => void;
   onResetMission: () => void;
 };
 
 export default function ActionsPanel({
   selectedBounds,
+  missionStatus,
   missionActive,
   missionLocked,
   validDroneCount,
@@ -24,6 +27,7 @@ export default function ActionsPanel({
   onAlgorithmChange,
   onStartMission,
   onStopMission,
+  onRecallDrones,
   onResetMission
 }: ActionsPanelProps) {
   const selectorDisabled = missionActive || missionLocked;
@@ -67,8 +71,12 @@ export default function ActionsPanel({
         <div className="hint-text warning-text">Warning: only {validDroneCount} valid drones (15 recommended).</div>
       )}
 
-      <button className="action-btn stop" onClick={onStopMission} disabled={!mission?.id || !missionActive}>
+      <button className="action-btn stop" onClick={onStopMission} disabled={!mission?.id || !(missionStatus === "searching")}>
         Stop Mission
+      </button>
+
+      <button className="action-btn recall" onClick={onRecallDrones} disabled={!mission?.id || !(missionStatus === "search_complete")}>
+        Recall Drones
       </button>
 
       <button className="action-btn reset" onClick={onResetMission} disabled={missionActive}>
