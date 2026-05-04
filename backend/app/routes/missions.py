@@ -18,6 +18,7 @@ from app.missions import (
     _dispatch_failure_row,
     _ensure_sitl_running_for_mission,
     _prepare_dispatch_assignments,
+    _sync_mission_drones_with_sitl,
     mission_db,
 )
 from app.settings import DEFAULT_DISPATCH_HOST, DEFAULT_DISPATCH_TIMEOUT_SECONDS
@@ -185,6 +186,7 @@ async def stop_mission(mission_id: str):
     if mission.status in ["idle", "search_complete", "paused", "mission_complete"]:
         raise HTTPException(status_code=400, detail="Drones are not in motion")
 
+    _sync_mission_drones_with_sitl(mission)
     mission.status = "paused"
 
     await manager.broadcast(
@@ -195,7 +197,7 @@ async def stop_mission(mission_id: str):
             "progress": mission.progress,
         }
     )
-    await manager.broadcast({"type": "telemetry", "drones": []})
+    await manager.broadcast({"type": "telemetry", "drones": mission.drones})
 
     return mission.to_dict()
 
