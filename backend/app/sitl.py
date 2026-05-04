@@ -420,7 +420,7 @@ def wait_for_armed(drone, timeout=10.0):
 def _any_mission_running() -> bool:
     """Helper to check if simulation.py is currently handling telemetry."""
     for mission in mission_db.values():
-        if mission.status != "idle":
+        if mission.status in {"searching", "search_complete", "recalling"}:
             return True
     return False
 

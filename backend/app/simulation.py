@@ -416,9 +416,11 @@ async def simulation_loop(mission_id: str):
         return
 
     mission = mission_db[mission_id]
-    mission.elapsed_seconds = 0
-    mission.status = "searching"
-    recall_sent = False
+    if getattr(mission, "elapsed_seconds", None) is None:
+        mission.elapsed_seconds = 0
+    if not getattr(mission, "status", None):
+        mission.status = "searching"
+    recall_sent = mission.status == "recalling"
 
     active_strategy = get_algorithm(mission.algorithm)
     active_strategy.initialize(mission)
