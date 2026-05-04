@@ -11,7 +11,7 @@ async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Pro
 export type MissionApiClient = {
   createMission: (payload: MissionCreateRequest) => Promise<MissionRecord>;
   startMission: (missionId: string | number, algorithm?: string) => Promise<MissionRecord>;
-  stopMission: (missionId: string | number) => Promise<MissionRecord>;
+  pauseMission: (missionId: string | number) => Promise<MissionRecord>;
   deleteMission: (missionId: string | number) => Promise<void>;
   recallMission: (missionId: string | number) => Promise<MissionRecord>;
   resetMission: (missionId: string | number) => Promise<MissionRecord>;
@@ -37,8 +37,8 @@ export function createMissionClient(apiBase: string): MissionApiClient {
           : {})
       }),
 
-    stopMission: (missionId) =>
-      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/stop`, {
+    pauseMission: (missionId) =>
+      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/pause`, {
         method: "POST"
       }),
 

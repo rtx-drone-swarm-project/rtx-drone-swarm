@@ -282,7 +282,7 @@ export default function App() {
     onTargetFound
   });
 
-  const { startMission, stopMission, resetMissionLock, recallDrones, resetDrones } = useMissionActions({
+  const { startMission, pauseMission, resetMissionLock, recallDrones, resetDrones } = useMissionActions({
     apiBase,
     missionLocked,
     selectedBounds,
@@ -453,7 +453,7 @@ export default function App() {
             selectedAlgorithm={selectedAlgorithm}
             onAlgorithmChange={onAlgorithmChange}
             onStartMission={startMission}
-            onStopMission={stopMission}
+            onPauseMission={pauseMission}
             onResetMission={onResetMission}
           />
           <FoundHikersPanel hikers={foundHikersSorted} getHikerLabel={getHikerLabel} />

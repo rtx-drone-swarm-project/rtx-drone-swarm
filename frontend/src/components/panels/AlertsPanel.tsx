@@ -54,7 +54,7 @@ export default function AlertsPanel({
       </div>
     </div>
   ) : missionStatus === "paused" ? (
-    <div className="alert-chip stopped">
+    <div className="alert-chip paused">
       <span className="alert-icon">&#x1F6D1;</span>
       <div>
         <div className="alert-title">Mission status</div>

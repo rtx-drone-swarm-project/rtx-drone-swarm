@@ -132,18 +132,18 @@ export default function useMissionActions({
     }
   };
 
-  const stopMission = async () => {
+  const pauseMission = async () => {
     if (!mission?.id) {
       return;
     }
 
     try {
-      const stopped = await missionClient.stopMission(mission.id);
-      setMission(stopped);
+      const paused = await missionClient.pauseMission(mission.id);
+      setMission(paused);
       setMissionStatus("paused");
       setProgress(0);
     } catch (err) {
-      console.warn(`Stop failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`Pause failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -181,7 +181,7 @@ export default function useMissionActions({
 
   return {
     startMission,
-    stopMission,
+    pauseMission,
     resetMissionLock,
     recallDrones,
     resetDrones,

@@ -205,7 +205,7 @@ body,
   background: rgb(30 58 138 / 0.35);
 }
 
-.alert-chip.stopped {
+.alert-chip.paused {
   color: #fca5a5;
   border-color: rgb(239 68 68 / 0.45);
   background: rgb(127 29 29 / 0.35);
@@ -341,12 +341,12 @@ body,
   cursor: not-allowed;
 }
 
-.action-btn.stop {
+.action-btn.pause {
   background: rgb(239 68 68 / 0.9);
   color: #fff;
 }
 
-.action-btn.stop:disabled {
+.action-btn.pause:disabled {
   background: rgb(127 29 29 / 0.5);
   color: #9ca3af;
   cursor: not-allowed;

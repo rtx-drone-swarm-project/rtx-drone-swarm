@@ -10,7 +10,7 @@ type ActionsPanelProps = {
   selectedAlgorithm: AlgorithmOption;
   onAlgorithmChange: (algorithm: AlgorithmOption) => void;
   onStartMission: () => void;
-  onStopMission: () => void;
+  onPauseMission: () => void;
   onResetMission: () => void;
 };
 
@@ -23,7 +23,7 @@ export default function ActionsPanel({
   selectedAlgorithm,
   onAlgorithmChange,
   onStartMission,
-  onStopMission,
+  onPauseMission,
   onResetMission
 }: ActionsPanelProps) {
   const selectorDisabled = missionActive || missionLocked;
@@ -67,8 +67,8 @@ export default function ActionsPanel({
         <div className="hint-text warning-text">Warning: only {validDroneCount} valid drones (15 recommended).</div>
       )}
 
-      <button className="action-btn stop" onClick={onStopMission} disabled={!mission?.id || !missionActive}>
-        Stop Mission
+      <button className="action-btn pause" onClick={onPauseMission} disabled={!mission?.id || !missionActive}>
+        Pause Mission
       </button>
 
       <button className="action-btn reset" onClick={onResetMission} disabled={missionActive}>

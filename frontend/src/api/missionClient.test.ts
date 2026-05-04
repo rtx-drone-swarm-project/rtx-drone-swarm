@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createMissionClient } from "./missionClient";
 
 describe("missionClient", () => {
-  it("creates, starts, and stops missions with expected requests", async () => {
+  it("creates, starts, and pauses missions with expected requests", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "idle" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "searching" }) })
@@ -18,7 +18,7 @@ describe("missionClient", () => {
       drones: [{ id: "d1", lat: 1.5, lon: 3.5 }]
     });
     await client.startMission("m1");
-    await client.stopMission("m1");
+    await client.pauseMission("m1");
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -32,7 +32,7 @@ describe("missionClient", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
-      "http://localhost:8000/missions/m1/stop",
+      "http://localhost:8000/missions/m1/pause",
       expect.objectContaining({ method: "POST" })
     );
   });

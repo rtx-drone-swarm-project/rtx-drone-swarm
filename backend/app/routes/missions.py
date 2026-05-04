@@ -1,4 +1,4 @@
-"""Mission lifecycle routes for create, start, dispatch, stop, and delete flows."""
+"""Mission lifecycle routes for create, start, dispatch, pause, and delete flows."""
 
 import asyncio
 import logging
@@ -176,9 +176,9 @@ async def dispatch_targets(mission_id: str, dispatch_data: DispatchTargetsReques
     }
 
 
-@router.post("/missions/{mission_id}/stop")
-async def stop_mission(mission_id: str):
-    """Stop a mission and broadcast that it is no longer running."""
+@router.post("/missions/{mission_id}/pause")
+async def pause_mission(mission_id: str):
+    """Pause a mission and broadcast that it is no longer running."""
     if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
 

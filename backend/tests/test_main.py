@@ -193,9 +193,9 @@ def test_start_mission():
     assert second_start_response.status_code == 400
     assert second_start_response.json() == {"detail": "Only 'idle' missions can be started"}
     
-def test_stop_mission():
+def test_pause_mission():
     mission_data = {
-        "name": "Stop Test Mission",
+        "name": "Pause Test Mission",
         "bounds": {
             "min_lat": 34.0,
             "max_lat": 35.0,
@@ -214,21 +214,21 @@ def test_stop_mission():
     start_response = client.post(f"/missions/{mission_id}/start")
     assert start_response.status_code == 200
 
-    # Now stop the mission
-    stop_response = client.post(f"/missions/{mission_id}/stop")
-    assert stop_response.status_code == 200
-    stop_data = stop_response.json()
-    assert stop_data["status"] == "paused"
+    # Now pause the mission
+    pause_response = client.post(f"/missions/{mission_id}/pause")
+    assert pause_response.status_code == 200
+    pause_data = pause_response.json()
+    assert pause_data["status"] == "paused"
 
-    # Test stopping a non-existent mission
-    invalid_stop_response = client.post("/missions/invalid_id/stop")
-    assert invalid_stop_response.status_code == 404
-    assert invalid_stop_response.json() == {"detail": "Mission not found"}
+    # Test pausing a non-existent mission
+    invalid_pause_response = client.post("/missions/invalid_id/pause")
+    assert invalid_pause_response.status_code == 404
+    assert invalid_pause_response.json() == {"detail": "Mission not found"}
     
-    # Test stopping an already stopped mission
-    second_stop_response = client.post(f"/missions/{mission_id}/stop")
-    assert second_stop_response.status_code == 400
-    assert second_stop_response.json() == {"detail": "Drones are not in motion"}
+    # Test pausing an already paused mission
+    second_pause_response = client.post(f"/missions/{mission_id}/pause")
+    assert second_pause_response.status_code == 400
+    assert second_pause_response.json() == {"detail": "Drones are not in motion"}
 
 
 def test_simulation_progress_only_advances_when_targets_are_found():

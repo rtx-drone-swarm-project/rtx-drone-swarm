@@ -39,7 +39,7 @@ At runtime the flow looks like this:
 | Path | Responsibility |
 |------|----------------|
 | `app/routes/health.py` | Lightweight liveness endpoint. |
-| `app/routes/missions.py` | Mission create/read/start/dispatch/stop/delete endpoints. |
+| `app/routes/missions.py` | Mission create/read/start/dispatch/pause/delete endpoints. |
 | `app/routes/sitl.py` | SITL bridge inspection and manual dispatch smoke-test endpoints. |
 | `app/routes/ws.py` | Telemetry WebSocket endpoint for browser clients. |
 
@@ -54,7 +54,7 @@ At runtime the flow looks like this:
 | `GET /missions/{mission_id}` | Returns the stored mission object. |
 | `POST /missions/{mission_id}/start` | Marks a mission running, seeds targets and grid points, optionally starts SITL, and launches simulation plus startup dispatch. |
 | `POST /missions/{mission_id}/dispatch-targets` | Dispatches specific drones to explicit coordinates through the helper-script flow. |
-| `POST /missions/{mission_id}/stop` | Marks a mission stopped and broadcasts the state change. |
+| `POST /missions/{mission_id}/pause` | Marks a mission paused and broadcasts the state change. |
 | `DELETE /missions/{mission_id}` | Removes a mission from the in-memory store. |
 | `GET /sitl/status` | Returns bridge config plus the latest cached state for each connected drone. |
 | `POST /sitl/test-dispatch/{sysid}` | Runs a direct dispatch against one connected drone for smoke testing. |
