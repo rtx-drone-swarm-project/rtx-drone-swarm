@@ -142,7 +142,9 @@ describe("App integration", () => {
     //   expect(screen.getAllByText("Sweep (Voronoi + Lawnmower)").length).toBeGreaterThan(1);
     // });
 
-    fireEvent.click(screen.getByRole("button", { name: "Recall Drones" }));
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Recall Drones" })[0]
+    );
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Start Mission" })).toBeTruthy();
