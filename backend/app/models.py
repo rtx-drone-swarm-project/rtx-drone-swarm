@@ -1,7 +1,7 @@
 """Pydantic models shared across mission and dispatch endpoints."""
 
 from typing import Optional, List, Literal, Dict, Tuple, Set
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from pydantic import BaseModel
 import numpy as np
 
@@ -72,6 +72,7 @@ class Mission:
     grid: np.ndarray or None
 
     _dense_coverage_grid: np.ndarray or None
+    _dense_grid_size: int
     _dense_covered_count: int
     _found_target_ids: Set[str]
 
@@ -97,6 +98,7 @@ class Mission:
         self.grid = None
 
         self._dense_coverage_grid = None
+        self._dense_grid_size = 0
         self._dense_covered_count = 0
         self._found_target_ids = set()
 
@@ -108,15 +110,23 @@ class Mission:
         self.covered_set = set()
 
     def to_dict(self):
-        data = asdict(self)
+        data = {
+            "id": self.id,
+            "name": self.name,
+            "status": self.status,
+            "progress": self.progress,
+            "elapsed_seconds": self.elapsed_seconds,
+            "completion_elapsed_seconds": self.completion_elapsed_seconds,
+            "algorithm": self.algorithm,
+            "bounds": self.bounds,
+            "drones": self.drones,
+            "hikers": self.hikers,
+            "targets": self.targets,
+            "grid": self.grid,
+        }
 
         if self.grid is not None and type(self.grid) is np.ndarray:
             data["grid"] = self.grid.tolist()
-
-        if self._dense_coverage_grid is not None and type(self._dense_coverage_grid) is np.ndarray:
-            data["_dense_coverage_grid"] = (
-                self._dense_coverage_grid.tolist()
-            )
 
         return data
 
