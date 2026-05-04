@@ -33,6 +33,18 @@ ALGORITHM_SEED_OFFSETS = {
     "sweep": 303,
 }
 
+class AttrDict(dict):
+    """Dict with attribute access for simulation/algorithm compatibility."""
+
+    def __getattr__(self, name: str):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        self[name] = value
+
 
 def make_run_id() -> str:
     return f"bench-{uuid.uuid4().hex[:12]}"
@@ -138,7 +150,7 @@ async def run_headless_trial(
     """Run one algorithm/scenario pair without SITL commands or WS tick broadcasts."""
     algorithm_seed = scenario_seed + ALGORITHM_SEED_OFFSETS.get(algorithm, 909)
     dense_grid = build_dense_coverage_grid(bounds)
-    mission = {
+    mission = AttrDict({
         "id": f"{run_id}-{algorithm}-{iteration}",
         "name": "Headless Benchmark Trial",
         "status": "running",
@@ -151,13 +163,18 @@ async def run_headless_trial(
         "targets": [dict[str, Any](target) for target in target_starts],
         "_dense_coverage_grid": dense_grid,
         "_dense_grid_size": len(dense_grid),
-        "_found_target_ids": [],
+        "_found_target_ids": set[Any](),
+        "covered_set": set[Any](),
+        "sweep_paths": {},
+        "sweep_centroids": {},
+        "sweep_phase": {},
+        "sweep_reached_radius": None,
         "_suppress_broadcasts": True,
         "_static_targets": True,
         "_move_assigned_sim_drones": True,
         "_rng": random.Random(algorithm_seed),
         "_np_rng": np.random.default_rng(algorithm_seed),
-    }
+    })
     strategy = get_algorithm(algorithm)
     strategy.initialize(mission)
 
@@ -182,8 +199,8 @@ async def run_headless_trial(
             str(drone["id"]): (float(drone["lat"]), float(drone["lon"]))
             for drone in mission["drones"]
         }
-        await _update_drones_for_tick(mission, set(), waypoints, bounds)
-        _update_targets_for_tick(mission, bounds)
+        await _update_drones_for_tick(mission, set[str](), waypoints)
+        _update_targets_for_tick(mission)
         _update_coverage(mission)
         _track_redundant_coverage(mission, dense_grid, visit_drones_by_cell)
         _track_distance(mission, previous_positions, distance_by_drone)
