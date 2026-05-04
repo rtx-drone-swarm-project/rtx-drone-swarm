@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { createMissionClient } from "../api/missionClient";
 import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionState, Target, ValidDrone } from "../types/mission";
-import { normalizeMissionStatus } from "../utils/format";
 
 type UseMissionActionsArgs = {
   apiBase: string;
@@ -12,13 +11,13 @@ type UseMissionActionsArgs = {
   validDroneCount: number;
   mission: MissionState;
   setMission: (value: MissionState) => void;
-  setSearchStatus: (value: string) => void;
+  setMissionStatus: (value: string) => void;
   setProgress: (value: number) => void;
   setTargets: (value: Target[]) => void;
   setElapsedSeconds: (value: number) => void;
   setMissionLocked: (value: boolean) => void;
   setFoundHikers: (value: FoundHiker[]) => void;
-  setHikerSummaryOpen: (value: boolean) => void;
+  setSearchSummaryOpen: (value: boolean) => void;
   setCompletedTargets: (value: Target[]) => void;
   setSummaryMissionId: (value: string | number | null) => void;
   setHikerLabelById: (value: Record<string, number>) => void;
@@ -59,13 +58,13 @@ export default function useMissionActions({
   validDroneCount,
   mission,
   setMission,
-  setSearchStatus,
+  setMissionStatus,
   setProgress,
   setTargets,
   setElapsedSeconds,
   setMissionLocked,
   setFoundHikers,
-  setHikerSummaryOpen,
+  setSearchSummaryOpen,
   setCompletedTargets,
   setSummaryMissionId,
   setHikerLabelById
@@ -95,11 +94,11 @@ export default function useMissionActions({
       );
     }
 
-    setSearchStatus("running");
+    setMissionStatus("searching");
     setElapsedSeconds(0);
     setMissionLocked(false);
     setFoundHikers([]);
-    setHikerSummaryOpen(false);
+    setSearchSummaryOpen(false);
     setCompletedTargets([]);
     setSummaryMissionId(null);
     setHikerLabelById({});
@@ -124,11 +123,11 @@ export default function useMissionActions({
 
       const started = await missionClient.startMission(created.id, selectedAlgorithm);
       setMission(started);
-      setSearchStatus(normalizeMissionStatus(started.status ?? "running"));
+      setMissionStatus("searching");
       setProgress(started.progress ?? 0);
       if (Array.isArray(started.targets)) setTargets(started.targets);
     } catch (err) {
-      setSearchStatus("idle");
+      setMissionStatus("idle");
       console.warn(`Start failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
@@ -141,7 +140,7 @@ export default function useMissionActions({
     try {
       const stopped = await missionClient.stopMission(mission.id);
       setMission(stopped);
-      setSearchStatus(normalizeMissionStatus(stopped.status ?? "idle"));
+      setMissionStatus("paused");
       setProgress(0);
     } catch (err) {
       console.warn(`Stop failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -152,12 +151,12 @@ export default function useMissionActions({
     const missionId = mission?.id;
     setMissionLocked(false);
     setMission(null);
-    setSearchStatus("idle");
+    setMissionStatus("idle");
     setProgress(0);
     setTargets([]);
     setFoundHikers([]);
     setElapsedSeconds(0);
-    setHikerSummaryOpen(false);
+    setSearchSummaryOpen(false);
     setCompletedTargets([]);
     setSummaryMissionId(null);
     setHikerLabelById({});
@@ -170,9 +169,21 @@ export default function useMissionActions({
     }
   };
 
+  const recallDrones = async () => {
+    if (!mission?.id) return;
+    await missionClient.recallMission(mission.id);
+  };
+
+  const resetDrones = async () => {
+    if (!mission?.id) return;
+    await missionClient.resetMission(mission.id);
+  };
+
   return {
     startMission,
     stopMission,
-    resetMissionLock
+    resetMissionLock,
+    recallDrones,
+    resetDrones,
   };
 }

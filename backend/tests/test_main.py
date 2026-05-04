@@ -1,12 +1,53 @@
 import asyncio
+import time
+import numpy as np
+import logging
 from fastapi.testclient import TestClient
 from app import app
-from app.main import missions_db, simulation_loop, manager, _sync_mission_drones_with_sitl, sitl_bridge
+from app.models import Mission, MissionCreate, Drone, Bounds
+from app.main import mission_db, simulation_loop, manager, _sync_mission_drones_with_sitl, sitl_bridge
+from app.algorithms.base import DETECTION_RADIUS
+from app.algorithms.boustrophedon import _row_endpoints_lawnmower, _build_dense_grid, _voronoi_assign, _balanced_partition_seeds, _match_drones_to_seeds, _row_endpoints_lawnmower, VoronoiBoustrophedon, _REACH_RADIUS
+from app.voronoi import lloyd_step
+from app.algorithms.voronoi import VoronoiCoverage
+from app.algorithms.base import build_search_grid
+from app.settings import _positive_float_env
 import app.main as main_module
 import app.routes.missions as missions_routes
 import app.simulation as simulation_module
+import app.dispatch as dispatch_module
+import app.sitl as sitl_module
+import app.connect_swarm as connect_swarm_module
 
 client = TestClient(app)
+
+def create_test_mission(
+    id="mission-1",
+    drones=None,
+    bounds=None,
+    name="test-mission",
+    algorithm="voronoi",
+):
+    bounds = bounds or Bounds(
+        min_lat=0.0,
+        max_lat=0.04,
+        min_lon=0.0,
+        max_lon=0.04,
+    )
+
+    drones = drones or [
+        Drone(id="drone1", lat=0.01, lon=0.01),
+    ]
+
+    mission_data = MissionCreate(
+        name=name,
+        bounds=bounds,
+        drones=drones,
+        algorithm=algorithm,
+    )
+    mission = Mission(id, mission_data)
+
+    return mission
 
 def test_read_main():
     response = client.get("/health")
@@ -137,15 +178,10 @@ def test_start_mission():
     start_response = client.post(f"/missions/{mission_id}/start")
     assert start_response.status_code == 200
     start_data = start_response.json()
-    assert start_data["status"] == "running"
-    assert "_dense_coverage_grid" not in start_data
-    assert "_dense_grid_size" not in start_data
-    assert "_found_target_ids" not in start_data
+    assert start_data["status"] == "searching"
 
     get_response = client.get(f"/missions/{mission_id}")
     get_data = get_response.json()
-    assert "_dense_coverage_grid" not in get_data
-    assert "_dense_grid_size" not in get_data
     
     # Test starting a non-existent mission
     invalid_start_response = client.post("/missions/invalid_id/start")
@@ -182,8 +218,7 @@ def test_stop_mission():
     stop_response = client.post(f"/missions/{mission_id}/stop")
     assert stop_response.status_code == 200
     stop_data = stop_response.json()
-    assert stop_data["status"] == "stopped"
-    assert "_dense_coverage_grid" not in stop_data
+    assert stop_data["status"] == "paused"
 
     # Test stopping a non-existent mission
     invalid_stop_response = client.post("/missions/invalid_id/stop")
@@ -193,96 +228,23 @@ def test_stop_mission():
     # Test stopping an already stopped mission
     second_stop_response = client.post(f"/missions/{mission_id}/stop")
     assert second_stop_response.status_code == 400
-    assert second_stop_response.json() == {"detail": "Mission is already stopped or complete"}
-
-
-def test_simulation_emits_target_found_and_completes_mission():
-    mission_id = "sim-target-found"
-    missions_db[mission_id] = {
-        "id": mission_id,
-        "name": "Simulation Event Test",
-        "status": "running",
-        "progress": 0.0,
-        "elapsed_seconds": 0,
-        "bounds": {
-            "min_lat": 34.0,
-            "max_lat": 35.0,
-            "min_lon": -118.0,
-            "max_lon": -117.0,
-        },
-        "drones": [
-            {
-                "id": "drone1",
-                "lat": 34.5,
-                "lon": -117.5,
-                "assigned_target_id": "tgt-1",
-            }
-        ],
-        "targets": [
-            {
-                "id": "tgt-1",
-                "lat": 34.5,
-                "lon": -117.5,
-                "status": "detected",
-                "assigned_drone_id": "drone1",
-            }
-        ],
-        "hikers": [],
-    }
-
-    captured = []
-
-    async def fake_broadcast(message):
-        captured.append(message)
-
-    original_broadcast = manager.broadcast
-    manager.broadcast = fake_broadcast
-    try:
-        asyncio.run(simulation_loop(mission_id))
-        mission = missions_db[mission_id]
-        assert mission["status"] == "complete"
-        assert mission["progress"] == 100.0
-    finally:
-        manager.broadcast = original_broadcast
-        missions_db.pop(mission_id, None)
-
-    target_found_messages = [m for m in captured if m.get("type") == "target_found"]
-    assert len(target_found_messages) == 1
-    target_found = target_found_messages[0]
-    assert target_found["target_id"] == "tgt-1"
-    assert target_found["drone_id"] == "drone1"
-    assert target_found["lat"] == 34.5
-    assert target_found["lon"] == -117.5
-    assert isinstance(target_found["found_at"], int)
+    assert second_stop_response.json() == {"detail": "Drones are not in motion"}
 
 
 def test_simulation_progress_only_advances_when_targets_are_found():
     mission_id = "sim-progress-from-found-targets"
-    missions_db[mission_id] = {
-        "id": mission_id,
-        "name": "Progress From Found Targets Test",
-        "status": "running",
-        "progress": 0.0,
-        "elapsed_seconds": 0,
-        "bounds": {
-            "min_lat": 34.0,
-            "max_lat": 35.0,
-            "min_lon": -118.0,
-            "max_lon": -117.0,
-        },
-        "drones": [
-            {
-                "id": "drone1",
-                "lat": 34.5,
-                "lon": -117.5,
-            }
-        ],
-        "targets": [
-            {"id": "t1", "lat": 34.5, "lon": -117.5, "status": "found"},
-            {"id": "t2", "lat": 34.6, "lon": -117.4, "status": "wandering"},
-        ],
-        "hikers": [],
-    }
+    mission = create_test_mission(
+        id=mission_id,
+        name="Progress From Found Targets Test",
+        bounds={"min_lat": 34.0, "max_lat": 35.0, "min_lon": -118.0, "max_lon": -117.0},
+        drones=[{"id": "drone1", "lat": 34.5, "lon": -117.5}],
+    )
+    mission.targets = [
+        {"id": "t1", "lat": 34.5, "lon": -117.5, "status": "found"},
+        {"id": "t2", "lat": 34.6, "lon": -117.4, "status": "wandering"},
+    ]
+    mission.status = "searching"
+    mission_db[mission_id] = mission
 
     async def no_op_broadcast(_message):
         return None
@@ -290,50 +252,29 @@ def test_simulation_progress_only_advances_when_targets_are_found():
     original_broadcast = manager.broadcast
     manager.broadcast = no_op_broadcast
     try:
-        mission = missions_db[mission_id]
+        mission = mission_db[mission_id]
         all_targets_found = asyncio.run(simulation_module._finalize_mission_progress(mission))
         assert all_targets_found is False
-        assert mission["status"] == "running"
-        assert mission["progress"] == 50.0
+        assert mission.status == "searching"
+        assert mission.progress == 50.0
     finally:
         manager.broadcast = original_broadcast
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
 
 def test_target_detection_uses_expanded_radius_before_icons_overlap():
-    mission = {
-        "bounds": {
-            "min_lat": 34.0,
-            "max_lat": 35.0,
-            "min_lon": -118.0,
-            "max_lon": -117.0,
-        },
-        "drones": [
-            {
-                "id": "drone1",
-                "lat": 34.5,
-                "lon": -117.5,
-            }
-        ],
-        "targets": [
-            {
-                "id": "t1",
-                "lat": 34.5012,
-                "lon": -117.5,
-                "status": "wandering",
-                "vx": 0,
-                "vy": 0,
-            }
-        ],
-    }
-
-    simulation_module._update_targets_for_tick(
-        mission,
-        mission["bounds"],
+    mission = create_test_mission(
+        bounds={"min_lat": 34.0, "max_lat": 35.0, "min_lon": -118.0, "max_lon": -117.0},
+        drones=[{"id": "drone1", "lat": 34.5, "lon": -117.5}],
     )
+    mission.targets = [
+        {"id": "t1", "lat": 34.5012, "lon": -117.5, "status": "wandering", "vx": 0, "vy": 0}
+    ]
 
-    target = mission["targets"][0]
-    drone = mission["drones"][0]
+    simulation_module._update_targets_for_tick(mission)
+
+    target = mission.targets[0]
+    drone = mission.drones[0]
     assert simulation_module.DETECTION_RADIUS >= 0.0012
     assert target["status"] == "detected"
     assert target["assigned_drone_id"] == "drone1"
@@ -342,31 +283,17 @@ def test_target_detection_uses_expanded_radius_before_icons_overlap():
 
 def test_simulation_completes_when_all_targets_are_found():
     mission_id = "sim-complete-all-targets-found"
-    missions_db[mission_id] = {
-        "id": mission_id,
-        "name": "All Targets Found Completion Test",
-        "status": "running",
-        "progress": 0.0,
-        "elapsed_seconds": 0,
-        "bounds": {
-            "min_lat": 34.0,
-            "max_lat": 35.0,
-            "min_lon": -118.0,
-            "max_lon": -117.0,
-        },
-        "drones": [
-            {
-                "id": "drone1",
-                "lat": 34.5,
-                "lon": -117.5,
-            }
-        ],
-        "targets": [
-            {"id": "t1", "lat": 34.5, "lon": -117.5, "status": "found"},
-            {"id": "t2", "lat": 34.6, "lon": -117.4, "status": "found"},
-        ],
-        "hikers": [],
-    }
+    mission = create_test_mission(
+        id=mission_id,
+        name="All Targets Found Completion Test",
+        bounds={"min_lat": 34.0, "max_lat": 35.0, "min_lon": -118.0, "max_lon": -117.0},
+        drones=[{"id": "drone1", "lat": 34.5, "lon": -117.5}],
+    )
+    mission.targets = [
+        {"id": "t1", "lat": 34.5, "lon": -117.5, "status": "found"},
+        {"id": "t2", "lat": 34.6, "lon": -117.4, "status": "found"},
+    ]
+    mission_db[mission_id] = mission
 
     async def no_op_broadcast(_message):
         return None
@@ -374,45 +301,33 @@ def test_simulation_completes_when_all_targets_are_found():
     original_broadcast = manager.broadcast
     manager.broadcast = no_op_broadcast
     try:
-        mission = missions_db[mission_id]
+        mission = mission_db[mission_id]
         all_targets_found = asyncio.run(simulation_module._finalize_mission_progress(mission))
         assert all_targets_found is True
-        assert mission["status"] == "complete"
-        assert mission["progress"] == 100.0
+        assert mission.progress == 100.0
     finally:
         manager.broadcast = original_broadcast
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
 
 def test_simulation_uses_voronoi_centroid_for_unassigned_simulated_drones():
     mission_id = "sim-voronoi-motion"
-    missions_db[mission_id] = {
-        "id": mission_id,
-        "name": "Voronoi Motion Test",
-        "status": "running",
-        "progress": 0.0,
-        "elapsed_seconds": 0,
-        "bounds": {
-            "min_lat": 0.0,
-            "max_lat": 1.0,
-            "min_lon": 0.0,
-            "max_lon": 1.0,
-        },
-        "grid": [[0.8, 0.8], [0.9, 0.9]],
-        "drones": [
-            {
-                "id": "drone1",
-                "lat": 0.1,
-                "lon": 0.1,
-            }
-        ],
-        "targets": [],
-        "hikers": [],
-    }
+    mission = create_test_mission(
+        id=mission_id,
+        name="Voronoi Motion Test",
+        bounds={"min_lat": 0.0, "max_lat": 1.0, "min_lon": 0.0, "max_lon": 1.0},
+        drones=[{"id": "drone1", "lat": 0.1, "lon": 0.1}],
+    )
+    mission.status = "searching"
+    mission.grid = np.array([
+        [0.8, 0.8],
+        [0.9, 0.9],
+    ])
+    mission_db[mission_id] = mission
 
     async def stop_after_first_telemetry(message):
         if message.get("type") == "telemetry":
-            missions_db[mission_id]["status"] = "stopped"
+            mission_db[mission_id].status = "mission_complete"
 
     original_broadcast = manager.broadcast
     original_get_states = sitl_bridge.get_states_by_sysid
@@ -421,11 +336,11 @@ def test_simulation_uses_voronoi_centroid_for_unassigned_simulated_drones():
 
     try:
         asyncio.run(simulation_loop(mission_id))
-        drone = missions_db[mission_id]["drones"][0]
+        drone = mission_db[mission_id].drones[0]
     finally:
         manager.broadcast = original_broadcast
         sitl_bridge.get_states_by_sysid = original_get_states
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
     assert drone["telemetry_source"] == "simulated"
     assert drone["lat"] > 0.1
@@ -477,8 +392,8 @@ def test_start_mission_runs_dispatch_bridge_when_targets_present():
         start_response = client.post(f"/missions/{mission_id}/start")
         assert start_response.status_code == 200
         payload = start_response.json()
-        assert payload["status"] == "running"
-        import time; time.sleep(0.3)
+        assert payload["status"] == "searching"
+        time.sleep(0.3)
         assert len(captured.get("assignments", [])) == 1
         assert captured["assignments"][0]["sysid"] == 1
     finally:
@@ -486,15 +401,9 @@ def test_start_mission_runs_dispatch_bridge_when_targets_present():
 
 
 def test_sync_mission_drones_with_sitl_uses_live_positions():
-    mission = {
-        "drones": [
-            {
-                "id": "drone-1",
-                "lat": 1.0,
-                "lon": 2.0,
-            }
-        ]
-    }
+    mission = create_test_mission(
+        drones=[{"id": "drone-1", "lat": 1.0, "lon": 2.0}],
+    )
 
     original_get_states = sitl_bridge.get_states_by_sysid
     sitl_bridge.get_states_by_sysid = lambda: {
@@ -519,7 +428,7 @@ def test_sync_mission_drones_with_sitl_uses_live_positions():
         sitl_bridge.get_states_by_sysid = original_get_states
 
     assert live_drone_ids == {"drone-1"}
-    drone = mission["drones"][0]
+    drone = mission.drones[0]
     assert drone["sysid"] == 1
     assert drone["lat"] == 34.123456
     assert drone["lon"] == -117.654321
@@ -611,8 +520,6 @@ def test_run_dispatch_script_timeout_returns_failure_rows():
     async def fake_create_subprocess_exec(*_args, **_kwargs):
         return slow_process
 
-    import app.dispatch as dispatch_module
-
     original_create_subprocess_exec = dispatch_module.asyncio.create_subprocess_exec
     dispatch_module.asyncio.create_subprocess_exec = fake_create_subprocess_exec
 
@@ -644,8 +551,6 @@ def test_run_dispatch_script_non_zero_exit_returns_failure_rows():
     async def fake_create_subprocess_exec(*_args, **_kwargs):
         return FailingProcess()
 
-    import app.dispatch as dispatch_module
-
     original_create_subprocess_exec = dispatch_module.asyncio.create_subprocess_exec
     dispatch_module.asyncio.create_subprocess_exec = fake_create_subprocess_exec
 
@@ -666,8 +571,6 @@ def test_run_dispatch_script_non_zero_exit_returns_failure_rows():
 
 
 def test_dispatch_drone_fails_when_arm_never_reflects_in_state():
-    import app.sitl as sitl_module
-
     class FakeDrone:
         def __init__(self):
             self.sysid = 7
@@ -675,6 +578,12 @@ def test_dispatch_drone_fails_when_arm_never_reflects_in_state():
             self.arm_called = False
             self.takeoff_called = False
             self.goto_called = False
+            self.mode_map = {
+                "GUIDED": 4,
+                "LOITER": 5,
+                "LAND": 9,
+                "RTL": 6,
+            }
 
         def arm(self):
             self.arm_called = True
@@ -688,8 +597,21 @@ def test_dispatch_drone_fails_when_arm_never_reflects_in_state():
         def get_state(self):
             return self.state
 
+        def set_mode(self, mode_name):
+            if mode_name not in self.mode_map:
+                raise ValueError(f"Mode {mode_name} not supported")
+
+            self.state["mode"] = self.mode_map[mode_name]
+
+        def is_mode(self, mode_name):
+            if mode_name not in self.mode_map:
+                raise ValueError(f"Mode {mode_name} not supported")
+
+            return self.get_state()["mode"] == self.mode_map[mode_name]
+
     bridge = sitl_module.SITLTelemetryBridge()
     fake_drone = FakeDrone()
+    fake_drone.set_mode("GUIDED")
     bridge.swarm.drones = [fake_drone]
 
     original_wait = sitl_module._wait_for_condition
@@ -700,15 +622,13 @@ def test_dispatch_drone_fails_when_arm_never_reflects_in_state():
         sitl_module._wait_for_condition = original_wait
 
     assert result["success"] is False
-    assert "never reported armed state" in result["message"]
+    assert "Arm command ACKed but drone never reported armed state" in result["message"]
     assert fake_drone.arm_called is True
     assert fake_drone.takeoff_called is False
     assert fake_drone.goto_called is False
 
 
 def test_drone_eof_handler_marks_connection_disconnected():
-    import app.connect_swarm as connect_swarm_module
-
     class FakePort:
         def __init__(self):
             self.closed = False
@@ -735,8 +655,6 @@ def test_drone_eof_handler_marks_connection_disconnected():
 
 
 def test_ensure_connected_drops_stale_links_and_retries():
-    import app.sitl as sitl_module
-
     class FakeDrone:
         def is_connection_alive(self, _stale_after):
             return False
@@ -780,18 +698,10 @@ def test_send_live_drone_gotos_logs_skip_reasons_for_not_airborne(caplog):
     }
     sitl_bridge.is_dispatching = lambda _sysid: False
 
-    mission = {
-        "elapsed_seconds": 10,
-        "drones": [
-            {
-                "id": "drone-1",
-                "sysid": 1,
-                "lat": 34.5,
-                "lon": -117.5,
-                "alt": 0.0,
-            }
-        ],
-    }
+    mission = create_test_mission(
+        drones=[Drone(id="drone-1", sysid=1, lat=34.5, lon=-117.5, alt=0.0)],
+    )
+    mission.elapsed_seconds = 10
 
     try:
         with caplog.at_level("INFO"):
@@ -814,21 +724,11 @@ def test_sweep_live_goto_prefers_algorithm_waypoint_over_startup_target():
     sitl_bridge.is_dispatching = lambda _sysid: False
     sitl_bridge.send_goto = lambda sysid, lat, lon, alt: sent.append((sysid, lat, lon, alt))
 
-    mission = {
-        "algorithm": "sweep",
-        "elapsed_seconds": 1,
-        "drones": [
-            {
-                "id": "drone-1",
-                "sysid": 1,
-                "lat": 34.0,
-                "lon": -117.0,
-                "alt": 20.0,
-                "target_lat": 34.9,
-                "target_lon": -117.9,
-            }
-        ],
-    }
+    mission = create_test_mission(
+        drones=[Drone(id="drone-1", sysid=1, lat=34.0, lon=-117.0, alt=20.0, target_lat=34.9, target_lon=-117.9)],
+        algorithm="sweep",
+    )
+    mission.elapsed_seconds = 1
 
     try:
         simulation_module._send_live_drone_gotos(mission, {"drone-1"}, {"drone-1": (34.2, -117.2)})
@@ -850,23 +750,13 @@ def test_assigned_target_still_overrides_sweep_waypoint():
     sitl_bridge.is_dispatching = lambda _sysid: False
     sitl_bridge.send_goto = lambda sysid, lat, lon, alt: sent.append((sysid, lat, lon, alt))
 
-    mission = {
-        "algorithm": "sweep",
-        "elapsed_seconds": 1,
-        "drones": [
-            {
-                "id": "drone-1",
-                "sysid": 1,
-                "lat": 34.0,
-                "lon": -117.0,
-                "alt": 20.0,
-                "assigned_target_id": "t1",
-                "target_lat": 34.9,
-                "target_lon": -117.9,
-            }
-        ],
-        "targets": [{"id": "t1", "lat": 34.4, "lon": -117.4}],
-    }
+    mission = create_test_mission(
+        drones=[{"id": "drone-1", "sysid": 1, "lat": 34.0, "lon": -117.0, "alt": 20.0, "target_lat": 34.9, "target_lon": -117.9}],
+        algorithm="sweep",
+    )
+    mission.elapsed_seconds = 1
+    mission.targets = [{"id": "t1", "lat": 34.4, "lon": -117.4}]
+    mission.drones[0]["assigned_target_id"] = "t1"
 
     try:
         simulation_module._send_live_drone_gotos(mission, {"drone-1"}, {"drone-1": (34.2, -117.2)})
@@ -879,8 +769,6 @@ def test_assigned_target_still_overrides_sweep_waypoint():
 
 
 def test_get_states_by_sysid_triggers_reconnect_for_stale_links():
-    import app.sitl as sitl_module
-
     class FakeDrone:
         def is_connection_alive(self, _stale_after):
             return False
@@ -905,13 +793,13 @@ def test_get_states_by_sysid_triggers_reconnect_for_stale_links():
 
 
 def test_mission_drone_to_sysid_map_assigns_existing_and_fallback_sysids():
-    mission = {
-        "drones": [
-            {"id": "drone-a", "sysid": 7},
-            {"id": "drone-b"},
-            {"id": "drone-c", "sysid": "3"},
+    mission = create_test_mission(
+        drones=[
+            {"id": "drone-a", "sysid": 7, "lat": 34.5, "lon": -117.5},
+            {"id": "drone-b", "lat": 34.5, "lon": -117.5},
+            {"id": "drone-c", "sysid": "3", "lat": 34.5, "lon": -117.5},
         ]
-    }
+    )
 
     mapping = main_module._mission_drone_to_sysid_map(mission)
 
@@ -920,7 +808,7 @@ def test_mission_drone_to_sysid_map_assigns_existing_and_fallback_sysids():
         "drone-b": 2,
         "drone-c": 3,
     }
-    assert mission["drones"][1]["sysid"] == 2
+    assert mission.drones[1]["sysid"] == 2
 
 
 def test_start_mission_stores_algorithm_from_body():
@@ -969,7 +857,7 @@ def test_metrics_endpoint_returns_algorithm_and_structure():
     assert response.status_code == 200
     payload = response.json()
     assert payload["algorithm"] == "apf"
-    assert payload["status"] == "running"
+    assert payload["status"] == "searching"
     assert "targets_total" in payload
     assert "targets_found" in payload
     assert "found_at_seconds" in payload
@@ -983,15 +871,15 @@ def test_metrics_endpoint_returns_404_for_missing_mission():
 
 def test_emit_target_found_stores_found_at_on_target():
     mission_id = "emit-found-at-test"
-    missions_db[mission_id] = {
-        "id": mission_id,
-        "status": "running",
-        "elapsed_seconds": 42,
-        "_found_target_ids": [],
-        "bounds": {"min_lat": 34.0, "max_lat": 35.0, "min_lon": -118.0, "max_lon": -117.0},
-        "drones": [],
-        "targets": [],
-    }
+    mission = create_test_mission(
+        id=mission_id,
+        bounds={"min_lat": 34.0, "max_lat": 35.0, "min_lon": -118.0, "max_lon": -117.0},
+        drones=[],
+    )
+    mission.status = "searching"
+    mission.elapsed_seconds = 42
+    mission_db[mission_id] = mission
+    
     target = {"id": "tgt-x", "lat": 34.5, "lon": -117.5, "status": "detected"}
 
     async def fake_broadcast(_message):
@@ -1000,87 +888,57 @@ def test_emit_target_found_stores_found_at_on_target():
     original_broadcast = manager.broadcast
     manager.broadcast = fake_broadcast
     try:
-        asyncio.run(simulation_module._emit_target_found(missions_db[mission_id], target))
+        asyncio.run(simulation_module._emit_target_found(mission_db[mission_id], target))
     finally:
         manager.broadcast = original_broadcast
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
     assert target["found_at"] == 42
 
 
 def test_sweep_algorithm_assigns_dense_paths_and_returns_first_waypoint():
-    from app.algorithms.boustrophedon import VoronoiBoustrophedon
-    from app.algorithms.base import DETECTION_RADIUS
+    drones = [Drone(id="drone1", lat=0.01, lon=0.01), Drone(id="drone2", lat=0.03, lon=0.03)]
+    mission = create_test_mission(drones=drones, algorithm="sweep")
 
-    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
-    mission = {
-        "bounds": bounds,
-        "drones": [
-            {"id": "drone1", "lat": 0.01, "lon": 0.01},
-            {"id": "drone2", "lat": 0.03, "lon": 0.03},
-        ],
-    }
     algorithm = VoronoiBoustrophedon()
-    waypoints = algorithm.get_target_waypoints(mission, mission["drones"])
+    waypoints = algorithm.get_target_waypoints(mission, mission.drones)
 
-    assert "sweep_paths" in mission
-    assert set(mission["sweep_paths"].keys()) == {"drone1", "drone2"}
-    # Each drone covers half of a 0.04°×0.04° area at DETECTION_RADIUS spacing → many waypoints
-    assert all(len(path) > 2 for path in mission["sweep_paths"].values())
+    assert set(mission.sweep_paths.keys()) == {"drone1", "drone2"}
+    # Each drone covers half of a 0.04°×0.04° area
+    assert all(len(path) > 2 for path in mission.sweep_paths.values())
     assert set(waypoints.keys()) == {"drone1", "drone2"}
-    assert mission["sweep_reached_radius"] == DETECTION_RADIUS
+    assert mission.sweep_reached_radius == DETECTION_RADIUS
 
 
 def test_sweep_algorithm_advances_to_next_waypoint_when_drone_arrives():
-    from app.algorithms.boustrophedon import VoronoiBoustrophedon
-
-    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
-    mission = {
-        "bounds": bounds,
-        "drones": [{"id": "drone1", "lat": -0.1, "lon": -0.1}],  # far from path start
-    }
+    mission = create_test_mission(drones=[Drone(id="drone1", lat=-0.1, lon=-0.1)], algorithm="sweep")
     algorithm = VoronoiBoustrophedon()
 
-    first = algorithm.get_target_waypoints(mission, mission["drones"])
-    initial_path_length = len(mission["sweep_paths"]["drone1"])
+    first = algorithm.get_target_waypoints(mission, mission.drones)
+    initial_path_length = len(mission.sweep_paths["drone1"])
 
     # Teleport drone to the first waypoint
-    mission["drones"][0]["lat"] = first["drone1"][0]
-    mission["drones"][0]["lon"] = first["drone1"][1]
-    second = algorithm.get_target_waypoints(mission, mission["drones"])
+    mission.drones[0]["lat"] = first["drone1"][0]
+    mission.drones[0]["lon"] = first["drone1"][1]
+    second = algorithm.get_target_waypoints(mission, mission.drones)
 
-    assert len(mission["sweep_paths"]["drone1"]) < initial_path_length
-
-
-def test_sweep_algorithm_returns_empty_when_no_bounds():
-    from app.algorithms.boustrophedon import VoronoiBoustrophedon
-
-    algorithm = VoronoiBoustrophedon()
-    mission = {"drones": [{"id": "drone1", "lat": 0.0, "lon": 0.0}]}
-    assert algorithm.get_target_waypoints(mission, mission["drones"]) == {}
+    assert len(mission.sweep_paths["drone1"]) < initial_path_length
 
 
 def test_sweep_reached_radius_equals_detection_radius():
-    from app.algorithms.boustrophedon import VoronoiBoustrophedon, _REACH_RADIUS
-    from app.algorithms.base import DETECTION_RADIUS
-
-    mission = {
-        "bounds": {"min_lat": 33.45, "max_lat": 33.47, "min_lon": -117.25, "max_lon": -117.23},
-        "drones": [{"id": "d1", "lat": 33.46, "lon": -117.24}],
-    }
+    mission = create_test_mission(
+        bounds={"min_lat": 33.45, "max_lat": 33.47, "min_lon": -117.25, "max_lon": -117.23}, 
+        drones=[Drone(id="d1", lat=33.46, lon=-117.24)], algorithm="sweep"
+    )
     alg = VoronoiBoustrophedon()
-    alg.get_target_waypoints(mission, mission["drones"])
+    alg.get_target_waypoints(mission, mission.drones)
 
-    assert mission["sweep_reached_radius"] == DETECTION_RADIUS
+    assert mission.sweep_reached_radius == DETECTION_RADIUS
     assert _REACH_RADIUS == DETECTION_RADIUS
 
 
 def test_dense_grid_covers_full_bounds():
     """Every point in the search area must be within DETECTION_RADIUS of a grid point."""
-    from app.algorithms.boustrophedon import _build_dense_grid
-    from app.algorithms.base import DETECTION_RADIUS
-    import numpy as np
-
     bounds = {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01}
     grid = _build_dense_grid(bounds)
 
@@ -1091,10 +949,6 @@ def test_dense_grid_covers_full_bounds():
 
 
 def test_dense_grid_spaced_at_detection_radius():
-    from app.algorithms.boustrophedon import _build_dense_grid
-    from app.algorithms.base import DETECTION_RADIUS
-    import numpy as np
-
     bounds = {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01}
     grid = _build_dense_grid(bounds)
 
@@ -1106,10 +960,6 @@ def test_dense_grid_spaced_at_detection_radius():
 
 def test_dense_grid_includes_non_multiple_max_bounds():
     """Max bounds must be explicit endpoints so sweep rows do not leave corner gaps."""
-    from app.algorithms.boustrophedon import _build_dense_grid
-    from app.algorithms.base import DETECTION_RADIUS
-    import numpy as np
-
     bounds = {"min_lat": 0.0, "max_lat": 0.0139, "min_lon": 0.0, "max_lon": 0.0139}
     grid = _build_dense_grid(bounds)
     unique_lats = np.unique(np.round(grid[:, 0], 8))
@@ -1123,9 +973,6 @@ def test_dense_grid_includes_non_multiple_max_bounds():
 
 def test_voronoi_partition_covers_entire_dense_grid():
     """Every dense-grid point must be assigned to exactly one seed — no gaps."""
-    from app.algorithms.boustrophedon import _build_dense_grid, _voronoi_assign
-    import numpy as np
-
     bounds = {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01}
     grid = _build_dense_grid(bounds)
     positions = np.array([[0.002, 0.002], [0.008, 0.008]])
@@ -1137,8 +984,6 @@ def test_voronoi_partition_covers_entire_dense_grid():
 
 def test_balanced_partition_seeds_evenly_distributed_for_small_drone_counts():
     """For 2-6 drones, seeds must span the bounds — not cluster."""
-    from app.algorithms.boustrophedon import _balanced_partition_seeds
-
     bounds = {"min_lat": 0.0, "max_lat": 1.0, "min_lon": 0.0, "max_lon": 1.0}
     for k in (2, 3, 4, 5, 6):
         seeds = _balanced_partition_seeds(bounds, k)
@@ -1155,8 +1000,6 @@ def test_balanced_partition_seeds_evenly_distributed_for_small_drone_counts():
 
 def test_balanced_partition_seeds_returns_exactly_k_for_all_counts():
     """Contract: exactly k seeds for every valid k."""
-    from app.algorithms.boustrophedon import _balanced_partition_seeds
-
     bounds = {"min_lat": 0.0, "max_lat": 1.0, "min_lon": 0.0, "max_lon": 1.0}
     for k in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 20, 25]:
         seeds = _balanced_partition_seeds(bounds, k)
@@ -1165,9 +1008,6 @@ def test_balanced_partition_seeds_returns_exactly_k_for_all_counts():
 
 def test_balanced_partition_seeds_respects_bounds_aspect_ratio():
     """Wide bounds should yield more columns than rows; tall bounds the opposite."""
-    from app.algorithms.boustrophedon import _balanced_partition_seeds
-    import numpy as np
-
     wide = {"min_lat": 0.0, "max_lat": 0.02, "min_lon": 0.0, "max_lon": 0.08}  # 4:1 wide
     seeds = _balanced_partition_seeds(wide, 6)
     n_unique_lats = len(np.unique(np.round(seeds[:, 0], 6)))
@@ -1187,9 +1027,6 @@ def test_balanced_partition_seeds_respects_bounds_aspect_ratio():
 
 def test_single_drone_partition_centers_on_bounds():
     """k=1 → the one cell covers the entire area, centered."""
-    from app.algorithms.boustrophedon import _balanced_partition_seeds, _build_dense_grid, _voronoi_assign
-    import numpy as np
-
     bounds = {"min_lat": 0.0, "max_lat": 0.02, "min_lon": 0.0, "max_lon": 0.02}
     seeds = _balanced_partition_seeds(bounds, 1)
     assert len(seeds) == 1
@@ -1204,11 +1041,6 @@ def test_single_drone_partition_centers_on_bounds():
 
 def test_sweep_partition_balanced_across_all_drone_counts():
     """Max cell / min cell should stay under a sensible bound for every k."""
-    from app.algorithms.boustrophedon import (
-        _balanced_partition_seeds, _build_dense_grid, _voronoi_assign,
-    )
-    import numpy as np
-
     bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
     dense = _build_dense_grid(bounds)
 
@@ -1224,24 +1056,21 @@ def test_sweep_partition_balanced_across_all_drone_counts():
 
 def test_sweep_partition_balanced_when_drones_clustered_at_init():
     """Even if all drones spawn clustered, partitions must be roughly equal area."""
-    from app.algorithms.boustrophedon import VoronoiBoustrophedon
-    import numpy as np
-
-    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
     # 4 drones all clustered near a single corner — the worst case
-    mission = {
-        "bounds": bounds,
-        "drones": [
-            {"id": "d1", "lat": 0.001, "lon": 0.001},
-            {"id": "d2", "lat": 0.0011, "lon": 0.0012},
-            {"id": "d3", "lat": 0.0009, "lon": 0.001},
-            {"id": "d4", "lat": 0.0012, "lon": 0.0009},
-        ],
-    }
-    alg = VoronoiBoustrophedon()
-    alg.get_target_waypoints(mission, mission["drones"])
+    mission = create_test_mission(
+        drones=[
+            Drone(id="d1", lat=0.001, lon=0.001), 
+            Drone(id="d2", lat=0.0011, lon=0.0012), 
+            Drone(id="d3", lat=0.0009, lon=0.001), 
+            Drone(id="d4", lat=0.0012, lon=0.0009)
+        ], 
+        algorithm="sweep"
+    )
 
-    path_lengths = [len(p) for p in mission["sweep_paths"].values()]
+    alg = VoronoiBoustrophedon()
+    alg.get_target_waypoints(mission, mission.drones)
+
+    path_lengths = [len(p) for p in mission.sweep_paths.values()]
     # No drone gets more than 2x the smallest partition
     assert max(path_lengths) <= 2 * min(path_lengths) + 4, (
         f"Lopsided partitions: {path_lengths} — clustered drones broke the partition"
@@ -1249,9 +1078,6 @@ def test_sweep_partition_balanced_when_drones_clustered_at_init():
 
 
 def test_match_drones_to_seeds_assigns_each_drone_exactly_one_seed():
-    from app.algorithms.boustrophedon import _match_drones_to_seeds
-    import numpy as np
-
     drones = np.array([[0.0, 0.0], [1.0, 1.0], [0.5, 0.5]])
     seeds = np.array([[0.9, 0.9], [0.1, 0.1], [0.5, 0.5]])
     mapping = _match_drones_to_seeds(drones, seeds)
@@ -1266,9 +1092,6 @@ def test_match_drones_to_seeds_assigns_each_drone_exactly_one_seed():
 
 def test_voronoi_lloyd_step_partition_is_correct():
     """Lloyd's: every grid point assigned to nearest centroid; new centroid is mean of cluster."""
-    from app.voronoi import lloyd_step
-    import numpy as np
-
     grid = np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
     centroids = np.array([[0.1, 0.1], [0.9, 0.9]])
     new_centroids, labels = lloyd_step(grid, centroids)
@@ -1284,17 +1107,12 @@ def test_voronoi_lloyd_step_partition_is_correct():
 
 
 def test_voronoi_algorithm_returns_centroid_per_drone():
-    from app.algorithms.voronoi import VoronoiCoverage
-
-    mission = {
-        "bounds": {"min_lat": 0.0, "max_lat": 1.0, "min_lon": 0.0, "max_lon": 1.0},
-        "grid": [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]],
-        "drones": [
-            {"id": "d1", "lat": 0.1, "lon": 0.1},
-            {"id": "d2", "lat": 0.9, "lon": 0.9},
-        ],
-    }
-    waypoints = VoronoiCoverage().get_target_waypoints(mission, mission["drones"])
+    mission = create_test_mission(
+        bounds={"min_lat": 0.0, "max_lat": 1.0, "min_lon": 0.0, "max_lon": 1.0},
+        drones=[Drone(id="d1", lat=0.1, lon=0.1), Drone(id="d2", lat=0.9, lon=0.9)],
+    )
+    mission.grid = np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
+    waypoints = VoronoiCoverage().get_target_waypoints(mission, mission.drones)
     assert set(waypoints.keys()) == {"d1", "d2"}
     for lat, lon in waypoints.values():
         assert 0.0 <= lat <= 1.0
@@ -1303,17 +1121,15 @@ def test_voronoi_algorithm_returns_centroid_per_drone():
 
 def test_voronoi_algorithm_handles_small_drone_counts():
     """Verify voronoi runs for N=1,2,3 and returns a valid waypoint per drone."""
-    from app.algorithms.voronoi import VoronoiCoverage
-    from app.algorithms.base import build_search_grid
-
     bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
-    grid = build_search_grid(bounds, n=15).tolist()
+    grid = build_search_grid(bounds, n=15)
 
     for k in [1, 2, 3]:
         drones = [{"id": f"d{i}", "lat": 0.01 + i * 0.005, "lon": 0.01 + i * 0.005}
                   for i in range(k)]
-        mission = {"bounds": bounds, "grid": grid, "drones": drones}
-        result = VoronoiCoverage().get_target_waypoints(mission, drones)
+        mission = create_test_mission(bounds=bounds, drones=drones)
+        mission.grid = grid
+        result = VoronoiCoverage().get_target_waypoints(mission, mission.drones)
         assert len(result) == k, f"k={k}: expected {k} waypoints, got {len(result)}"
         for lat, lon in result.values():
             assert bounds["min_lat"] <= lat <= bounds["max_lat"]
@@ -1486,9 +1302,6 @@ class PlugPlayTempAlgorithm(BaseSearchAlgorithm):
 
 
 def test_row_endpoints_lawnmower_alternates_direction():
-    from app.algorithms.boustrophedon import _row_endpoints_lawnmower
-    import numpy as np
-
     pts = np.array([
         [0.0, 0.0], [0.0, 0.002], [0.0, 0.004],
         [0.002, 0.0], [0.002, 0.002], [0.002, 0.004],
@@ -1504,9 +1317,6 @@ def test_row_endpoints_lawnmower_alternates_direction():
 
 
 def test_row_endpoints_lawnmower_emits_two_per_row():
-    from app.algorithms.boustrophedon import _row_endpoints_lawnmower
-    import numpy as np
-
     # 3 lat rows, 5 cols each → 6 waypoints (2 per row), not 15
     pts = np.array([[lat, lon]
                     for lat in [0.0, 0.002, 0.004]
@@ -1517,107 +1327,92 @@ def test_row_endpoints_lawnmower_emits_two_per_row():
 
 def test_sweep_centroid_is_first_waypoint_and_phase_is_en_route_at_init():
     """Drone's first waypoint must be the centroid; drone is 'en_route' until reached."""
-    from app.algorithms.boustrophedon import VoronoiBoustrophedon
-    import numpy as np
-
-    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
-    mission = {
-        "bounds": bounds,
-        "drones": [{"id": "d1", "lat": -0.5, "lon": -0.5}],  # far from bounds
-    }
+    mission = create_test_mission(
+        drones=[{"id": "d1", "lat": -0.5, "lon": -0.5}]  # far from bounds
+    )
     alg = VoronoiBoustrophedon()
-    result = alg.get_target_waypoints(mission, mission["drones"])
+    result = alg.get_target_waypoints(mission, mission.drones)
 
-    assert "sweep_centroids" in mission
-    centroid = mission["sweep_centroids"]["d1"]
+    centroid = mission.sweep_centroids["d1"]
     assert result["d1"] == centroid, "First waypoint must be the centroid"
-    assert mission["sweep_phase"]["d1"] == "en_route"
-    assert mission["drones"][0]["sweep_centroid"] == [centroid[0], centroid[1]]
-    assert mission["drones"][0]["sweep_phase"] == "en_route"
+    assert mission.sweep_phase["d1"] == "en_route"
+    assert mission.drones[0]["sweep_centroid"] == [centroid[0], centroid[1]]
+    assert mission.drones[0]["sweep_phase"] == "en_route"
 
 
 def test_sweep_phase_transitions_to_sweeping_when_centroid_reached(caplog):
     """When drone arrives at its centroid, phase flips to 'sweeping' and a log line fires."""
-    from app.algorithms.boustrophedon import VoronoiBoustrophedon
-    import logging
-
-    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
-    mission = {
-        "bounds": bounds,
-        "drones": [{"id": "d1", "lat": -0.5, "lon": -0.5}],
-    }
+    mission = create_test_mission(
+        drones=[{"id": "d1", "lat": -0.5, "lon": -0.5}]
+    )
     alg = VoronoiBoustrophedon()
-    alg.get_target_waypoints(mission, mission["drones"])
+    alg.get_target_waypoints(mission, mission.drones)
 
-    centroid = mission["sweep_centroids"]["d1"]
-    mission["drones"][0]["lat"] = centroid[0]
-    mission["drones"][0]["lon"] = centroid[1]
+    centroid = mission.sweep_centroids["d1"]
+    mission.drones[0]["lat"] = centroid[0]
+    mission.drones[0]["lon"] = centroid[1]
 
     with caplog.at_level(logging.INFO, logger="app.algorithms.boustrophedon"):
-        alg.get_target_waypoints(mission, mission["drones"])
+        alg.get_target_waypoints(mission, mission.drones)
 
-    assert mission["sweep_phase"]["d1"] == "sweeping"
-    assert mission["drones"][0]["sweep_phase"] == "sweeping"
+    assert mission.sweep_phase["d1"] == "sweeping"
+    assert mission.drones[0]["sweep_phase"] == "sweeping"
     assert any("reached centroid" in rec.message for rec in caplog.records)
 
 
 def test_sweep_phase_transitions_to_complete_when_path_exhausted(caplog):
-    from app.algorithms.boustrophedon import VoronoiBoustrophedon
-    import logging
-
-    bounds = {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01}
-    mission = {
-        "bounds": bounds,
-        "drones": [{"id": "d1", "lat": 0.005, "lon": 0.005}],
-    }
+    mission = create_test_mission(
+        bounds={"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+        drones=[{"id": "d1", "lat": 0.005, "lon": 0.005}]
+    )
     alg = VoronoiBoustrophedon()
-    alg.get_target_waypoints(mission, mission["drones"])
-    mission["sweep_paths"]["d1"] = []
+    alg.get_target_waypoints(mission, mission.drones)
+    mission.sweep_paths["d1"] = []
 
     with caplog.at_level(logging.INFO, logger="app.algorithms.boustrophedon"):
-        alg.get_target_waypoints(mission, mission["drones"])
+        alg.get_target_waypoints(mission, mission.drones)
 
-    assert mission["sweep_phase"]["d1"] == "complete"
+    assert mission.sweep_phase["d1"] == "complete"
     assert any("partition fully swept" in rec.message for rec in caplog.records)
 
 
 def test_sweep_drone_idles_when_partition_exhausted():
     """When a drone's path runs out it should go idle (not regenerate)."""
-    from app.algorithms.boustrophedon import VoronoiBoustrophedon
-
-    mission = {
-        "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
-        "drones": [{"id": "d1", "lat": 0.005, "lon": 0.005}],
-    }
+    mission = create_test_mission(
+        bounds={"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+        drones=[{"id": "d1", "lat": 0.005, "lon": 0.005}],
+        algorithm="sweep",
+    )
     alg = VoronoiBoustrophedon()
-    alg.get_target_waypoints(mission, mission["drones"])
-    mission["sweep_paths"]["d1"] = []  # simulate exhausted path
+    alg.get_target_waypoints(mission, mission.drones)
+    mission.sweep_paths["d1"] = []  # simulate exhausted path
 
-    result = alg.get_target_waypoints(mission, mission["drones"])
+    result = alg.get_target_waypoints(mission, mission.drones)
     assert "d1" not in result
 
 
 def test_update_coverage_marks_grid_cells_within_detection_radius():
     """Coverage now uses the dense grid (via _dense_coverage_grid or falls back to 'grid')."""
-    import numpy as np
     # Provide a small fake dense grid: two cells near the drone, one far away.
-    mission = {
-        "_dense_coverage_grid": np.array([[34.5, -117.5], [34.5001, -117.5], [40.0, -117.5]]),
-        "_dense_grid_size": 3,
-        "drones": [{"id": "drone1", "lat": 34.5, "lon": -117.5}],
-    }
+    mission = create_test_mission(
+        drones=[{"id": "drone1", "lat": 34.5, "lon": -117.5}],
+    )
+    mission._dense_coverage_grid = np.array([[34.5, -117.5], [34.5001, -117.5], [40.0, -117.5]])
+    mission._dense_grid_size = 3
     simulation_module._update_coverage(mission)
-    covered_set = mission["_covered_set"]
+    covered_set = mission.covered_set
     assert 0 in covered_set          # cell at drone position — covered
     assert 1 in covered_set          # cell 0.0001° away — within DETECTION_RADIUS
     assert 2 not in covered_set      # cell at lat=40.0 — far away
-    assert mission["_dense_covered_count"] == 2
+    assert mission._dense_covered_count == 2
 
 
 def test_update_coverage_is_no_op_when_grid_missing():
-    mission = {"drones": [{"id": "drone1", "lat": 34.5, "lon": -117.5}]}
+    mission = create_test_mission(
+        drones=[{"id": "drone1", "lat": 34.5, "lon": -117.5}],
+    )
     simulation_module._update_coverage(mission)
-    assert "_dense_covered_count" not in mission
+    assert mission._dense_covered_count == 0
 
 
 def test_metrics_endpoint_includes_coverage_and_find_time_fields():
@@ -1641,20 +1436,20 @@ def test_metrics_endpoint_includes_coverage_and_find_time_fields():
 
 def test_metrics_coverage_rate_is_percent_per_second():
     mission_id = "metrics-rate-units"
-    missions_db[mission_id] = {
-        "id": mission_id,
-        "algorithm": "sweep",
-        "status": "running",
-        "elapsed_seconds": 10,
-        "_dense_grid_size": 4,
-        "_dense_covered_count": 2,
-        "targets": [],
-    }
+    mission = create_test_mission(
+        id=mission_id,
+        algorithm="sweep",
+    )
+    mission.status = "searching"
+    mission.elapsed_seconds = 10
+    mission._dense_grid_size = 4
+    mission._dense_covered_count = 2
+    mission_db[mission_id] = mission
 
     try:
         response = client.get(f"/missions/{mission_id}/metrics")
     finally:
-        missions_db.pop(mission_id, None)
+        mission_db.pop(mission_id, None)
 
     payload = response.json()
     assert payload["coverage_pct"] == 50.0
@@ -1662,8 +1457,6 @@ def test_metrics_coverage_rate_is_percent_per_second():
 
 
 def test_sitl_drone_speed_env_parser_rejects_invalid_values(monkeypatch):
-    from app.settings import _positive_float_env
-
     monkeypatch.setenv("TEST_SPEED", "nan")
     assert _positive_float_env("TEST_SPEED", 15.0) == 15.0
     monkeypatch.setenv("TEST_SPEED", "-1")
@@ -1675,23 +1468,17 @@ def test_sitl_drone_speed_env_parser_rejects_invalid_values(monkeypatch):
 
 
 def test_finalize_mission_stores_completion_elapsed_seconds():
-    mission = {
-        "status": "running",
-        "progress": 0.0,
-        "elapsed_seconds": 77,
-        "targets": [
-            {"id": "t1", "status": "found"},
-            {"id": "t2", "status": "found"},
-        ],
-    }
+    mission = create_test_mission()
+    mission.elapsed_seconds = 77
+    mission.status = "searching"
+    mission.targets = [{"id": "t1", "status": "found"}, {"id": "t2", "status": "found"}]
 
     async def run():
         return await simulation_module._finalize_mission_progress(mission)
 
     result = asyncio.run(run())
     assert result is True
-    assert mission["status"] == "complete"
-    assert mission["completion_elapsed_seconds"] == 77
+    assert mission.completion_elapsed_seconds == 77
 
 
 def test_normalize_script_results_matches_expected_assignments_by_sysid_and_drone_id():

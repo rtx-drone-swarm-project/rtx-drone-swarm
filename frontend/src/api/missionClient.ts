@@ -18,6 +18,8 @@ export type MissionApiClient = {
   stopBenchmark: (runId: string) => Promise<BenchmarkRun | { run_id: string; stopping: boolean }>;
   getBenchmarkRun: (runId: string) => Promise<BenchmarkRun>;
   listBenchmarkRuns: () => Promise<{ runs: BenchmarkRun[] }>;
+  recallMission: (missionId: string | number) => Promise<MissionRecord>;
+  resetMission: (missionId: string | number) => Promise<MissionRecord>;
 };
 
 export function createMissionClient(apiBase: string): MissionApiClient {
@@ -67,6 +69,16 @@ export function createMissionClient(apiBase: string): MissionApiClient {
     getBenchmarkRun: (runId) =>
       requestJson<BenchmarkRun>(`${apiBase}/benchmark/${runId}`),
 
-    listBenchmarkRuns: () => requestJson<{ runs: BenchmarkRun[] }>(`${apiBase}/benchmark/runs`)
+    listBenchmarkRuns: () => requestJson<{ runs: BenchmarkRun[] }>(`${apiBase}/benchmark/runs`),
+
+    recallMission: (missionId) =>
+      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/recall`, {
+        method: "POST"
+      }),
+
+    resetMission: (missionId) =>
+      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/reset`, {
+        method: "POST"
+      }),
   };
 }

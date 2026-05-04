@@ -1,17 +1,17 @@
-import type { Bounds, MissionStatus } from "../../types/mission";
+import type { Bounds } from "../../types/mission";
 import CollapsibleSection from "../common/CollapsibleSection";
 import SearchingLabel from "../common/SearchingLabel";
 
 type AlertsPanelProps = {
   missionComplete: boolean;
-  normalizedSearchStatus: MissionStatus;
+  missionStatus: string;
   selectedBounds: Bounds | null;
   wsConnected: boolean;
 };
 
 export default function AlertsPanel({
   missionComplete,
-  normalizedSearchStatus,
+  missionStatus,
   selectedBounds,
   wsConnected
 }: AlertsPanelProps) {
@@ -20,25 +20,45 @@ export default function AlertsPanel({
       <span className="alert-icon">&#x2705;</span>
       <div>
         <div className="alert-title">Mission status</div>
-        <div className="alert-sub">Completed — all hikers found. Search at 100%.</div>
+        <div className="alert-sub">Mission complete — all hikers found, all drones recalled.</div>
       </div>
     </div>
-  ) : normalizedSearchStatus === "stopped" ? (
-    <div className="alert-chip stopped">
-      <span className="alert-icon">&#x1F6D1;</span>
-      <div>
-        <div className="alert-title">Mission status</div>
-        <div className="alert-sub">Stopped — search halted by operator.</div>
-      </div>
-    </div>
-  ) : normalizedSearchStatus === "running" ? (
+  ) : missionStatus === "searching" ? (
     <div className="alert-chip info">
       <span className="alert-icon search-pulse-icon">&#x1F50D;</span>
       <div>
         <div className="alert-title">Mission status</div>
         <div className="alert-sub">
-          <SearchingLabel text="In progress — searching selected area" />
+          <SearchingLabel text="Search in progress — searching selected area." />
         </div>
+      </div>
+    </div>
+  ) : missionStatus === "search_complete" ? (
+    <div className="alert-chip info">
+      <span className="alert-icon search-pulse-icon">&#x1F50D;</span>
+      <div>
+        <div className="alert-title">Mission status</div>
+        <div className="alert-sub">
+          <SearchingLabel text="Search complete — all hikers found, awaiting drone instruction." />
+        </div>
+      </div>
+    </div>
+  ) : missionStatus === "recalling" ? (
+    <div className="alert-chip info">
+      <span className="alert-icon search-pulse-icon">&#x1F50D;</span>
+      <div>
+        <div className="alert-title">Mission status</div>
+        <div className="alert-sub">
+          <SearchingLabel text="Recalling — all hikers found, recalling drones." />
+        </div>
+      </div>
+    </div>
+  ) : missionStatus === "paused" ? (
+    <div className="alert-chip stopped">
+      <span className="alert-icon">&#x1F6D1;</span>
+      <div>
+        <div className="alert-title">Mission status</div>
+        <div className="alert-sub">Paused — search paused by operator.</div>
       </div>
     </div>
   ) : selectedBounds ? (
