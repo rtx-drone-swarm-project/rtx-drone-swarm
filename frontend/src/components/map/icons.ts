@@ -96,6 +96,28 @@ export function makeTargetTriangleIcon() {
   return makeTargetCircleIcon("Hiker", "found");
 }
 
+export function makeHomeIcon() {
+  return L.divIcon({
+    className: "home-marker",
+    html: `
+      <svg width="20" height="24" viewBox="0 0 34 40" aria-hidden="true">
+        <path d="M17 2 L31 14 V34 H22 V24 H12 V34 H3 V14 Z"
+              fill="#fab01d"
+              stroke="white"
+              stroke-width="2.5"
+              stroke-linejoin="round" />
+        <path d="M14 34 V26 H20 V34"
+              fill="none"
+              stroke="white"
+              stroke-width="2"
+              stroke-linecap="round" />
+      </svg>
+    `,
+    iconSize: [20, 24],
+    iconAnchor: [10, 11]
+  });
+}
+
 export function makeCentroidIcon(label: string, phase?: string | null) {
   const normalizedPhase = typeof phase === "string" ? phase.toLowerCase() : "";
   const isReached = normalizedPhase === "sweeping" || normalizedPhase === "complete";

@@ -547,6 +547,7 @@ export default function App() {
           defaultZoom={DEFAULT_ZOOM}
           mapCenter={mapCenter}
           selectedBounds={selectedBounds}
+          homeLocation={mission?.home ?? null}
           missionActive={missionActive}
           validDrones={validDrones}
           targets={targets}

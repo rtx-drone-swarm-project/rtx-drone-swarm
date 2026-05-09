@@ -123,6 +123,11 @@ export type Bounds = {
   max_lon: number;
 };
 
+export type Coordinate = {
+  lat: number;
+  lon: number;
+};
+
 export type TelemetryDrone = {
   id: EntityId;
   sysid?: number | null;
@@ -164,6 +169,7 @@ export type MissionRecord = {
   progress?: number;
   targets?: Target[];
   algorithm?: string;
+  home?: Coordinate;
 };
 
 export type MissionMetrics = {

@@ -14,6 +14,7 @@ const off = vi.fn();
 const mocks = vi.hoisted(() => ({
   marker: vi.fn((_props: Record<string, unknown>) => null),
   polyline: vi.fn((_props: Record<string, unknown>) => null),
+  makeHomeIcon: vi.fn(() => ({ icon: "home" })),
   makeCentroidIcon: vi.fn((_label: string, _phase?: string | null) => ({ icon: "centroid" })),
   makeDroneIcon: vi.fn((_label: string, _role?: string | null, _heading?: number) => ({ icon: "drone" })),
   makePlacedHikerIcon: vi.fn((_label: string, _movement: string, _locked?: boolean) => ({ icon: "placed-hiker" })),
@@ -44,6 +45,7 @@ vi.mock("./MapBBoxDrawer", () => ({ default: () => null }));
 vi.mock("./MapClickSelector", () => ({ default: () => null }));
 vi.mock("./MapRecenter", () => ({ default: () => null }));
 vi.mock("./icons", () => ({
+  makeHomeIcon: mocks.makeHomeIcon,
   makeCentroidIcon: mocks.makeCentroidIcon,
   makeDroneIcon: mocks.makeDroneIcon,
   makePlacedHikerIcon: mocks.makePlacedHikerIcon,
@@ -81,6 +83,7 @@ describe("MapPanel", () => {
     off.mockClear();
     mocks.marker.mockClear();
     mocks.polyline.mockClear();
+    mocks.makeHomeIcon.mockClear();
     mocks.makeCentroidIcon.mockClear();
     mocks.makeDroneIcon.mockClear();
     mocks.makePlacedHikerIcon.mockClear();

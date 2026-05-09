@@ -1,12 +1,12 @@
 import { MapContainer, Marker, Polyline, Rectangle, TileLayer } from "react-leaflet";
 import type { LeafletEvent, Marker as LeafletMarker } from "leaflet";
-import type { AlgorithmOption, Bounds, PlacedHiker, SelectedDrone, Target, ValidDrone } from "../../types/mission";
+import type { AlgorithmOption, Bounds, Coordinate, PlacedHiker, SelectedDrone, Target, ValidDrone } from "../../types/mission";
 import { boundsToLeaflet } from "../../utils/geo";
 import MapBBoxDrawer from "./MapBBoxDrawer";
 import MapClickSelector from "./MapClickSelector";
 import MapControlStack from "./MapControlStack";
 import MapRecenter from "./MapRecenter";
-import { makeCentroidIcon, makeDroneIcon, makePlacedHikerIcon, makeTargetCircleIcon } from "./icons";
+import { makeCentroidIcon, makeDroneIcon, makeHomeIcon, makePlacedHikerIcon, makeTargetCircleIcon } from "./icons";
 import L from "leaflet";
 import { useEffect, useRef } from "react";
 
@@ -104,6 +104,7 @@ type MapPanelProps = {
   defaultZoom: number;
   mapCenter: [number, number] | null;
   selectedBounds: Bounds | null;
+  homeLocation?: Coordinate | null;
   missionActive: boolean;
   validDrones: ValidDrone[];
   targets: Target[];
@@ -134,6 +135,7 @@ export default function MapPanel({
   defaultZoom,
   mapCenter,
   selectedBounds,
+  homeLocation,
   missionActive,
   validDrones,
   targets,
@@ -177,6 +179,14 @@ export default function MapPanel({
           <Rectangle
             bounds={rectBounds}
             pathOptions={{ color: "#3b82f6", fillOpacity: 0.08, dashArray: "8 8", weight: 2 }}
+          />
+        )}
+
+        {homeLocation && (
+          <Marker
+            position={[homeLocation.lat, homeLocation.lon]}
+            icon={makeHomeIcon()}
+            interactive={false}
           />
         )}
 

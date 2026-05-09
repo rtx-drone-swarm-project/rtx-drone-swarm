@@ -13,6 +13,12 @@ class Bounds(BaseModel):
     min_lon: float
     max_lon: float
 
+class Coordinate(BaseModel):
+    """Latitude/longitude coordinate."""
+
+    lat: float
+    lon: float
+
 class Drone(BaseModel):
     """Mission-facing drone state used in REST payloads and WebSocket updates."""
 
@@ -67,12 +73,13 @@ class Mission:
     completion_elapsed_seconds: int
     algorithm: str
     bounds: Dict[str, float]
+    home: Optional[Dict[str, float]]
     drones: List[Dict]
     hikers: List[Dict]
     targets: List[Dict]
-    grid: np.ndarray or None
+    grid: Optional[np.ndarray]
 
-    _dense_coverage_grid: np.ndarray or None
+    _dense_coverage_grid: Optional[np.ndarray]
     _dense_grid_size: int
     _dense_covered_count: int
     _found_target_ids: Set[str]
@@ -93,6 +100,7 @@ class Mission:
         self.completion_elapsed_seconds = 0
         self.algorithm = getattr(mission_data, "algorithm", "voronoi")
         self.bounds = mission_data.bounds.model_dump()
+        self.home = self._derive_home(mission_data)
         self.drones = [d.model_dump() for d in mission_data.drones]
         self.hikers = [m.model_dump() for m in mission_data.hikers] if mission_data.hikers else []
         self.targets = []
@@ -110,6 +118,18 @@ class Mission:
 
         self.covered_set = set()
 
+    @staticmethod
+    def _derive_home(mission_data: MissionCreate) -> Optional[Dict[str, float]]:
+        drones = list(getattr(mission_data, "drones", []) or [])
+        if drones:
+            lat_total = sum(float(drone.lat) for drone in drones)
+            lon_total = sum(float(drone.lon) for drone in drones)
+            count = len(drones)
+            return {
+                "lat": lat_total / count,
+                "lon": lon_total / count,
+            }
+
     def to_dict(self):
         data = {
             "id": self.id,
@@ -120,6 +140,7 @@ class Mission:
             "completion_elapsed_seconds": self.completion_elapsed_seconds,
             "algorithm": self.algorithm,
             "bounds": self.bounds,
+            "home": self.home,
             "drones": self.drones,
             "hikers": self.hikers,
             "targets": self.targets,

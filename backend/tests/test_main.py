@@ -130,6 +130,7 @@ def test_create_mission():
     data = response.json()
     assert data["name"] == mission_data["name"]
     assert data["bounds"] == mission_data["bounds"]
+    assert data["home"] == {"lat": 34.5, "lon": -117.5}
     
     # Drones get initialized with status="idle" and target coords None
     for res_drone, req_drone in zip(data["drones"], mission_data["drones"]):
@@ -138,6 +139,26 @@ def test_create_mission():
         assert res_drone["lon"] == req_drone["lon"]
         assert res_drone["status"] == "idle"
     assert data["hikers"] == [{**mission_data["hikers"][0], "movement": "moving"}]
+
+
+def test_create_mission_home_uses_average_initial_drone_position():
+    mission_data = {
+        "name": "Average Home Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 35.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.2, "lon": -117.8},
+            {"id": "drone2", "lat": 34.4, "lon": -117.6},
+        ],
+    }
+    response = client.post("/missions", json=mission_data)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["home"] == {"lat": 34.3, "lon": -117.7}
 
 
 def test_get_mission_returns_stored_bounds():
