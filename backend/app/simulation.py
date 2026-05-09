@@ -439,7 +439,6 @@ async def simulation_loop(mission_id: str):
     if not getattr(mission, "status", None):
         mission.status = "searching"
     recall_sent = mission.status == "recalling"
-    hover_sent = mission.status == "paused"
 
     active_strategy = get_algorithm(mission.algorithm)
     active_strategy.initialize(mission)
