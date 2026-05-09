@@ -4,11 +4,13 @@ import { getApiBase, getApiPort } from "./api/runtime";
 import TopBar from "./components/layout/TopBar";
 import MapPanel from "./components/map/MapPanel";
 import DroneModal from "./components/modals/DroneModal";
+import HikerModal from "./components/modals/HikerModal";
 import SearchSummaryModal from "./components/modals/SearchSummaryModal";
 import AlertsPanel from "./components/panels/AlertsPanel";
 import ActionsPanel from "./components/panels/ActionsPanel";
 import BenchmarkPanel from "./components/panels/BenchmarkPanel";
 import FoundHikersPanel from "./components/panels/FoundHikersPanel";
+import HikerSetupPanel from "./components/panels/HikerSetupPanel";
 import LegendPanel from "./components/panels/LegendPanel";
 import NavigationPanel from "./components/panels/NavigationPanel";
 import SwarmStatusPanel from "./components/panels/SwarmStatusPanel";
@@ -20,8 +22,10 @@ import type {
   AlgorithmMetadata,
   Bounds,
   FoundHiker,
+  HikerMovement,
   MissionMetrics,
   MissionState,
+  PlacedHiker,
   SelectedDrone,
   Target,
   TelemetryDrone,
@@ -34,12 +38,22 @@ import type {
   TargetFoundMessage,
   TelemetryMessage
 } from "./types/ws";
-import { normalizeMissionStatus } from "./utils/format";
 import { customAreaBounds } from "./utils/geo";
 import { parseCoordinate } from "./utils/validate";
 
 const DEFAULT_CENTER: [number, number] = [33.5, -117.2];
 const DEFAULT_ZOOM = 13;
+
+function isPointInsideBounds(lat: number, lon: number, bounds: Bounds) {
+  return lat >= bounds.min_lat && lat <= bounds.max_lat && lon >= bounds.min_lon && lon <= bounds.max_lon;
+}
+
+function clampPointToBounds(lat: number, lon: number, bounds: Bounds): [number, number] {
+  return [
+    Math.min(bounds.max_lat, Math.max(bounds.min_lat, lat)),
+    Math.min(bounds.max_lon, Math.max(bounds.min_lon, lon))
+  ];
+}
 
 export default function App() {
   const apiPort = getApiPort();
@@ -70,11 +84,15 @@ export default function App() {
   const [completionElapsedSeconds, setCompletionElapsedSeconds] = useState<number>(0);
   const [completedMetrics, setCompletedMetrics] = useState<MissionMetrics | null>(null);
   const [benchmarkProgress, setBenchmarkProgress] = useState<BenchmarkProgressMessage | null>(null);
+  const [placedHikers, setPlacedHikers] = useState<PlacedHiker[]>([]);
+  const [selectedHikerId, setSelectedHikerId] = useState<string | null>(null);
+  const [isPlacingHiker, setIsPlacingHiker] = useState(false);
 
   // Ref so onMissionStatus can read current elapsed without it being a dep,
   // which would recreate the callback every second and reconnect the WebSocket.
   const elapsedSecondsRef = useRef(elapsedSeconds);
   const runningMissionIdRef = useRef<string | null>(null);
+  const nextHikerNumberRef = useRef(1);
   useEffect(() => {
     elapsedSecondsRef.current = elapsedSeconds;
   }, [elapsedSeconds]);
@@ -214,6 +232,22 @@ export default function App() {
     [completedTargets, hikerLabelById]
   );
 
+  const getPlacedHikerLabel = useCallback(
+    (_hiker: PlacedHiker, index: number) => `Hiker ${index + 1}`,
+    []
+  );
+
+  const selectedPlacedHiker = useMemo(
+    () => placedHikers.find((hiker) => hiker.id === selectedHikerId) ?? null,
+    [placedHikers, selectedHikerId]
+  );
+
+  const selectedPlacedHikerLabel = useMemo(() => {
+    if (!selectedPlacedHiker) return "";
+    const index = placedHikers.findIndex((hiker) => hiker.id === selectedPlacedHiker.id);
+    return getPlacedHikerLabel(selectedPlacedHiker, index >= 0 ? index : 0);
+  }, [getPlacedHikerLabel, placedHikers, selectedPlacedHiker]);
+
   useEffect(() => {
     if (missionStatus !== "searching") return;
     const interval = window.setInterval(() => {
@@ -315,11 +349,22 @@ export default function App() {
     onBenchmarkProgress: setBenchmarkProgress
   });
 
+  const missionActive = missionStatus !== "idle" && missionStatus !== "mission_complete";
+  const missionComplete = missionStatus === "mission_complete";
+  const hikerPlacementEditable = selectedBounds != null && !missionActive && !missionLocked;
+
+  useEffect(() => {
+    if (!hikerPlacementEditable) {
+      setIsPlacingHiker(false);
+    }
+  }, [hikerPlacementEditable]);
+
   const { startMission, stopMission, resetMissionLock, recallDrones, resetDrones } = useMissionActions({
     apiBase,
     missionLocked,
     selectedBounds,
     selectedAlgorithm,
+    placedHikers,
     validDrones,
     validDroneCount,
     mission,
@@ -394,6 +439,8 @@ export default function App() {
       setLon(selectedLon.toFixed(6));
       setMapCenter([selectedLat, selectedLon]);
       setIsValidCoord(true);
+      setPlacedHikers((prev) => prev.filter((hiker) => isPointInsideBounds(hiker.lat, hiker.lon, bounds)));
+      setIsPlacingHiker(false);
     },
     []
   );
@@ -409,6 +456,8 @@ export default function App() {
     const bounds = customAreaBounds(latValue, lonValue, sideKm / 2);
     setSelectedBounds(bounds);
     setMapCenter([latValue, lonValue]);
+    setPlacedHikers((prev) => prev.filter((hiker) => isPointInsideBounds(hiker.lat, hiker.lon, bounds)));
+    setIsPlacingHiker(false);
   }, [lat, lon]);
 
   const onAlgorithmChange = useCallback((algorithm: AlgorithmOption) => {
@@ -420,11 +469,69 @@ export default function App() {
   const onResetMission = useCallback(() => {
     runningMissionIdRef.current = null;
     setDroneTrails({});
+    setPlacedHikers([]);
+    setSelectedHikerId(null);
+    setIsPlacingHiker(false);
     resetMissionLock();
   }, [resetMissionLock]);
 
-  const missionActive = missionStatus !== "idle" && missionStatus !== "mission_complete";
-  const missionComplete = missionStatus === "mission_complete";
+  const onAddHiker = useCallback(() => {
+    if (!selectedBounds || !hikerPlacementEditable) return;
+    setSelectedHikerId(null);
+    setIsPlacingHiker((current) => !current);
+  }, [hikerPlacementEditable, selectedBounds]);
+
+  const onPlaceHiker = useCallback(
+    (nextLat: number, nextLon: number) => {
+      if (!selectedBounds || !hikerPlacementEditable || !isPlacingHiker) return;
+      if (!isPointInsideBounds(nextLat, nextLon, selectedBounds)) return;
+      const newHiker: PlacedHiker = {
+        id: `hiker-${nextHikerNumberRef.current}`,
+        lat: nextLat,
+        lon: nextLon,
+        movement: "stationary"
+      };
+      nextHikerNumberRef.current += 1;
+      setPlacedHikers((prev) => [...prev, newHiker]);
+    },
+    [hikerPlacementEditable, isPlacingHiker, selectedBounds]
+  );
+
+  const onMoveHiker = useCallback(
+    (hikerId: string, nextLat: number, nextLon: number) => {
+      if (!selectedBounds || !hikerPlacementEditable) return;
+      const [lat, lon] = clampPointToBounds(nextLat, nextLon, selectedBounds);
+      setPlacedHikers((prev) => prev.map((hiker) => (hiker.id === hikerId ? { ...hiker, lat, lon } : hiker)));
+    },
+    [hikerPlacementEditable, selectedBounds]
+  );
+
+  const onHikerMovementChange = useCallback(
+    (movement: HikerMovement) => {
+      if (!hikerPlacementEditable || !selectedHikerId) return;
+      setPlacedHikers((prev) =>
+        prev.map((hiker) => (hiker.id === selectedHikerId ? { ...hiker, movement } : hiker))
+      );
+    },
+    [hikerPlacementEditable, selectedHikerId]
+  );
+
+  const onRemoveHiker = useCallback(
+    (hikerId: string) => {
+      if (!hikerPlacementEditable) return;
+      setPlacedHikers((prev) => prev.filter((hiker) => hiker.id !== hikerId));
+      setSelectedHikerId((current) => (current === hikerId ? null : current));
+    },
+    [hikerPlacementEditable]
+  );
+
+  const onClearHikers = useCallback(() => {
+    if (!hikerPlacementEditable) return;
+    setPlacedHikers([]);
+    setSelectedHikerId(null);
+    setIsPlacingHiker(false);
+  }, [hikerPlacementEditable]);
+
   const lostHikerCount = targets.filter((target) => target.status !== "found").length;
 
   return (
@@ -440,8 +547,15 @@ export default function App() {
           missionActive={missionActive}
           validDrones={validDrones}
           targets={targets}
+          placedHikers={placedHikers}
+          hikerPlacementEditable={hikerPlacementEditable}
+          hikerPlacementMode={isPlacingHiker}
           getHikerLabel={getHikerLabel}
+          getPlacedHikerLabel={getPlacedHikerLabel}
           setSelectedDrone={setSelectedDrone}
+          onSelectHiker={setSelectedHikerId}
+          onPlaceHiker={onPlaceHiker}
+          onMoveHiker={onMoveHiker}
           droneTrails={droneTrails}
           selectedAlgorithm={selectedAlgorithm}
           onSelectArea={onSelectArea}
@@ -491,6 +605,17 @@ export default function App() {
             onStopMission={stopMission}
             onResetMission={onResetMission}
           />
+          <HikerSetupPanel
+            selectedBoundsReady={selectedBounds != null}
+            hikers={placedHikers}
+            editable={hikerPlacementEditable}
+            placementMode={isPlacingHiker}
+            getHikerLabel={getPlacedHikerLabel}
+            onAddHiker={onAddHiker}
+            onSelectHiker={setSelectedHikerId}
+            onRemoveHiker={onRemoveHiker}
+            onClearHikers={onClearHikers}
+          />
           <BenchmarkPanel
             apiBase={apiBase}
             selectedBounds={selectedBounds}
@@ -503,6 +628,13 @@ export default function App() {
       </main>
 
       <DroneModal drone={selectedDrone} onClose={() => setSelectedDrone(null)} />
+      <HikerModal
+        hiker={selectedPlacedHiker}
+        label={selectedPlacedHikerLabel}
+        editable={hikerPlacementEditable}
+        onMovementChange={onHikerMovementChange}
+        onClose={() => setSelectedHikerId(null)}
+      />
       <SearchSummaryModal
         isOpen={searchSummaryOpen}
         onClose={() => setSearchSummaryOpen(false)}

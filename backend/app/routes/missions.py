@@ -102,21 +102,37 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
             mission.drones = [d.model_dump() for d in start_data.drones]
         if start_data.algorithm is not None:
             mission.algorithm = start_data.algorithm
+        if start_data.hikers is not None:
+            mission.hikers = [h.model_dump() for h in start_data.hikers]
 
     bounds = mission.bounds
     startup_note = await _ensure_sitl_running_for_mission(mission)
 
     targets = []
-    for _ in range(random.randint(2, 3)):
-        targets.append(
-            {
-                "id": f"tgt-{uuid.uuid4().hex[:8]}",
-                "lat": random.uniform(bounds["min_lat"], bounds["max_lat"]),
-                "lon": random.uniform(bounds["min_lon"], bounds["max_lon"]),
-                "status": "wandering",
-                "assigned_drone_id": None,
-            }
-        )
+    if mission.hikers:
+        for hiker in mission.hikers:
+            targets.append(
+                {
+                    "id": hiker["id"],
+                    "lat": hiker["lat"],
+                    "lon": hiker["lon"],
+                    "status": "found" if hiker.get("found") else "wandering",
+                    "assigned_drone_id": None,
+                    "movement": hiker.get("movement", "moving"),
+                }
+            )
+    else:
+        for _ in range(random.randint(2, 3)):
+            targets.append(
+                {
+                    "id": f"tgt-{uuid.uuid4().hex[:8]}",
+                    "lat": random.uniform(bounds["min_lat"], bounds["max_lat"]),
+                    "lon": random.uniform(bounds["min_lon"], bounds["max_lon"]),
+                    "status": "wandering",
+                    "assigned_drone_id": None,
+                    "movement": "moving",
+                }
+            )
     mission.targets = targets
     mission.grid = build_search_grid(bounds, n=15)
     mission._dense_coverage_grid = build_dense_coverage_grid(bounds)

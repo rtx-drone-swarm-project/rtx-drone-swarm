@@ -7,22 +7,30 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./components/map/MapPanel", () => ({
-  default: (props: { onSelectArea: (lat: number, lon: number, bounds: any) => void }) => {
+  default: (props: {
+    onSelectArea: (lat: number, lon: number, bounds: any) => void;
+    onPlaceHiker?: (lat: number, lon: number) => void;
+  }) => {
     mocks.mapPanelProps.push(props);
     return (
-      <button
-        type="button"
-        onClick={() =>
-          props.onSelectArea(33.5, -117.2, {
-            min_lat: 33.45,
-            max_lat: 33.55,
-            min_lon: -117.25,
-            max_lon: -117.15
-          })
-        }
-      >
-        Select Area
-      </button>
+      <>
+        <button
+          type="button"
+          onClick={() =>
+            props.onSelectArea(33.5, -117.2, {
+              min_lat: 33.45,
+              max_lat: 33.55,
+              min_lon: -117.25,
+              max_lon: -117.15
+            })
+          }
+        >
+          Select Area
+        </button>
+        <button type="button" onClick={() => props.onPlaceHiker?.(33.5, -117.2)}>
+          Place Hiker On Map
+        </button>
+      </>
     );
   }
 }));
@@ -195,5 +203,62 @@ describe("App integration", () => {
       const latestProps = mocks.mapPanelProps[mocks.mapPanelProps.length - 1];
       expect(latestProps.droneTrails["d1"]).toEqual([[33.5, -117.2], [33.51, -117.21]]);
     });
+  });
+
+  it("sends manually placed hikers when starting a mission", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+
+    const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/benchmark/runs")) {
+        return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
+      }
+      if (url.endsWith("/missions")) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m2", status: "idle", progress: 0 }) });
+      }
+      if (url.endsWith("/missions/m2/start")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m2",
+            status: "searching",
+            progress: 0,
+            targets: [{ id: "hiker-1", lat: 33.5, lon: -117.2, status: "wandering", movement: "moving" }]
+          })
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ algorithms: [] }) });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Hiker" }));
+    expect(screen.queryByRole("button", { name: "Moving" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
+    fireEvent.click(screen.getByText("Hiker 1"));
+    fireEvent.click(screen.getByRole("button", { name: "Moving" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start Mission" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m2/start"))).toBe(true);
+    });
+
+    const createMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions"));
+    expect(createMissionRequest).toBeTruthy();
+    if (!createMissionRequest) throw new Error("missing create mission request");
+    const body = JSON.parse(String(createMissionRequest[1]?.body));
+
+    expect(body.hikers).toEqual([
+      {
+        id: "hiker-1",
+        lat: 33.5,
+        lon: -117.2,
+        found: false,
+        movement: "moving"
+      }
+    ]);
   });
 });

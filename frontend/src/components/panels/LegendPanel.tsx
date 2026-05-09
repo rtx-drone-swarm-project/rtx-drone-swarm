@@ -16,6 +16,14 @@ export default function LegendPanel() {
         Confirmer drone
       </div>
       <div className="legend-item">
+        <span className="legend-dot placed-stationary" />
+        Placed stationary hiker
+      </div>
+      <div className="legend-item">
+        <span className="legend-dot placed-moving" />
+        Placed moving hiker
+      </div>
+      <div className="legend-item">
         <span className="legend-dot target" />
         Hiker detected / wandering target
       </div>
@@ -32,7 +40,7 @@ export default function LegendPanel() {
         Search area boundary
       </div>
       <div className="legend-help">
-        Drag to draw area · Scroll to zoom · Click drone for details
+        Shift-drag to draw area · Drag hiker markers before start · Click drone or hiker for details
       </div>
     </CollapsibleSection>
   );

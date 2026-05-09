@@ -39,6 +39,7 @@ class Hiker(BaseModel):
     lon: float
     alt: Optional[float] = None
     found: bool = False
+    movement: Literal["stationary", "moving"] = "moving"
 
 class MissionCreate(BaseModel):
     """Payload for creating a mission with bounds, drones, and optional hikers."""

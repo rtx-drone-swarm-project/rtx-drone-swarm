@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 import { createMissionClient } from "../api/missionClient";
-import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionState, Target, ValidDrone } from "../types/mission";
+import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionState, PlacedHiker, Target, ValidDrone } from "../types/mission";
 
 type UseMissionActionsArgs = {
   apiBase: string;
   missionLocked: boolean;
   selectedBounds: Bounds | null;
   selectedAlgorithm: AlgorithmOption;
+  placedHikers: PlacedHiker[];
   validDrones: ValidDrone[];
   validDroneCount: number;
   mission: MissionState;
@@ -54,6 +55,7 @@ export default function useMissionActions({
   missionLocked,
   selectedBounds,
   selectedAlgorithm,
+  placedHikers,
   validDrones,
   validDroneCount,
   mission,
@@ -104,19 +106,20 @@ export default function useMissionActions({
     setHikerLabelById({});
 
     try {
+      const placedHikerPayload = placedHikers.map((hiker) => ({
+        id: hiker.id,
+        lat: hiker.lat,
+        lon: hiker.lon,
+        found: false,
+        movement: hiker.movement
+      }));
+
       const created = await missionClient.createMission({
         name: `SAR-${new Date().toISOString()}`,
         bounds: selectedBounds,
         drones: missionDrones,
         algorithm: selectedAlgorithm,
-        hikers: [
-          {
-            id: "hiker-1",
-            lat: selectedBounds.min_lat + Math.random() * (selectedBounds.max_lat - selectedBounds.min_lat),
-            lon: selectedBounds.min_lon + Math.random() * (selectedBounds.max_lon - selectedBounds.min_lon),
-            found: false
-          }
-        ]
+        ...(placedHikerPayload.length ? { hikers: placedHikerPayload } : {})
       });
 
       setMission(created);

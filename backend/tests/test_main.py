@@ -126,7 +126,7 @@ def test_create_mission():
         assert res_drone["lat"] == req_drone["lat"]
         assert res_drone["lon"] == req_drone["lon"]
         assert res_drone["status"] == "idle"
-    assert data["hikers"] == mission_data["hikers"]
+    assert data["hikers"] == [{**mission_data["hikers"][0], "movement": "moving"}]
 
 
 def test_get_mission_returns_stored_bounds():
@@ -192,6 +192,71 @@ def test_start_mission():
     second_start_response = client.post(f"/missions/{mission_id}/start")
     assert second_start_response.status_code == 400
     assert second_start_response.json() == {"detail": "Only 'idle' missions can be started"}
+
+
+def test_start_mission_uses_supplied_hikers():
+    mission_data = {
+        "name": "Manual Hiker Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 35.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.5, "lon": -117.5}
+        ],
+        "hikers": [
+            {"id": "hiker-1", "lat": 34.6, "lon": -117.6, "found": False, "movement": "stationary"},
+            {"id": "hiker-2", "lat": 34.7, "lon": -117.7, "found": False, "movement": "moving"},
+        ],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    start_response = client.post(f"/missions/{mission_id}/start")
+    assert start_response.status_code == 200
+    targets = start_response.json()["targets"]
+
+    assert targets == [
+        {
+            "id": "hiker-1",
+            "lat": 34.6,
+            "lon": -117.6,
+            "status": "wandering",
+            "assigned_drone_id": None,
+            "movement": "stationary",
+        },
+        {
+            "id": "hiker-2",
+            "lat": 34.7,
+            "lon": -117.7,
+            "status": "wandering",
+            "assigned_drone_id": None,
+            "movement": "moving",
+        },
+    ]
+
+
+def test_stationary_targets_do_not_wander():
+    mission = create_test_mission()
+    mission.targets = [
+        {
+            "id": "hiker-1",
+            "lat": 0.02,
+            "lon": 0.02,
+            "status": "wandering",
+            "movement": "stationary",
+        }
+    ]
+    mission.drones = [{"id": "drone1", "lat": 0.0, "lon": 0.0}]
+
+    simulation_module._update_targets_for_tick(mission)
+
+    assert mission.targets[0]["lat"] == 0.02
+    assert mission.targets[0]["lon"] == 0.02
+    assert "vx" not in mission.targets[0]
     
 def test_stop_mission():
     mission_data = {

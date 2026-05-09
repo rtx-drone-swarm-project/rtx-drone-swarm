@@ -310,7 +310,8 @@ def _update_targets_for_tick(mission: Mission) -> None:
     for target in mission.targets:
         if target.get("status", "wandering") != "wandering":
             continue
-        if not getattr(mission, "_static_targets", False):
+        target_can_move = target.get("movement", "moving") != "stationary"
+        if target_can_move and not getattr(mission, "_static_targets", False):
             if "vx" not in target:
                 angle = rng.uniform(0, 2 * math.pi)
                 target["vx"] = SPEED / 2 * math.cos(angle)

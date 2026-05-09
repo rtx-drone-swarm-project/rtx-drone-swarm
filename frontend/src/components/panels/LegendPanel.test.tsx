@@ -9,6 +9,8 @@ describe("LegendPanel", () => {
     expect(screen.getByText("Drone")).toBeTruthy();
     expect(screen.getByText("Finder drone")).toBeTruthy();
     expect(screen.getByText("Confirmer drone")).toBeTruthy();
+    expect(screen.getByText("Placed stationary hiker")).toBeTruthy();
+    expect(screen.getByText("Placed moving hiker")).toBeTruthy();
     expect(screen.getByText("Hiker detected / wandering target")).toBeTruthy();
     expect(screen.getByText("Hiker being confirmed")).toBeTruthy();
     expect(screen.getByText("Hiker found")).toBeTruthy();
@@ -18,9 +20,9 @@ describe("LegendPanel", () => {
   it("renders the compact how-to hint and not the old verbose note", () => {
     render(<LegendPanel />);
 
-    expect(screen.getByText(/Drag to draw area/i)).toBeTruthy();
-    expect(screen.getByText(/Scroll to zoom/i)).toBeTruthy();
-    expect(screen.getByText(/Click drone for details/i)).toBeTruthy();
+    expect(screen.getByText(/Shift-drag to draw area/i)).toBeTruthy();
+    expect(screen.getByText(/Drag hiker markers before start/i)).toBeTruthy();
+    expect(screen.getByText(/Click drone or hiker for details/i)).toBeTruthy();
 
     expect(screen.queryByText(/Drone call signs appear on hover/i)).toBeNull();
     expect(screen.queryByText(/Blue marks finder drones/i)).toBeNull();

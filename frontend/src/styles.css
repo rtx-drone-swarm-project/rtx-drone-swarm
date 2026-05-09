@@ -102,6 +102,10 @@ body,
   position: relative;
 }
 
+.map-wrap.is-placing-hiker .leaflet-container {
+  cursor: crosshair;
+}
+
 .left-rail,
 .right-rail {
   position: absolute;
@@ -390,6 +394,22 @@ body,
   cursor: not-allowed;
 }
 
+.action-btn.hiker-add {
+  background: rgb(37 99 235 / 0.92);
+  color: #eff6ff;
+}
+
+.action-btn.hiker-add.active {
+  background: #f97316;
+  color: #fff7ed;
+}
+
+.action-btn.hiker-add:disabled {
+  background: rgb(51 65 85 / 0.5);
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
 .algorithm-selector {
   margin-bottom: 12px;
 }
@@ -438,6 +458,73 @@ body,
   color: #94a3b8;
   font-size: 12px;
   margin-bottom: 8px;
+}
+
+.hiker-setup.is-disabled {
+  opacity: 0.72;
+}
+
+.hiker-list {
+  display: grid;
+  gap: 8px;
+}
+
+.hiker-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.hiker-list-main {
+  min-width: 0;
+  border: 1px solid rgb(71 85 105 / 0.9);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgb(15 23 42 / 0.72);
+  color: #e2e8f0;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+}
+
+.hiker-list-main:hover {
+  border-color: rgb(96 165 250 / 0.8);
+}
+
+.hiker-list-main span,
+.hiker-list-main strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hiker-list-main strong {
+  color: #bfdbfe;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hiker-remove,
+.hiker-clear {
+  border: 1px solid rgb(239 68 68 / 0.45);
+  border-radius: 8px;
+  background: rgb(127 29 29 / 0.42);
+  color: #fecaca;
+  cursor: pointer;
+}
+
+.hiker-remove:disabled,
+.hiker-clear:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.hiker-clear {
+  width: 100%;
+  padding: 7px 10px;
+  font-weight: 600;
 }
 
 .warning-text {
@@ -640,6 +727,14 @@ body,
   background: #ef4444;
 }
 
+.legend-dot.placed-stationary {
+  background: #22c55e;
+}
+
+.legend-dot.placed-moving {
+  background: #f97316;
+}
+
 .legend-dot.confirming {
   background: #f59e0b;
 }
@@ -728,6 +823,11 @@ body,
   box-shadow: 0 16px 40px rgb(0 0 0 / 0.4);
 }
 
+.modal-panel.is-disabled {
+  border-color: #475569;
+  background: #111827;
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -801,6 +901,37 @@ body,
   display: block;
   color: #94a3b8;
   margin-bottom: 4px;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: rgb(15 23 42 / 0.88);
+}
+
+.segmented-control button {
+  min-width: 0;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: transparent;
+  color: #cbd5e1;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.segmented-control button.active {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.segmented-control button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
 }
 
 .search-summary-body {
@@ -1008,6 +1139,16 @@ body,
 .target-label-marker {
   background: none !important;
   border: none !important;
+}
+
+.placed-hiker-label-marker {
+  background: none !important;
+  border: none !important;
+}
+
+.placed-hiker-marker.is-locked {
+  opacity: 0.62;
+  filter: grayscale(0.45);
 }
 
 @media (max-width: 1100px) {
