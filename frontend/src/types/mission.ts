@@ -227,6 +227,7 @@ export type MissionCreateRequest = {
   name: string;
   bounds: Bounds;
   drones: MissionDroneInput[];
+  home?: Coordinate;
   /** Must match backend-discovered algorithm keys; echoed on the mission until start overrides. */
   algorithm?: AlgorithmOption;
   hikers?: Array<{

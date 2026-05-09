@@ -161,6 +161,27 @@ def test_create_mission_home_uses_average_initial_drone_position():
     assert data["home"] == {"lat": 34.3, "lon": -117.7}
 
 
+def test_create_mission_uses_explicit_home_when_provided():
+    mission_data = {
+        "name": "Explicit Home Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 35.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.2, "lon": -117.8},
+            {"id": "drone2", "lat": 34.4, "lon": -117.6},
+        ],
+        "home": {"lat": 34.9, "lon": -117.1},
+    }
+    response = client.post("/missions", json=mission_data)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["home"] == {"lat": 34.9, "lon": -117.1}
+
+
 def test_get_mission_returns_stored_bounds():
     mission_data = {
         "name": "Mission Lookup Test",

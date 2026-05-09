@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { useMap } from "react-leaflet";
-import type { ValidDrone } from "../../types/mission";
+import type { Coordinate, ValidDrone } from "../../types/mission";
 
 type MapControlStackProps = {
   drones: ValidDrone[];
+  homeLocation?: Coordinate | null;
 };
 
-export default function MapControlStack({ drones }: MapControlStackProps) {
+export default function MapControlStack({ drones, homeLocation }: MapControlStackProps) {
   const map = useMap();
   const hasDrones = drones.length > 0;
+  const hasHome = homeLocation != null;
   const [controlsBusy, setControlsBusy] = useState(false);
   const controlsBusyRef = useRef(false);
   const unlockTimerRef = useRef<number | null>(null);
@@ -48,6 +50,17 @@ export default function MapControlStack({ drones }: MapControlStackProps) {
       const avgLat = drones.reduce((sum, drone) => sum + drone.lat, 0) / drones.length;
       const avgLon = drones.reduce((sum, drone) => sum + drone.lon, 0) / drones.length;
       map.flyTo([avgLat, avgLon], getBoundedZoom(map.getZoom() + 1), { animate: true, duration: 0.7 });
+    });
+  };
+
+  const flyToHome = () => {
+    if (!homeLocation) return;
+    runWhenReady("moveend", 1000, () => {
+      map.stop();
+      map.flyTo([homeLocation.lat, homeLocation.lon], getBoundedZoom(map.getZoom() + 1), {
+        animate: true,
+        duration: 0.7
+      });
     });
   };
 
@@ -101,6 +114,27 @@ export default function MapControlStack({ drones }: MapControlStackProps) {
             d="M4 12.25 20 4l-4.2 16-3.25-5.1L7.5 18l-1.25-1.25 3.1-5.05L4 12.25Z"
             fill="currentColor"
           />
+        </svg>
+      </button>
+      <button
+        type="button"
+        className="map-control-btn"
+        onPointerDown={stopMapInteraction}
+        onPointerUp={stopMapInteraction}
+        onMouseDown={stopMapInteraction}
+        onMouseUp={stopMapInteraction}
+        onDoubleClick={stopMapInteraction}
+        onClick={(event) => handleControlClick(event, flyToHome)}
+        title="Pan to home"
+        aria-label="Pan to home"
+        disabled={!hasHome || controlsBusy}
+      >
+        <svg viewBox="0 0 24 24" fill="none" width="18" height="18" aria-hidden="true">
+          <path
+            d="M6.5 10.75 12 6l5.5 4.75V18a1 1 0 0 1-1 1H13v-4h-2v4H7.5a1 1 0 0 1-1-1v-7.25Z"
+            fill="currentColor"
+          />
+          <path d="M4.75 11.5 12 5.25l7.25 6.25" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
       <button

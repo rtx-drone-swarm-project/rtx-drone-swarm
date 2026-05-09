@@ -164,7 +164,7 @@ export default function MapPanel({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution="&copy; OpenStreetMap contributors"
         />
-        <MapControlStack drones={validDrones} />
+        <MapControlStack drones={validDrones} homeLocation={homeLocation} />
         <MapClickSelector enabled={hikerPlacementMode && hikerPlacementEditable} onSelect={onPlaceHiker} />
         <MapBBoxDrawer
           enabled={!missionActive && !hikerPlacementMode}

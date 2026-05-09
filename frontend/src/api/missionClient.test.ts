@@ -109,6 +109,32 @@ describe("missionClient", () => {
     ).rejects.toThrow("bad request");
   });
 
+  it("includes explicit home in the mission creation payload when provided", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "idle" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMissionClient("http://localhost:8000");
+    await client.createMission({
+      name: "test",
+      bounds: { min_lat: 1, max_lat: 2, min_lon: 3, max_lon: 4 },
+      drones: [{ id: "d1", lat: 1.5, lon: 3.5 }],
+      home: { lat: 9.1, lon: 10.2 }
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/missions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          name: "test",
+          bounds: { min_lat: 1, max_lat: 2, min_lon: 3, max_lon: 4 },
+          drones: [{ id: "d1", lat: 1.5, lon: 3.5 }],
+          home: { lat: 9.1, lon: 10.2 }
+        })
+      })
+    );
+  });
+
   it("starts and reads benchmark runs", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ run_id: "b1", status: "running" }) })

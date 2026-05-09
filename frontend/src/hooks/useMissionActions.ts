@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { createMissionClient } from "../api/missionClient";
-import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionState, PlacedHiker, Target, ValidDrone } from "../types/mission";
+import type { AlgorithmOption, Bounds, Coordinate, FoundHiker, MissionDroneInput, MissionState, PlacedHiker, Target, ValidDrone } from "../types/mission";
 import type { MissionStatus } from "../types/ws";
 
 type UseMissionActionsArgs = {
@@ -8,6 +8,7 @@ type UseMissionActionsArgs = {
   missionLocked: boolean;
   selectedBounds: Bounds | null;
   selectedAlgorithm: AlgorithmOption;
+  selectedHomeLocation: Coordinate | null;
   placedHikers: PlacedHiker[];
   validDrones: ValidDrone[];
   validDroneCount: number;
@@ -56,6 +57,7 @@ export default function useMissionActions({
   missionLocked,
   selectedBounds,
   selectedAlgorithm,
+  selectedHomeLocation,
   placedHikers,
   validDrones,
   validDroneCount,
@@ -119,6 +121,7 @@ export default function useMissionActions({
         name: `SAR-${new Date().toISOString()}`,
         bounds: selectedBounds,
         drones: missionDrones,
+        ...(selectedHomeLocation ? { home: selectedHomeLocation } : {}),
         algorithm: selectedAlgorithm,
         ...(placedHikerPayload.length ? { hikers: placedHikerPayload } : {})
       });

@@ -109,6 +109,14 @@ describe("App integration", () => {
       ]
     });
 
+    const homeSection = screen.getByText("Home").closest("section");
+    expect(homeSection).toBeTruthy();
+    if (!homeSection) throw new Error("Home section not found");
+    const homeInputs = within(homeSection).getAllByRole("textbox");
+    fireEvent.change(homeInputs[0], { target: { value: "34.000000" } });
+    fireEvent.change(homeInputs[1], { target: { value: "-118.000000" } });
+    fireEvent.click(within(homeSection).getByRole("button", { name: "Set Mission Home" }));
+
     fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
     fireEvent.click(screen.getByRole("button", { name: "Start Mission" }));
 
@@ -143,6 +151,7 @@ describe("App integration", () => {
     expect(body.drones[0]).not.toHaveProperty("mode");
     expect(body.drones[0]).not.toHaveProperty("telemetry_source");
     expect(body.drones[0]).not.toHaveProperty("armed");
+    expect(body.home).toEqual({ lat: 34, lon: -118 });
 
     socket.sendMessage({
       type: "mission_status",
@@ -209,6 +218,35 @@ describe("App integration", () => {
     await waitFor(() => {
       const latestProps = mocks.mapPanelProps[mocks.mapPanelProps.length - 1];
       expect(latestProps.droneTrails["d1"]).toEqual([[33.5, -117.2], [33.51, -117.21]]);
+    });
+  });
+
+  it("locks the home panel while mission status is mission_complete", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal("fetch", vi.fn());
+
+    render(<App />);
+
+    const socket = MockWebSocket.instances[0];
+    socket.sendMessage({
+      type: "mission_status",
+      mission_id: "m1",
+      status: "mission_complete",
+      progress: 100,
+      targets: []
+    });
+
+    const homeSection = screen.getByText("Home").closest("section");
+    expect(homeSection).toBeTruthy();
+    if (!homeSection) throw new Error("Home section not found");
+
+    await waitFor(() => {
+      const homePanel = within(homeSection);
+      const [homeLatInput, homeLonInput] = homePanel.getAllByRole("textbox") as HTMLInputElement[];
+      const setHomeButton = homePanel.getByRole("button", { name: "Set Mission Home" }) as HTMLButtonElement;
+      expect(homeLatInput.disabled).toBe(true);
+      expect(homeLonInput.disabled).toBe(true);
+      expect(setHomeButton.disabled).toBe(true);
     });
   });
 

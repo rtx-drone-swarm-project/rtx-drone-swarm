@@ -53,6 +53,7 @@ class MissionCreate(BaseModel):
     name: str
     bounds: Bounds
     drones: List[Drone]
+    home: Optional[Coordinate] = None
     hikers: Optional[List[Hiker]] = None
     algorithm: Optional[str] = "voronoi"
 
@@ -120,6 +121,10 @@ class Mission:
 
     @staticmethod
     def _derive_home(mission_data: MissionCreate) -> Optional[Dict[str, float]]:
+        explicit_home = getattr(mission_data, "home", None)
+        if explicit_home is not None:
+            return explicit_home.model_dump()
+
         drones = list(getattr(mission_data, "drones", []) or [])
         if drones:
             lat_total = sum(float(drone.lat) for drone in drones)

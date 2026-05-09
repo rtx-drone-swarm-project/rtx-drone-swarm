@@ -11,6 +11,7 @@ import ActionsPanel from "./components/panels/ActionsPanel";
 import BenchmarkPanel from "./components/panels/BenchmarkPanel";
 import FoundHikersPanel from "./components/panels/FoundHikersPanel";
 import HikerSetupPanel from "./components/panels/HikerSetupPanel";
+import HomePanel from "./components/panels/HomePanel";
 import LegendPanel from "./components/panels/LegendPanel";
 import NavigationPanel from "./components/panels/NavigationPanel";
 import SwarmStatusPanel from "./components/panels/SwarmStatusPanel";
@@ -29,7 +30,8 @@ import type {
   SelectedDrone,
   Target,
   TelemetryDrone,
-  ValidDrone
+  ValidDrone,
+  Coordinate
 } from "./types/mission";
 import type {
   BenchmarkProgressMessage,
@@ -56,6 +58,13 @@ function clampPointToBounds(lat: number, lon: number, bounds: Bounds): [number, 
   ];
 }
 
+function averageCoordinate(drones: ValidDrone[]): Coordinate | null {
+  if (!drones.length) return null;
+  const lat = drones.reduce((sum, drone) => sum + drone.lat, 0) / drones.length;
+  const lon = drones.reduce((sum, drone) => sum + drone.lon, 0) / drones.length;
+  return { lat, lon };
+}
+
 export default function App() {
   const apiPort = getApiPort();
   const apiBase = useMemo(() => getApiBase(apiPort), [apiPort]);
@@ -72,6 +81,11 @@ export default function App() {
   const [lat, setLat] = useState(DEFAULT_CENTER[0].toFixed(6));
   const [lon, setLon] = useState(DEFAULT_CENTER[1].toFixed(6));
   const [isValidCoord, setIsValidCoord] = useState(true);
+  const [homeLat, setHomeLat] = useState(DEFAULT_CENTER[0].toFixed(6));
+  const [homeLon, setHomeLon] = useState(DEFAULT_CENTER[1].toFixed(6));
+  const [isValidHomeCoord, setIsValidHomeCoord] = useState(true);
+  const [homeLocation, setHomeLocation] = useState<Coordinate | null>(null);
+  const [homeManuallySet, setHomeManuallySet] = useState(false);
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(DEFAULT_CENTER);
   const [mapAutocentered, setMapAutocentered] = useState(false);
   const [selectedBounds, setSelectedBounds] = useState<Bounds | null>(null);
@@ -165,6 +179,8 @@ export default function App() {
   );
 
   const validDroneCount = validDrones.length;
+  const derivedSpawnHome = useMemo(() => averageCoordinate(validDrones), [validDrones]);
+  const effectiveHomeLocation = homeLocation ?? mission?.home ?? derivedSpawnHome;
 
   useEffect(() => {
     let cancelled = false;
@@ -353,6 +369,7 @@ export default function App() {
   const missionActive = missionStatus !== "idle" && missionStatus !== "mission_complete";
   const missionComplete = missionStatus === "mission_complete";
   const hikerPlacementEditable = selectedBounds != null && !missionActive && !missionLocked;
+  const homeEditingLocked = missionStatus === "recalling" || missionStatus === "mission_complete";
 
   useEffect(() => {
     if (!hikerPlacementEditable) {
@@ -365,6 +382,7 @@ export default function App() {
     missionLocked,
     selectedBounds,
     selectedAlgorithm,
+    selectedHomeLocation: effectiveHomeLocation,
     placedHikers,
     validDrones,
     validDroneCount,
@@ -405,6 +423,22 @@ export default function App() {
       return discovered.length ? [...prev, ...discovered] : prev;
     });
   }, [assignHikerLabels, targets]);
+
+  useEffect(() => {
+    if (homeManuallySet || mission?.home) return;
+    if (!derivedSpawnHome) return;
+    setHomeLat(derivedSpawnHome.lat.toFixed(6));
+    setHomeLon(derivedSpawnHome.lon.toFixed(6));
+  }, [derivedSpawnHome, homeManuallySet, mission?.home]);
+
+  useEffect(() => {
+    if (!mission?.home) return;
+    setHomeLocation(mission.home);
+    setHomeLat(mission.home.lat.toFixed(6));
+    setHomeLon(mission.home.lon.toFixed(6));
+    setHomeManuallySet(false);
+    setIsValidHomeCoord(true);
+  }, [mission?.home]);
 
   const applyNavigation = useCallback((nextLat: string, nextLon: string) => {
     const latValue = parseCoordinate(nextLat, -90, 90);
@@ -461,6 +495,47 @@ export default function App() {
     setIsPlacingHiker(false);
   }, [lat, lon]);
 
+  const applyHomeNavigation = useCallback((nextLat: string, nextLon: string) => {
+    const latValue = parseCoordinate(nextLat, -90, 90);
+    const lonValue = parseCoordinate(nextLon, -180, 180);
+    if (latValue == null || lonValue == null) {
+      setIsValidHomeCoord(false);
+      return;
+    }
+    setIsValidHomeCoord(true);
+  }, []);
+
+  const onHomeLatitudeChange = useCallback(
+    (nextLat: string) => {
+      setHomeManuallySet(true);
+      setHomeLat(nextLat);
+      applyHomeNavigation(nextLat, homeLon);
+    },
+    [applyHomeNavigation, homeLon]
+  );
+
+  const onHomeLongitudeChange = useCallback(
+    (nextLon: string) => {
+      setHomeManuallySet(true);
+      setHomeLon(nextLon);
+      applyHomeNavigation(homeLat, nextLon);
+    },
+    [applyHomeNavigation, homeLat]
+  );
+
+  const onSetMissionHome = useCallback(() => {
+    const latValue = parseCoordinate(homeLat, -90, 90);
+    const lonValue = parseCoordinate(homeLon, -180, 180);
+    if (latValue == null || lonValue == null) {
+      setIsValidHomeCoord(false);
+      return;
+    }
+    setIsValidHomeCoord(true);
+    setHomeLocation({ lat: latValue, lon: lonValue });
+    setHomeManuallySet(true);
+    setMapCenter([latValue, lonValue]);
+  }, [homeLat, homeLon]);
+
   const onAlgorithmChange = useCallback((algorithm: AlgorithmOption) => {
     setSelectedAlgorithm(algorithm);
     runningMissionIdRef.current = null;
@@ -471,6 +546,8 @@ export default function App() {
     runningMissionIdRef.current = null;
     nextHikerNumberRef.current = 1;
     setDroneTrails({});
+    setHomeLocation(null);
+    setHomeManuallySet(false);
     setPlacedHikers([]);
     setSelectedHikerId(null);
     setIsPlacingHiker(false);
@@ -547,7 +624,7 @@ export default function App() {
           defaultZoom={DEFAULT_ZOOM}
           mapCenter={mapCenter}
           selectedBounds={selectedBounds}
-          homeLocation={mission?.home ?? null}
+          homeLocation={effectiveHomeLocation}
           missionActive={missionActive}
           validDrones={validDrones}
           targets={targets}
@@ -630,6 +707,15 @@ export default function App() {
             algorithmOptions={algorithmOptions}
           />
           <FoundHikersPanel hikers={foundHikersSorted} getHikerLabel={getHikerLabel} />
+          <HomePanel
+            lat={homeLat}
+            lon={homeLon}
+            isValidCoord={isValidHomeCoord}
+            disabled={homeEditingLocked}
+            onLatitudeChange={onHomeLatitudeChange}
+            onLongitudeChange={onHomeLongitudeChange}
+            onSetMissionHome={onSetMissionHome}
+          />
         </aside>
       </main>
 

@@ -94,6 +94,7 @@ describe("MapPanel", () => {
   it("renders the custom map controls", () => {
     render(<MapPanel {...defaultProps} />);
     expect(screen.getByRole("button", { name: "Pan to drones" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Pan to home" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Zoom in" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Zoom out" })).toBeTruthy();
   });
@@ -119,6 +120,25 @@ describe("MapPanel", () => {
     render(<MapPanel {...defaultProps} validDrones={[]} />);
     fireEvent.click(screen.getByRole("button", { name: "Pan to drones" }));
     expect(flyTo).not.toHaveBeenCalled();
+  });
+
+  it("pan to home button is disabled when no home location is available", () => {
+    render(<MapPanel {...defaultProps} />);
+    const btn = screen.getByRole("button", { name: "Pan to home" }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+
+  it("flies to the home location when pan to home is clicked", () => {
+    render(<MapPanel {...defaultProps} homeLocation={{ lat: 34.2, lon: -118.2 }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Pan to home" }));
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(once).toHaveBeenCalledWith("moveend", expect.any(Function));
+    expect(flyTo).toHaveBeenCalledWith([34.2, -118.2], 14, {
+      animate: true,
+      duration: 0.7
+    });
   });
 
   it("flies to the average drone location and zooms in slightly", () => {
