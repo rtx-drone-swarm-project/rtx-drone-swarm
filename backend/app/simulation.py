@@ -457,7 +457,7 @@ async def simulation_loop(mission_id: str):
     while True:
         if mission_db.get(mission_id) is not mission:
             break
-        if mission.status in ["idle", "mission_complete"]:
+        if mission.status in ["idle", "paused", "mission_complete"]:
             break
 
         # Pull live SITL state into the mission before making any coverage or
