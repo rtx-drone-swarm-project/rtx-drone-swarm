@@ -124,19 +124,15 @@ def _assign_confirmation_drone(mission: Mission, target: dict, finder_drone: dic
 
 
 def _send_live_drone_hold_position(mission, live_drone_ids):
-    states = sitl_bridge.get_states_by_sysid()
-
     for drone in mission.drones:
         sysid = drone.get("sysid")
 
         if str(drone.get("id")) not in live_drone_ids:
             continue
 
-        state = states.get(sysid, {})
-
-        lat = state.get("lat")
-        lon = state.get("lon")
-        alt = state.get("alt")
+        lat = drone.get("lat")
+        lon = drone.get("lon")
+        alt = drone.get("alt")
 
         if lat is None or lon is None or alt is None:
             continue
