@@ -1,24 +1,25 @@
 import { useMemo } from "react";
 import { createMissionClient } from "../api/missionClient";
-import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionState, Target, ValidDrone } from "../types/mission";
-import { normalizeMissionStatus } from "../utils/format";
+import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionState, PlacedHiker, Target, ValidDrone } from "../types/mission";
+import type { MissionStatus } from "../types/ws";
 
 type UseMissionActionsArgs = {
   apiBase: string;
   missionLocked: boolean;
   selectedBounds: Bounds | null;
   selectedAlgorithm: AlgorithmOption;
+  placedHikers: PlacedHiker[];
   validDrones: ValidDrone[];
   validDroneCount: number;
   mission: MissionState;
   setMission: (value: MissionState) => void;
-  setSearchStatus: (value: string) => void;
+  setMissionStatus: (value: MissionStatus) => void;
   setProgress: (value: number) => void;
   setTargets: (value: Target[]) => void;
   setElapsedSeconds: (value: number) => void;
   setMissionLocked: (value: boolean) => void;
   setFoundHikers: (value: FoundHiker[]) => void;
-  setHikerSummaryOpen: (value: boolean) => void;
+  setSearchSummaryOpen: (value: boolean) => void;
   setCompletedTargets: (value: Target[]) => void;
   setSummaryMissionId: (value: string | number | null) => void;
   setHikerLabelById: (value: Record<string, number>) => void;
@@ -55,17 +56,18 @@ export default function useMissionActions({
   missionLocked,
   selectedBounds,
   selectedAlgorithm,
+  placedHikers,
   validDrones,
   validDroneCount,
   mission,
   setMission,
-  setSearchStatus,
+  setMissionStatus,
   setProgress,
   setTargets,
   setElapsedSeconds,
   setMissionLocked,
   setFoundHikers,
-  setHikerSummaryOpen,
+  setSearchSummaryOpen,
   setCompletedTargets,
   setSummaryMissionId,
   setHikerLabelById
@@ -95,40 +97,41 @@ export default function useMissionActions({
       );
     }
 
-    setSearchStatus("running");
+    setMissionStatus("searching");
     setElapsedSeconds(0);
     setMissionLocked(false);
     setFoundHikers([]);
-    setHikerSummaryOpen(false);
+    setSearchSummaryOpen(false);
     setCompletedTargets([]);
     setSummaryMissionId(null);
     setHikerLabelById({});
 
     try {
+      const placedHikerPayload = placedHikers.map((hiker) => ({
+        id: hiker.id,
+        lat: hiker.lat,
+        lon: hiker.lon,
+        found: false,
+        movement: hiker.movement
+      }));
+
       const created = await missionClient.createMission({
         name: `SAR-${new Date().toISOString()}`,
         bounds: selectedBounds,
         drones: missionDrones,
         algorithm: selectedAlgorithm,
-        hikers: [
-          {
-            id: "hiker-1",
-            lat: selectedBounds.min_lat + Math.random() * (selectedBounds.max_lat - selectedBounds.min_lat),
-            lon: selectedBounds.min_lon + Math.random() * (selectedBounds.max_lon - selectedBounds.min_lon),
-            found: false
-          }
-        ]
+        ...(placedHikerPayload.length ? { hikers: placedHikerPayload } : {})
       });
 
       setMission(created);
 
       const started = await missionClient.startMission(created.id, selectedAlgorithm);
       setMission(started);
-      setSearchStatus(normalizeMissionStatus(started.status ?? "running"));
+      setMissionStatus("searching");
       setProgress(started.progress ?? 0);
       if (Array.isArray(started.targets)) setTargets(started.targets);
     } catch (err) {
-      setSearchStatus("idle");
+      setMissionStatus("idle");
       console.warn(`Start failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
@@ -141,7 +144,7 @@ export default function useMissionActions({
     try {
       const stopped = await missionClient.stopMission(mission.id);
       setMission(stopped);
-      setSearchStatus(normalizeMissionStatus(stopped.status ?? "idle"));
+      setMissionStatus("paused");
       setProgress(0);
     } catch (err) {
       console.warn(`Stop failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -152,12 +155,12 @@ export default function useMissionActions({
     const missionId = mission?.id;
     setMissionLocked(false);
     setMission(null);
-    setSearchStatus("idle");
+    setMissionStatus("idle");
     setProgress(0);
     setTargets([]);
     setFoundHikers([]);
     setElapsedSeconds(0);
-    setHikerSummaryOpen(false);
+    setSearchSummaryOpen(false);
     setCompletedTargets([]);
     setSummaryMissionId(null);
     setHikerLabelById({});
@@ -170,9 +173,15 @@ export default function useMissionActions({
     }
   };
 
+  const recallDrones = async () => {
+    if (!mission?.id) return;
+    await missionClient.recallMission(mission.id);
+  };
+
   return {
     startMission,
     stopMission,
-    resetMissionLock
+    resetMissionLock,
+    recallDrones,
   };
 }

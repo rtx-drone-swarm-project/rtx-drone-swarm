@@ -9,7 +9,8 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 
 from app.dispatch import run_direct_dispatch, run_dispatch_script
-from app.models import DispatchTargetsRequest, MissionCreate, MissionStart
+from app.models import DispatchTargetsRequest, MissionCreate, MissionStart, Mission
+from app.algorithms.base import build_dense_coverage_grid
 from app.missions import (
     _assign_start_area_targets,
     _build_start_dispatch_assignments,
@@ -17,11 +18,11 @@ from app.missions import (
     _dispatch_failure_row,
     _ensure_sitl_running_for_mission,
     _prepare_dispatch_assignments,
-    missions_db,
+    _sync_mission_drones_with_sitl,
+    mission_db,
 )
 from app.settings import DEFAULT_DISPATCH_HOST, DEFAULT_DISPATCH_TIMEOUT_SECONDS
 from app.simulation import simulation_loop
-#from app.voronoi import build_search_grid <---------------------------------------------------------------------------------------------
 from app.algorithms.base import build_search_grid
 from app.ws import manager
 
@@ -30,39 +31,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _public_mission(mission: dict) -> dict:
-    """Return a JSON-safe mission payload without internal runtime state."""
-    return {key: value for key, value in mission.items() if not key.startswith("_")}
-
-
 @router.post("/missions")
 def create_mission(mission_data: MissionCreate):
     """Create an in-memory mission record from validated request data."""
     mission_id = str(uuid.uuid4())
-    mission = {
-        "id": mission_id,
-        "name": mission_data.name,
-        "status": "idle",
-        "progress": 0.0,
-        "elapsed_seconds": 0,
-        "algorithm": getattr(mission_data, "algorithm", "voronoi"),
-        "bounds": mission_data.bounds.model_dump(),
-        "drones": [d.model_dump() for d in mission_data.drones],
-        "hikers": [m.model_dump() for m in mission_data.hikers] if mission_data.hikers else [],
-    }
-    missions_db[mission_id] = mission
-    return mission
+    mission = Mission(mission_id, mission_data)
+    mission_db[mission_id] = mission
+    return mission.to_dict()
 
 
 @router.get("/missions/{mission_id}")
 def get_mission(mission_id: str):
     """Return one stored mission or raise ``404`` if the id is unknown."""
-    if mission_id not in missions_db:
+    if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
-    return _public_mission(missions_db[mission_id])
+    return mission_db[mission_id].to_dict()
 
 
-async def _background_dispatch(mission: dict, mission_id: str, assignments: List[dict]) -> None:
+async def _background_dispatch(mission: Mission, mission_id: str, assignments: List[dict]) -> None:
     """Run startup dispatch in the background and broadcast normalized results."""
     logger.info("_background_dispatch: dispatching %d drones for mission %s", len(assignments), mission_id)
     try:
@@ -77,7 +63,7 @@ async def _background_dispatch(mission: dict, mission_id: str, assignments: List
             )
             for assignment in assignments
         ]
-    mission["dispatch_results"] = results
+        
     success_count = sum(1 for row in results if row.get("success"))
     logger.info(
         "_background_dispatch mission %s: %d/%d drones dispatched successfully",
@@ -92,7 +78,7 @@ async def _background_dispatch(mission: dict, mission_id: str, assignments: List
         {
             "type": "mission_status",
             "mission_id": mission_id,
-            "status": mission.get("status", "running"),
+            "status": mission.status,
             "dispatch_results": results,
         }
     )
@@ -101,50 +87,56 @@ async def _background_dispatch(mission: dict, mission_id: str, assignments: List
 @router.post("/missions/{mission_id}/start")
 async def start_mission(mission_id: str, start_data: Optional[MissionStart] = None):
     """Start a mission, seed targets and coverage points, then launch simulation tasks."""
-    if mission_id not in missions_db:
+    if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
 
-    mission = missions_db[mission_id]
-    if mission["status"] != "idle":
+    mission = mission_db[mission_id]
+    if mission.status != "idle":
         raise HTTPException(status_code=400, detail="Only 'idle' missions can be started")
 
-    mission["status"] = "running"
-    mission["elapsed_seconds"] = 0
-    mission["_found_target_ids"] = []
+    mission.status = "searching"
+    mission.elapsed_seconds = 0
 
     if start_data:
         if start_data.drones is not None:
-            mission["drones"] = [d.model_dump() for d in start_data.drones]
+            mission.drones = [d.model_dump() for d in start_data.drones]
         if start_data.algorithm is not None:
-            mission["algorithm"] = start_data.algorithm
+            mission.algorithm = start_data.algorithm
+        if start_data.hikers is not None:
+            mission.hikers = [h.model_dump() for h in start_data.hikers]
 
-    bounds = mission["bounds"]
+    bounds = mission.bounds
     startup_note = await _ensure_sitl_running_for_mission(mission)
-    if startup_note:
-        mission["sitl_startup_note"] = startup_note
-
-    mission["grid"] = build_search_grid(bounds, n=15).tolist()
-
-    from app.algorithms.base import build_dense_coverage_grid
-    dense = build_dense_coverage_grid(bounds)
-    # Stored as a numpy array for internal coverage tracking only.
-    # Route responses must use _public_mission so this never gets JSON-encoded.
-    # _update_coverage uses this for accurate per-DETECTION_RADIUS-cell tracking.
-    mission["_dense_coverage_grid"] = dense
-    mission["_dense_grid_size"] = len(dense)
 
     targets = []
-    for _ in range(random.randint(2, 3)):
-        targets.append(
-            {
-                "id": f"tgt-{uuid.uuid4().hex[:8]}",
-                "lat": random.uniform(bounds["min_lat"], bounds["max_lat"]),
-                "lon": random.uniform(bounds["min_lon"], bounds["max_lon"]),
-                "status": "wandering",
-                "assigned_drone_id": None,
-            }
-        )
-    mission["targets"] = targets
+    if mission.hikers:
+        for hiker in mission.hikers:
+            targets.append(
+                {
+                    "id": hiker["id"],
+                    "lat": hiker["lat"],
+                    "lon": hiker["lon"],
+                    "status": "found" if hiker.get("found") else "wandering",
+                    "assigned_drone_id": None,
+                    "movement": hiker.get("movement", "moving"),
+                }
+            )
+    else:
+        for _ in range(random.randint(2, 3)):
+            targets.append(
+                {
+                    "id": f"tgt-{uuid.uuid4().hex[:8]}",
+                    "lat": random.uniform(bounds["min_lat"], bounds["max_lat"]),
+                    "lon": random.uniform(bounds["min_lon"], bounds["max_lon"]),
+                    "status": "wandering",
+                    "assigned_drone_id": None,
+                    "movement": "moving",
+                }
+            )
+    mission.targets = targets
+    mission.grid = build_search_grid(bounds, n=15)
+    mission._dense_coverage_grid = build_dense_coverage_grid(bounds)
+    mission._dense_grid_size = len(mission._dense_coverage_grid)
 
     dispatch_assignments = _build_start_dispatch_assignments(mission)
     if not dispatch_assignments:
@@ -154,15 +146,15 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
         "start_mission %s: %d dispatch assignments, %d drones",
         mission_id,
         len(dispatch_assignments),
-        len(mission.get("drones", [])),
+        len(getattr(mission, "drones", [])),
     )
 
     await manager.broadcast(
         {
             "type": "mission_status",
             "mission_id": mission_id,
-            "status": "running",
-            "progress": mission["progress"],
+            "status": mission.status,
+            "progress": mission.progress,
             "targets": targets,
         }
     )
@@ -172,16 +164,16 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
     if dispatch_assignments:
         asyncio.create_task(_background_dispatch(mission, mission_id, dispatch_assignments))
 
-    return _public_mission(mission)
+    return mission.to_dict()
 
 
 @router.post("/missions/{mission_id}/dispatch-targets")
 async def dispatch_targets(mission_id: str, dispatch_data: DispatchTargetsRequest):
     """Dispatch one or more mission drones to explicit coordinates via the helper script."""
-    if mission_id not in missions_db:
+    if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
 
-    mission = missions_db[mission_id]
+    mission = mission_db[mission_id]
     valid_assignments, preflight_failures = _prepare_dispatch_assignments(dispatch_data, mission)
 
     script_results = []
@@ -194,7 +186,6 @@ async def dispatch_targets(mission_id: str, dispatch_data: DispatchTargetsReques
         )
 
     dispatch_results = preflight_failures + script_results
-    mission["dispatch_results"] = dispatch_results
     return {
         "mission_id": mission_id,
         "dispatch_results": dispatch_results,
@@ -204,51 +195,52 @@ async def dispatch_targets(mission_id: str, dispatch_data: DispatchTargetsReques
 @router.post("/missions/{mission_id}/stop")
 async def stop_mission(mission_id: str):
     """Stop a mission and broadcast that it is no longer running."""
-    if mission_id not in missions_db:
+    if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
 
-    mission = missions_db[mission_id]
-    if mission["status"] not in ["running", "idle"]:
-        raise HTTPException(status_code=400, detail="Mission is already stopped or complete")
+    mission = mission_db[mission_id]
+    if mission.status in ["idle", "search_complete", "paused", "mission_complete"]:
+        raise HTTPException(status_code=400, detail="Drones are not in motion")
 
-    mission["status"] = "stopped"
-    mission["progress"] = 0.0
+    _sync_mission_drones_with_sitl(mission)
+    mission.status = "paused"
 
     await manager.broadcast(
         {
             "type": "mission_status",
             "mission_id": mission_id,
-            "status": "stopped",
-            "progress": mission["progress"],
+            "status": mission.status,
+            "progress": mission.progress,
         }
     )
-    await manager.broadcast({"type": "telemetry", "drones": []})
+    await manager.broadcast({"type": "telemetry", "drones": mission.drones})
 
-    return _public_mission(mission)
+    return mission.to_dict()
 
 
 @router.get("/missions/{mission_id}/metrics")
 def get_mission_metrics(mission_id: str):
     """Return algorithm performance metrics for a completed or in-progress mission."""
-    if mission_id not in missions_db:
+    if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
-    mission = missions_db[mission_id]
-    targets = mission.get("targets", [])
+    mission = mission_db[mission_id]
+    targets = mission.targets
     found_targets = [t for t in targets if t.get("status") == "found"]
     found_times = [t["found_at"] for t in found_targets if "found_at" in t]
 
     # Use dense coverage if available (accurate); fall back to sparse for old missions.
-    grid_size = mission.get("_dense_grid_size") or len(mission.get("grid", []))
-    covered_count = mission.get("_dense_covered_count", len(mission.get("covered_grid_indices", [])))
+    sparse_grid_size = len(mission.grid) if mission.grid is not None else 0
+    grid_size = getattr(mission, "_dense_grid_size", 0) or sparse_grid_size
+    covered_count = mission._dense_covered_count
     coverage_pct = round(100.0 * covered_count / grid_size, 1) if grid_size else 0.0
-    elapsed = mission.get("elapsed_seconds", 0)
+    elapsed = mission.elapsed_seconds
     coverage_rate = round(coverage_pct / elapsed, 3) if elapsed > 0 else 0.0
 
     return {
-        "algorithm": mission.get("algorithm", "voronoi"),
-        "status": mission.get("status"),
+        "algorithm": mission.algorithm,
+        "status": mission.status,
         "elapsed_seconds": elapsed,
-        "completion_elapsed_seconds": mission.get("completion_elapsed_seconds"),
+        "completion_elapsed_seconds": mission.completion_elapsed_seconds,
         "targets_total": len(targets),
         "targets_found": len(found_targets),
         "found_at_seconds": found_times,
@@ -262,18 +254,47 @@ def get_mission_metrics(mission_id: str):
 
 @router.delete("/missions/{mission_id}")
 async def delete_mission(mission_id: str):
-    """Delete a mission record and notify connected clients that it is gone."""
-    if mission_id not in missions_db:
+    """Delete a mission record and broadcast that it is gone."""
+    if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
-    mission = missions_db.pop(mission_id)
-    if mission.get("status") == "running":
-        mission["status"] = "stopped"
+    mission = mission_db.pop(mission_id)
+    mission.status = "idle"
+
     await manager.broadcast(
         {
             "type": "mission_status",
             "mission_id": mission_id,
-            "status": "deleted",
+            "status": mission.status,
             "progress": 0.0,
         }
     )
+
     return {"ok": True, "mission_id": mission_id}
+
+@router.post("/missions/{mission_id}/recall")
+async def recall_mission(mission_id: str):
+    """Recall a mission and broadcast that recall has been initiated."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    # Prevent invalid transitions
+    if mission.status != "search_complete":
+        raise HTTPException(status_code=400, detail="Mission must be 'search_complete' to initiate recall")
+
+    # If already recalling, do nothing
+    if mission.status == "recalling":
+        return {"message": "Recall already in progress"}
+
+    mission.status = "recalling"
+
+    await manager.broadcast(
+        {
+            "type": "mission_status",
+            "mission_id": mission_id,
+            "status": mission.status,
+            "progress": mission.progress,
+        }
+    )
+
+    return mission.to_dict()

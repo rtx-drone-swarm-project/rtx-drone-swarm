@@ -23,39 +23,66 @@ body,
 
 .topbar {
   z-index: 1000;
-  padding: 14px 20px;
-  background: #1f2937;
-  border-bottom: 1px solid #334155;
-  box-shadow: 0 1px 10px rgb(0 0 0 / 0.3);
+  padding: 12px 40px; 
+  
+  background: rgba(28, 28, 30, 0.65); 
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 0.5px solid rgba(255, 255, 255, 0.15); 
+  
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px; 
+}
+
+.title-icon {
+  width: 20px;
+  height: 20px;
+  color: #0A84FF;
 }
 
 .topbar h1 {
   margin: 0;
-  text-align: center;
-  font-size: 30px;
+  font-size: 17px; 
   font-weight: 600;
-  color: #f9fafb;
+  letter-spacing: -0.4px; 
+  color: #ffffff;
+}
+
+/* --- Progress Section Layout --- */
+.progress-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .progress-label {
-  margin-top: 8px;
-  color: #cbd5e1;
-  text-align: center;
+  margin: 0;
+  color: rgba(235, 235, 245, 0.6); 
   font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums; 
 }
 
 .progress-bar {
-  margin-top: 6px;
-  height: 10px;
-  background: #374151;
+  width: 120px;
+  height: 4px; 
+  background: rgba(255, 255, 255, 0.15); 
   border-radius: 999px;
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #3b82f6, #60a5fa);
-  transition: width 1.2s ease;
+  background: #0A84FF; 
+  border-radius: 999px;
+  transition: width 0.3s ease-out;
 }
 
 .control-layout {
@@ -73,6 +100,10 @@ body,
 
 .map-wrap {
   position: relative;
+}
+
+.map-wrap.is-placing-hiker .leaflet-container {
+  cursor: crosshair;
 }
 
 .left-rail,
@@ -352,6 +383,17 @@ body,
   cursor: not-allowed;
 }
 
+.action-btn.recall {
+  background: rgb(71 85 105 / 0.95);
+  color: #f8fafc;
+}
+
+.action-btn.recall:disabled {
+  background: rgb(51 65 85 / 0.5);
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
 .action-btn.reset {
   background: rgb(71 85 105 / 0.95);
   color: #f8fafc;
@@ -360,6 +402,22 @@ body,
 .action-btn.reset:disabled {
   background: rgb(51 65 85 / 0.5);
   color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.action-btn.hiker-add {
+  background: rgb(37 99 235 / 0.92);
+  color: #eff6ff;
+}
+
+.action-btn.hiker-add.active {
+  background: #f97316;
+  color: #fff7ed;
+}
+
+.action-btn.hiker-add:disabled {
+  background: rgb(51 65 85 / 0.5);
+  color: #94a3b8;
   cursor: not-allowed;
 }
 
@@ -413,12 +471,204 @@ body,
   margin-bottom: 8px;
 }
 
+.hiker-setup.is-disabled {
+  opacity: 0.72;
+}
+
+.hiker-list {
+  display: grid;
+  gap: 8px;
+}
+
+.hiker-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.hiker-list-main {
+  min-width: 0;
+  border: 1px solid rgb(71 85 105 / 0.9);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgb(15 23 42 / 0.72);
+  color: #e2e8f0;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+}
+
+.hiker-list-main:hover {
+  border-color: rgb(96 165 250 / 0.8);
+}
+
+.hiker-list-main span,
+.hiker-list-main strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hiker-list-main strong {
+  color: #bfdbfe;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hiker-remove,
+.hiker-clear {
+  border: 1px solid rgb(239 68 68 / 0.45);
+  border-radius: 8px;
+  background: rgb(127 29 29 / 0.42);
+  color: #fecaca;
+  cursor: pointer;
+}
+
+.hiker-remove:disabled,
+.hiker-clear:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.hiker-clear {
+  width: 100%;
+  padding: 7px 10px;
+  font-weight: 600;
+}
+
 .warning-text {
   color: #fbbf24;
 }
 
 .success-text {
   color: #4ade80;
+}
+
+.benchmark-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.benchmark-checks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.benchmark-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid rgb(71 85 105 / 0.9);
+  border-radius: 8px;
+  background: rgb(15 23 42 / 0.65);
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.benchmark-check input {
+  flex: 0 0 auto;
+}
+
+.benchmark-check span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.benchmark-input-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.benchmark-input-grid .field {
+  margin-bottom: 0;
+}
+
+.benchmark-progress-block {
+  display: grid;
+  gap: 6px;
+}
+
+.benchmark-progress-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #94a3b8;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.benchmark-progress-row strong {
+  color: #e2e8f0;
+}
+
+.benchmark-progress {
+  margin-top: 0;
+}
+
+.benchmark-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgb(71 85 105 / 0.75);
+  border-radius: 8px;
+}
+
+.benchmark-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+  font-size: 11px;
+}
+
+.benchmark-table th,
+.benchmark-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid rgb(51 65 85 / 0.8);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.benchmark-table th:first-child,
+.benchmark-table td:first-child {
+  text-align: left;
+}
+
+.benchmark-table thead th {
+  color: #93c5fd;
+  background: rgb(15 23 42 / 0.9);
+}
+
+.benchmark-table tbody th {
+  color: #f1f5f9;
+}
+
+.benchmark-table tbody td {
+  color: #cbd5e1;
+}
+
+.benchmark-table tr:last-child th,
+.benchmark-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.benchmark-export {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid rgb(96 165 250 / 0.5);
+  border-radius: 8px;
+  color: #bfdbfe;
+  text-align: center;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.benchmark-export:hover {
+  background: rgb(30 58 138 / 0.35);
 }
 
 .legend-item {
@@ -486,6 +736,14 @@ body,
 
 .legend-dot.target {
   background: #ef4444;
+}
+
+.legend-dot.placed-stationary {
+  background: #22c55e;
+}
+
+.legend-dot.placed-moving {
+  background: #f97316;
 }
 
 .legend-dot.confirming {
@@ -576,6 +834,11 @@ body,
   box-shadow: 0 16px 40px rgb(0 0 0 / 0.4);
 }
 
+.modal-panel.is-disabled {
+  border-color: #475569;
+  background: #111827;
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -651,17 +914,48 @@ body,
   margin-bottom: 4px;
 }
 
-.hiker-summary-body {
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: rgb(15 23 42 / 0.88);
+}
+
+.segmented-control button {
+  min-width: 0;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: transparent;
+  color: #cbd5e1;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.segmented-control button.active {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.segmented-control button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.search-summary-body {
   margin-top: 4px;
 }
 
-.hiker-summary-intro {
+.search-summary-intro {
   margin: 0 0 8px;
   font-size: 13px;
   color: #cbd5e1;
 }
 
-.hiker-summary-list {
+.search-summary-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -671,7 +965,7 @@ body,
   gap: 6px;
 }
 
-.hiker-summary-item {
+.search-summary-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -681,19 +975,19 @@ body,
   background: rgb(15 23 42 / 0.9);
 }
 
-.hiker-summary-label {
+.search-summary-label {
   font-size: 13px;
   color: #e5e7eb;
 }
 
-.hiker-summary-coords {
+.search-summary-coords {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
     monospace;
   font-size: 12px;
   color: #cbd5e1;
 }
 
-.hiker-summary-footer {
+.search-summary-footer {
   margin-top: 12px;
 }
 
@@ -856,6 +1150,16 @@ body,
 .target-label-marker {
   background: none !important;
   border: none !important;
+}
+
+.placed-hiker-label-marker {
+  background: none !important;
+  border: none !important;
+}
+
+.placed-hiker-marker.is-locked {
+  opacity: 0.62;
+  filter: grayscale(0.45);
 }
 
 @media (max-width: 1100px) {

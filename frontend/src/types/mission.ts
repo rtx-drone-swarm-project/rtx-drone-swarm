@@ -1,21 +1,110 @@
-export type MissionStatus = "idle" | "running" | "stopped" | "complete";
+export type AlgorithmOption = string;
 
-export type AlgorithmOption = "voronoi" | "voronoi_aco" | "apf" | "sweep" ;
+export type AlgorithmMetadata = {
+  key: AlgorithmOption;
+  label: string;
+  description?: string | null;
+  module?: string;
+  class_name?: string;
+};
 
-/** Keys supported by backend `ALGORITHMS` — keep in sync with `backend/app/algorithms/__init__.py`. */
-export const ALGORITHM_OPTIONS: { value: AlgorithmOption; label: string }[] = [
+export const DEFAULT_ALGORITHM_OPTIONS: AlgorithmMetadata[] = [
   { value: "voronoi", label: "Voronoi (Lloyd's)" },
   { value: "voronoi_aco", label: "Voronoi (ACO)" },
   { value: "apf", label: "APF (Potential Fields)" },
   { value: "sweep", label: "Sweep (Voronoi + Lawnmower)" }
-];
+].map((item) => ({ key: item.value, label: item.label }));
 
-export function algorithmDisplayLabel(id: AlgorithmOption | string): string {
-  const match = ALGORITHM_OPTIONS.find((o) => o.value === id);
+export function algorithmDisplayLabel(id: AlgorithmOption | string, options = DEFAULT_ALGORITHM_OPTIONS): string {
+  const match = options.find((o) => o.key === id);
   return match?.label ?? id;
 }
 
+export type BenchmarkMetricStats = {
+  mean: number | null;
+  min: number | null;
+  max: number | null;
+  stddev: number | null;
+};
+
+export type BenchmarkAlgorithmSummary = {
+  count: number;
+  [metric: string]: BenchmarkMetricStats | number;
+};
+
+export type BenchmarkSummary = Record<string, BenchmarkAlgorithmSummary>;
+
+export type BenchmarkTrial = {
+  id?: number;
+  run_id: string;
+  algorithm: string;
+  iteration: number;
+  scenario_seed: number;
+  bounds?: Bounds;
+  drone_count: number;
+  target_count: number;
+  timeout_seconds: number;
+  elapsed_seconds: number;
+  first_find_seconds?: number | null;
+  avg_find_seconds?: number | null;
+  last_find_seconds?: number | null;
+  completion_elapsed_seconds?: number | null;
+  coverage_pct: number;
+  miss_pct: number;
+  redundant_coverage_pct: number;
+  coverage_per_drone_second: number;
+  hiker_find_rate: number;
+  total_distance_traveled_m: number;
+  avg_distance_per_drone_m: number;
+  max_distance_single_drone_m: number;
+  time_to_50_coverage?: number | null;
+  time_to_80_coverage?: number | null;
+  time_to_95_coverage?: number | null;
+  targets_found: number;
+  targets_total: number;
+  status: string;
+  created_at?: string;
+};
+
+export type BenchmarkRun = {
+  run_id: string;
+  status: "running" | "complete" | "failed" | string;
+  created_at?: string;
+  completed_at?: string | null;
+  total_trials: number;
+  completed_trials: number;
+  request?: {
+    algorithms?: string[];
+    iterations?: number;
+    drone_count?: number;
+    target_count?: number;
+    timeout_seconds?: number;
+  };
+  summary?: BenchmarkSummary;
+  trials?: BenchmarkTrial[];
+  error?: string | null;
+};
+
+export type BenchmarkRequestPayload = {
+  algorithms: string[];
+  iterations: number;
+  bounds: Bounds;
+  drone_count: number;
+  target_count: number;
+  timeout_seconds: number;
+  seed?: number;
+};
+
 export type EntityId = string | number;
+
+export type HikerMovement = "stationary" | "moving";
+
+export type PlacedHiker = {
+  id: string;
+  lat: number;
+  lon: number;
+  movement: HikerMovement;
+};
 
 export type Bounds = {
   min_lat: number;
@@ -48,6 +137,7 @@ export type Target = {
   lat: number;
   lon: number;
   status?: string;
+  movement?: HikerMovement;
 };
 
 export type FoundHiker = {
@@ -121,12 +211,13 @@ export type MissionCreateRequest = {
   name: string;
   bounds: Bounds;
   drones: MissionDroneInput[];
-  /** Must match backend `ALGORITHMS` keys; echoed on the mission until start overrides. */
+  /** Must match backend-discovered algorithm keys; echoed on the mission until start overrides. */
   algorithm?: AlgorithmOption;
   hikers?: Array<{
     id: string;
     lat: number;
     lon: number;
     found: boolean;
+    movement?: HikerMovement;
   }>;
 };

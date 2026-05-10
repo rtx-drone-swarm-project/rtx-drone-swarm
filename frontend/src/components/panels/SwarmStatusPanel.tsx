@@ -1,4 +1,4 @@
-import { algorithmDisplayLabel } from "../../types/mission";
+import { algorithmDisplayLabel, type AlgorithmMetadata } from "../../types/mission";
 import { formatElapsed, statusLabel } from "../../utils/format";
 import CollapsibleSection from "../common/CollapsibleSection";
 import SearchingLabel from "../common/SearchingLabel";
@@ -8,10 +8,11 @@ type SwarmStatusPanelProps = {
   telemetryCount: number;
   validDroneCount: number;
   missionActive: boolean;
-  searchStatus: string;
+  missionStatus: string;
   lostHikerCount: number;
   telemetryMode: string;
   selectedAlgorithm: string;
+  algorithmOptions: AlgorithmMetadata[];
 };
 
 export default function SwarmStatusPanel({
@@ -19,12 +20,13 @@ export default function SwarmStatusPanel({
   telemetryCount,
   validDroneCount,
   missionActive,
-  searchStatus,
+  missionStatus,
   lostHikerCount,
   telemetryMode,
-  selectedAlgorithm
+  selectedAlgorithm,
+  algorithmOptions
 }: SwarmStatusPanelProps) {
-  const algorithmLabel = algorithmDisplayLabel(selectedAlgorithm);
+  const algorithmLabel = algorithmDisplayLabel(selectedAlgorithm, algorithmOptions);
   return (
     <CollapsibleSection title="Swarm Status">
       <div className="kv-grid">
@@ -35,7 +37,7 @@ export default function SwarmStatusPanel({
         <span>Valid Drones</span>
         <strong>{validDroneCount}</strong>
         <span>Search Status</span>
-        <strong>{missionActive ? <SearchingLabel text="Searching" /> : statusLabel(searchStatus)}</strong>
+        <strong>{statusLabel(missionStatus)}</strong>
         <span>Telemetry</span>
         <strong className={telemetryMode === "LIVE SITL" ? "success" : telemetryMode === "SIMULATED" ? "warning-text" : ""}>
           {telemetryMode}

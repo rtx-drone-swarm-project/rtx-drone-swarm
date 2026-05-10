@@ -14,6 +14,7 @@ from app.settings import (
     DEFAULT_SITL_COUNT,
     DEFAULT_SITL_HOST,
     DEFAULT_SITL_PORT_STEP,
+    DEFAULT_RECALL_ALT,
     SITL_DRONE_SPEED_MS,
 )
 
@@ -142,9 +143,11 @@ class SITLTelemetryBridge:
     def get_states_by_sysid(self) -> Dict[int, dict]:
         """Map the Swarm's internal state format to what the backend expects."""
         self.ensure_connected()
+        self.update_recall_states()
         states = {}
         for drone in self.swarm.drones:
             d_state = drone.get_state()
+            d_recall_phase = drone.get_recall_state().get("phase")
             
             has_pos = bool(d_state["lat"] and d_state["lon"])
             
@@ -162,6 +165,7 @@ class SITLTelemetryBridge:
                 "heading": d_state["heading"],
                 "armed": d_state["armed"],
                 "mode": d_state["mode"],
+                "recall_phase": d_recall_phase,
                 "telemetry_source": "sitl",           # ADDED THIS FOR FRONTEND
                 "has_position": has_pos,
                 "prearm_ok": drone.is_prearm_passed(),
@@ -188,13 +192,26 @@ class SITLTelemetryBridge:
                 return {"drone_id": drone_id, "sysid": sysid, "success": False, "message": "Not connected"}
 
             # Standardize mode
-            if drone.state["mode"] != "GUIDED":
+            if not drone.is_mode("GUIDED"):
                 drone.set_mode("GUIDED")
+                if not _wait_for_condition(
+                    lambda: drone.is_mode("GUIDED"),
+                    timeout=10.0
+                ):
+                    return {
+                        "drone_id": drone_id,
+                        "sysid": sysid,
+                        "success": False,
+                        "message": "Failed to enter GUIDED mode before arming",
+                    }
             
             # Check if it needs to arm and takeoff
-            if not drone.state["armed"]:
+            if not drone.get_state()["armed"]:
                 drone.arm()
-                if not _wait_for_condition(lambda: bool(drone.get_state()["armed"]), timeout=10.0):
+                if not _wait_for_condition(
+                    lambda: drone.get_state()["armed"],
+                    timeout=10.0
+                ):
                     return {
                         "drone_id": drone_id,
                         "sysid": sysid,
@@ -202,7 +219,7 @@ class SITLTelemetryBridge:
                         "message": "Arm command ACKed but drone never reported armed state",
                     }
                 
-            if drone.state["rel_alt"] < alt - 2:
+            if drone.get_state()["rel_alt"] < alt - 2:
                 drone.takeoff(alt)
                 if not _wait_for_condition(
                     lambda: float(drone.get_state()["rel_alt"]) >= min(alt - 2.0, 3.0),
@@ -225,6 +242,72 @@ class SITLTelemetryBridge:
         finally:
             self._dispatching_sysids.discard(sysid)
 
+    def recall_drone(self, sysid: int, drone_id: Optional[str] = None) -> dict:
+        try:
+            drone = self._get_drone(sysid)
+            if not drone:
+                return {"drone_id": drone_id, "sysid": sysid, "success": False, "message": "Not connected"}
+
+            home = drone.capture_home_location_if_unset()
+            if home.get("lat") is None or home.get("lon") is None:
+                return {
+                    "drone_id": drone_id,
+                    "sysid": sysid,
+                    "success": False,
+                    "message": "Home location not captured",
+                }
+
+            state = drone.get_state()
+            if not state["armed"]:
+                drone.set_recall_state("complete", last_action_at=time.time())
+                return {"drone_id": drone_id, "sysid": sysid, "success": True, "message": "Drone already disarmed at recall start"}
+
+            if not drone.is_mode("GUIDED"):
+                logger.info(f"Sending GUIDED to sysid={sysid}")
+                drone.set_mode("GUIDED")
+            
+            return_alt = max(float(state.get("rel_alt") or 0.0), float(DEFAULT_RECALL_ALT))
+            self.send_goto(sysid, home["lat"], home["lon"], return_alt)
+            drone.set_recall_state(
+                "returning",
+                home_lat=home["lat"],
+                home_lon=home["lon"],
+                last_action_at=time.time(),
+            )
+
+            return {
+                "drone_id": drone_id,
+                "sysid": sysid,
+                "success": True,
+                "message": "Recall initiated: returning to stored home in GUIDED mode",
+            }
+        
+        except Exception as exc:
+            logger.error(f"Recall failed for sysid {sysid}: {exc}")
+            return {"drone_id": drone_id, "sysid": sysid, "success": False, "message": str(exc)}
+
+    def update_recall_states(self) -> None:
+        for drone in self.swarm.drones:
+            recall = drone.get_recall_state()
+            phase = recall.get("phase")
+            if not phase or phase == "complete":
+                continue
+
+            state = drone.get_state()
+
+            if not state.get("armed"):
+                drone.set_recall_state("complete", last_action_at=time.time())
+                continue
+
+            if phase == "returning":
+                self._handle_returning(drone, recall)
+
+            elif phase == "landing":
+                self._handle_landing(drone, recall)
+
+            elif phase == "disarming":
+                self._handle_disarming(drone, recall)
+
     def send_goto(self, sysid: int, lat: float, lon: float, alt: float) -> None:
         """Lightweight goto wrapper for the simulation loop."""
         drone = self._get_drone(sysid)
@@ -244,14 +327,100 @@ class SITLTelemetryBridge:
             time.sleep(2)
             drone.takeoff(takeoff_alt) '''
 
+    def send_mode(self, sysid: int, mode: str) -> None:
+        drone = self._get_drone(sysid)
+        if drone:
+            state = drone.get_state()
+            logger.debug(
+                "send_mode sysid=%s target_mode=%s rel_alt=%s armed=%s current_mode=%s",
+                sysid,
+                mode,
+                state["rel_alt"],
+                state["armed"],
+                state["mode"],
+            )
+
+            drone.set_mode(mode)
+
+    def _handle_returning(self, drone, recall: dict):
+        home_lat = recall.get("home_lat")
+        home_lon = recall.get("home_lon")
+        if home_lat is None or home_lon is None:
+            drone.set_recall_state("error", last_action_at=time.time())
+            return
+
+        distance = drone.distance_to(float(home_lat), float(home_lon))
+
+        if distance <= 3.0:
+            if not drone.is_mode("LAND"):
+                logger.info(f"Recall: LAND (home reached)")
+                drone.set_mode("LAND")
+
+            drone.set_recall_state("landing", last_action_at=time.time())
+            return
+
+        # Retry goto every 10s
+        if time.time() - float(recall.get("last_action_at") or 0.0) >= 10:
+            alt = max(float(drone.get_state().get("rel_alt") or 0.0), float(DEFAULT_RECALL_ALT))
+            drone.goto(float(home_lat), float(home_lon), alt)
+            drone.set_recall_state("returning", last_action_at=time.time())
+
+        else:
+            drone.set_recall_state("returning")
+
+    def _handle_landing(self, drone, recall: dict):
+        drone.set_recall_state("landing")
+
+        altitude = float(drone.get_state().get("rel_alt") or 0.0)
+        if altitude <= 0.3:
+            logger.info("Recall: disarm after landing")
+
+            try:
+                drone.disarm(timeout=3)
+            except Exception:
+                pass
+
+            drone.set_recall_state("disarming", last_action_at=time.time())
+
+    def _handle_disarming(self, drone, recall: dict):
+        drone.set_recall_state("disarming")
+
+        state = drone.get_state()
+
+        if not state.get("armed"):
+            drone.set_recall_state("complete", last_action_at=time.time())
+            return
+
+        # Retry disarm if needed
+        if float(state.get("rel_alt") or 0.0) <= 0.3:
+            if time.time() - float(recall.get("last_action_at") or 0.0) >= 2.0:
+                try:
+                    drone.disarm(timeout=3)
+                except Exception:
+                    pass
+                drone.set_recall_state("disarming", last_action_at=time.time())
+
 
 from app.ws import manager
-from app.missions import missions_db # Assuming this is where you track active missions
+from app.missions import mission_db # Assuming this is where you track active missions
+
+def wait_for_armed(drone, timeout=10.0):
+    start = time.time()
+    seen_armed = False
+
+    while time.time() - start < timeout:
+        state = drone.get_state()
+        if state["armed"]:
+            seen_armed = True
+            return True
+        time.sleep(0.2)
+
+    return seen_armed
 
 def _any_mission_running() -> bool:
     """Helper to check if simulation.py is currently handling telemetry."""
-    for mission in missions_db.values():
-        if mission.get("status") == "running":
+    for mission in mission_db.values():
+        if mission.status in {"searching", "search_complete", "recalling"}:
             return True
     return False
 

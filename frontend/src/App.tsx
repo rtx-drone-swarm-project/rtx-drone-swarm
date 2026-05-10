@@ -1,44 +1,70 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createMissionClient } from "./api/missionClient";
 import { getApiBase, getApiPort } from "./api/runtime";
 import TopBar from "./components/layout/TopBar";
 import MapPanel from "./components/map/MapPanel";
 import DroneModal from "./components/modals/DroneModal";
-import HikerSummaryModal from "./components/modals/HikerSummaryModal";
+import HikerModal from "./components/modals/HikerModal";
+import SearchSummaryModal from "./components/modals/SearchSummaryModal";
 import AlertsPanel from "./components/panels/AlertsPanel";
 import ActionsPanel from "./components/panels/ActionsPanel";
+import BenchmarkPanel from "./components/panels/BenchmarkPanel";
 import FoundHikersPanel from "./components/panels/FoundHikersPanel";
+import HikerSetupPanel from "./components/panels/HikerSetupPanel";
 import LegendPanel from "./components/panels/LegendPanel";
 import NavigationPanel from "./components/panels/NavigationPanel";
 import SwarmStatusPanel from "./components/panels/SwarmStatusPanel";
 import useMissionActions from "./hooks/useMissionActions";
 import useMissionSocket from "./hooks/useMissionSocket";
+import { DEFAULT_ALGORITHM_OPTIONS } from "./types/mission";
 import type {
   AlgorithmOption,
+  AlgorithmMetadata,
   Bounds,
   FoundHiker,
+  HikerMovement,
   MissionMetrics,
   MissionState,
+  PlacedHiker,
   SelectedDrone,
   Target,
   TelemetryDrone,
   ValidDrone
 } from "./types/mission";
-import type { MissionProgressMessage, MissionStatusMessage, TargetFoundMessage, TelemetryMessage } from "./types/ws";
-import { normalizeMissionStatus } from "./utils/format";
+import type {
+  BenchmarkProgressMessage,
+  MissionProgressMessage,
+  MissionStatus,
+  MissionStatusMessage,
+  TargetFoundMessage,
+  TelemetryMessage
+} from "./types/ws";
 import { customAreaBounds } from "./utils/geo";
 import { parseCoordinate } from "./utils/validate";
 
 const DEFAULT_CENTER: [number, number] = [33.5, -117.2];
 const DEFAULT_ZOOM = 13;
 
+function isPointInsideBounds(lat: number, lon: number, bounds: Bounds) {
+  return lat >= bounds.min_lat && lat <= bounds.max_lat && lon >= bounds.min_lon && lon <= bounds.max_lon;
+}
+
+function clampPointToBounds(lat: number, lon: number, bounds: Bounds): [number, number] {
+  return [
+    Math.min(bounds.max_lat, Math.max(bounds.min_lat, lat)),
+    Math.min(bounds.max_lon, Math.max(bounds.min_lon, lon))
+  ];
+}
+
 export default function App() {
   const apiPort = getApiPort();
   const apiBase = useMemo(() => getApiBase(apiPort), [apiPort]);
+  const apiClient = useMemo(() => createMissionClient(apiBase), [apiBase]);
 
   const [telemetry, setTelemetry] = useState<TelemetryDrone[]>([]);
   const [mission, setMission] = useState<MissionState>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [searchStatus, setSearchStatus] = useState("idle");
+  const [missionStatus, setMissionStatus] = useState<MissionStatus>("idle");
   const [progress, setProgress] = useState(0);
   const [targets, setTargets] = useState<Target[]>([]);
   const [foundHikers, setFoundHikers] = useState<FoundHiker[]>([]);
@@ -51,17 +77,23 @@ export default function App() {
   const [selectedBounds, setSelectedBounds] = useState<Bounds | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [selectedDrone, setSelectedDrone] = useState<SelectedDrone>(null);
-  const [hikerSummaryOpen, setHikerSummaryOpen] = useState(false);
+  const [searchSummaryOpen, setSearchSummaryOpen] = useState(false);
   const [completedTargets, setCompletedTargets] = useState<Target[]>([]);
   const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<AlgorithmOption>("voronoi");
+  const [algorithmOptions, setAlgorithmOptions] = useState<AlgorithmMetadata[]>(DEFAULT_ALGORITHM_OPTIONS);
   const [completionElapsedSeconds, setCompletionElapsedSeconds] = useState<number>(0);
   const [completedMetrics, setCompletedMetrics] = useState<MissionMetrics | null>(null);
+  const [benchmarkProgress, setBenchmarkProgress] = useState<BenchmarkProgressMessage | null>(null);
+  const [placedHikers, setPlacedHikers] = useState<PlacedHiker[]>([]);
+  const [selectedHikerId, setSelectedHikerId] = useState<string | null>(null);
+  const [isPlacingHiker, setIsPlacingHiker] = useState(false);
 
   // Ref so onMissionStatus can read current elapsed without it being a dep,
   // which would recreate the callback every second and reconnect the WebSocket.
   const elapsedSecondsRef = useRef(elapsedSeconds);
   const runningMissionIdRef = useRef<string | null>(null);
+  const nextHikerNumberRef = useRef(1);
   useEffect(() => {
     elapsedSecondsRef.current = elapsedSeconds;
   }, [elapsedSeconds]);
@@ -134,6 +166,24 @@ export default function App() {
 
   const validDroneCount = validDrones.length;
 
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.listAlgorithms()
+      .then((payload) => {
+        if (cancelled || !Array.isArray(payload.algorithms) || payload.algorithms.length === 0) return;
+        setAlgorithmOptions(payload.algorithms);
+        setSelectedAlgorithm((current) =>
+          payload.algorithms.some((option) => option.key === current) ? current : payload.algorithms[0].key
+        );
+      })
+      .catch(() => {
+        // Keep built-in fallback options if the backend is not reachable yet.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient]);
+
   const getHikerLabel = useCallback(
     (targetId: string | number) => {
       const normalizedId = String(targetId);
@@ -183,13 +233,29 @@ export default function App() {
     [completedTargets, hikerLabelById]
   );
 
+  const getPlacedHikerLabel = useCallback(
+    (_hiker: PlacedHiker, index: number) => `Hiker ${index + 1}`,
+    []
+  );
+
+  const selectedPlacedHiker = useMemo(
+    () => placedHikers.find((hiker) => hiker.id === selectedHikerId) ?? null,
+    [placedHikers, selectedHikerId]
+  );
+
+  const selectedPlacedHikerLabel = useMemo(() => {
+    if (!selectedPlacedHiker) return "";
+    const index = placedHikers.findIndex((hiker) => hiker.id === selectedPlacedHiker.id);
+    return getPlacedHikerLabel(selectedPlacedHiker, index >= 0 ? index : 0);
+  }, [getPlacedHikerLabel, placedHikers, selectedPlacedHiker]);
+
   useEffect(() => {
-    if (normalizeMissionStatus(searchStatus) !== "running") return;
+    if (missionStatus !== "searching") return;
     const interval = window.setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(interval);
-  }, [searchStatus]);
+  }, [missionStatus]);
 
   const onTelemetry = useCallback((message: TelemetryMessage) => {
     const drones = Array.isArray(message.drones) ? message.drones : [];
@@ -224,20 +290,19 @@ export default function App() {
 
   const onMissionStatus = useCallback(
     (message: MissionStatusMessage) => {
-      const statusText = normalizeMissionStatus(typeof message.status === "string" ? message.status : "idle");
-      setSearchStatus(statusText);
-      if (typeof message.progress === "number") setProgress(statusText === "complete" ? 100 : message.progress);
+      setMissionStatus(message.status);
+      if (typeof message.progress === "number") setProgress(message.status === "search_complete" ? 100 : message.progress);
       if (Array.isArray(message.targets)) {
         assignHikerLabels(message.targets.map((target) => target.id));
         setTargets(message.targets);
       }
 
-      if (statusText === "complete") {
+      if (message.status === "mission_complete") {
         setCompletionElapsedSeconds(elapsedSecondsRef.current);
         setElapsedSeconds(0);
         setMissionLocked(true);
       }
-      if (statusText === "running") {
+      if (message.status === "searching") {
         const runningMissionId = message.mission_id != null ? String(message.mission_id) : "__unknown_running_mission__";
         if (runningMissionIdRef.current !== runningMissionId) {
           runningMissionIdRef.current = runningMissionId;
@@ -281,70 +346,53 @@ export default function App() {
     onTelemetry,
     onMissionStatus,
     onMissionProgress,
-    onTargetFound
+    onTargetFound,
+    onBenchmarkProgress: setBenchmarkProgress
   });
 
-  const { startMission, stopMission, resetMissionLock } = useMissionActions({
+  const missionActive = missionStatus !== "idle" && missionStatus !== "mission_complete";
+  const missionComplete = missionStatus === "mission_complete";
+  const hikerPlacementEditable = selectedBounds != null && !missionActive && !missionLocked;
+
+  useEffect(() => {
+    if (!hikerPlacementEditable) {
+      setIsPlacingHiker(false);
+    }
+  }, [hikerPlacementEditable]);
+
+  const { startMission, stopMission, resetMissionLock, recallDrones } = useMissionActions({
     apiBase,
     missionLocked,
     selectedBounds,
     selectedAlgorithm,
+    placedHikers,
     validDrones,
     validDroneCount,
     mission,
     setMission,
-    setSearchStatus,
+    setMissionStatus,
     setProgress,
     setTargets,
     setElapsedSeconds,
     setMissionLocked,
     setFoundHikers,
-    setHikerSummaryOpen,
+    setSearchSummaryOpen,
     setCompletedTargets,
     setSummaryMissionId,
     setHikerLabelById
   });
 
   useEffect(() => {
-    if (!mission || !targets.length) return;
+  if (!mission || !targets.length) return;
+  const allFound = targets.every(t => t.status === "found");
+  if (!allFound) return;
+  if (summaryMissionId === mission.id) return;
 
-    const allFound = targets.every((target) => target.status === "found");
-    if (!allFound) return;
-
-    if (summaryMissionId === mission.id) return;
-
-    setProgress(100);
-    setSearchStatus("complete");
-    setMissionLocked(true);
     setCompletionElapsedSeconds(elapsedSeconds);
-    setElapsedSeconds(0);
     setCompletedTargets(targets);
     setSummaryMissionId(mission.id);
-    setHikerSummaryOpen(true);
+    setSearchSummaryOpen(true);
   }, [mission, summaryMissionId, targets]);
-
-  useEffect(() => {
-    if (!hikerSummaryOpen || !summaryMissionId) {
-      setCompletedMetrics(null);
-      return;
-    }
-    let cancelled = false;
-    const controller = new AbortController();
-    setCompletedMetrics(null);
-    fetch(`${apiBase}/missions/${summaryMissionId}/metrics`, { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (!cancelled && data) setCompletedMetrics(data as MissionMetrics);
-      })
-      .catch((err) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        // Mission may have been deleted before fetch completes; ignore.
-      });
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [apiBase, hikerSummaryOpen, summaryMissionId]);
 
   useEffect(() => {
     if (!targets.length) return;
@@ -392,6 +440,8 @@ export default function App() {
       setLon(selectedLon.toFixed(6));
       setMapCenter([selectedLat, selectedLon]);
       setIsValidCoord(true);
+      setPlacedHikers((prev) => prev.filter((hiker) => isPointInsideBounds(hiker.lat, hiker.lon, bounds)));
+      setIsPlacingHiker(false);
     },
     []
   );
@@ -407,6 +457,8 @@ export default function App() {
     const bounds = customAreaBounds(latValue, lonValue, sideKm / 2);
     setSelectedBounds(bounds);
     setMapCenter([latValue, lonValue]);
+    setPlacedHikers((prev) => prev.filter((hiker) => isPointInsideBounds(hiker.lat, hiker.lon, bounds)));
+    setIsPlacingHiker(false);
   }, [lat, lon]);
 
   const onAlgorithmChange = useCallback((algorithm: AlgorithmOption) => {
@@ -417,13 +469,72 @@ export default function App() {
 
   const onResetMission = useCallback(() => {
     runningMissionIdRef.current = null;
+    nextHikerNumberRef.current = 1;
     setDroneTrails({});
+    setPlacedHikers([]);
+    setSelectedHikerId(null);
+    setIsPlacingHiker(false);
     resetMissionLock();
   }, [resetMissionLock]);
 
-  const normalizedSearchStatus = normalizeMissionStatus(searchStatus);
-  const missionActive = normalizedSearchStatus === "running";
-  const missionComplete = normalizedSearchStatus === "complete";
+  const onAddHiker = useCallback(() => {
+    if (!selectedBounds || !hikerPlacementEditable) return;
+    setSelectedHikerId(null);
+    setIsPlacingHiker((current) => !current);
+  }, [hikerPlacementEditable, selectedBounds]);
+
+  const onPlaceHiker = useCallback(
+    (nextLat: number, nextLon: number) => {
+      if (!selectedBounds || !hikerPlacementEditable || !isPlacingHiker) return;
+      if (!isPointInsideBounds(nextLat, nextLon, selectedBounds)) return;
+      const newHiker: PlacedHiker = {
+        id: `hiker-${nextHikerNumberRef.current}`,
+        lat: nextLat,
+        lon: nextLon,
+        movement: "stationary"
+      };
+      nextHikerNumberRef.current += 1;
+      setPlacedHikers((prev) => [...prev, newHiker]);
+    },
+    [hikerPlacementEditable, isPlacingHiker, selectedBounds]
+  );
+
+  const onMoveHiker = useCallback(
+    (hikerId: string, nextLat: number, nextLon: number) => {
+      if (!selectedBounds || !hikerPlacementEditable) return;
+      const [lat, lon] = clampPointToBounds(nextLat, nextLon, selectedBounds);
+      setPlacedHikers((prev) => prev.map((hiker) => (hiker.id === hikerId ? { ...hiker, lat, lon } : hiker)));
+    },
+    [hikerPlacementEditable, selectedBounds]
+  );
+
+  const onHikerMovementChange = useCallback(
+    (movement: HikerMovement) => {
+      if (!hikerPlacementEditable || !selectedHikerId) return;
+      setPlacedHikers((prev) =>
+        prev.map((hiker) => (hiker.id === selectedHikerId ? { ...hiker, movement } : hiker))
+      );
+    },
+    [hikerPlacementEditable, selectedHikerId]
+  );
+
+  const onRemoveHiker = useCallback(
+    (hikerId: string) => {
+      if (!hikerPlacementEditable) return;
+      setPlacedHikers((prev) => prev.filter((hiker) => hiker.id !== hikerId));
+      setSelectedHikerId((current) => (current === hikerId ? null : current));
+    },
+    [hikerPlacementEditable]
+  );
+
+  const onClearHikers = useCallback(() => {
+    if (!hikerPlacementEditable) return;
+    nextHikerNumberRef.current = 1;
+    setPlacedHikers([]);
+    setSelectedHikerId(null);
+    setIsPlacingHiker(false);
+  }, [hikerPlacementEditable]);
+
   const lostHikerCount = targets.filter((target) => target.status !== "found").length;
 
   return (
@@ -439,8 +550,15 @@ export default function App() {
           missionActive={missionActive}
           validDrones={validDrones}
           targets={targets}
+          placedHikers={placedHikers}
+          hikerPlacementEditable={hikerPlacementEditable}
+          hikerPlacementMode={isPlacingHiker}
           getHikerLabel={getHikerLabel}
+          getPlacedHikerLabel={getPlacedHikerLabel}
           setSelectedDrone={setSelectedDrone}
+          onSelectHiker={setSelectedHikerId}
+          onPlaceHiker={onPlaceHiker}
+          onMoveHiker={onMoveHiker}
           droneTrails={droneTrails}
           selectedAlgorithm={selectedAlgorithm}
           onSelectArea={onSelectArea}
@@ -449,7 +567,7 @@ export default function App() {
         <aside className="left-rail">
           <AlertsPanel
             missionComplete={missionComplete}
-            normalizedSearchStatus={normalizedSearchStatus}
+            missionStatus={missionStatus}
             selectedBounds={selectedBounds}
             wsConnected={wsConnected}
           />
@@ -458,10 +576,11 @@ export default function App() {
             telemetryCount={telemetry.length}
             validDroneCount={validDroneCount}
             missionActive={missionActive}
-            searchStatus={searchStatus}
+            missionStatus={missionStatus}
             lostHikerCount={lostHikerCount}
             telemetryMode={telemetryMode}
             selectedAlgorithm={selectedAlgorithm}
+            algorithmOptions={algorithmOptions}
           />
           <LegendPanel />
         </aside>
@@ -478,27 +597,57 @@ export default function App() {
           />
           <ActionsPanel
             selectedBounds={selectedBounds}
+            missionStatus={missionStatus}
             missionActive={missionActive}
             missionLocked={missionLocked}
             validDroneCount={validDroneCount}
             mission={mission}
             selectedAlgorithm={selectedAlgorithm}
+            algorithmOptions={algorithmOptions}
             onAlgorithmChange={onAlgorithmChange}
             onStartMission={startMission}
             onStopMission={stopMission}
+            onRecallDrones={recallDrones}
             onResetMission={onResetMission}
+          />
+          <HikerSetupPanel
+            selectedBoundsReady={selectedBounds != null}
+            hikers={placedHikers}
+            editable={hikerPlacementEditable}
+            placementMode={isPlacingHiker}
+            getHikerLabel={getPlacedHikerLabel}
+            onAddHiker={onAddHiker}
+            onSelectHiker={setSelectedHikerId}
+            onRemoveHiker={onRemoveHiker}
+            onClearHikers={onClearHikers}
+          />
+          <BenchmarkPanel
+            apiBase={apiBase}
+            selectedBounds={selectedBounds}
+            validDroneCount={validDroneCount}
+            progressMessage={benchmarkProgress}
+            algorithmOptions={algorithmOptions}
           />
           <FoundHikersPanel hikers={foundHikersSorted} getHikerLabel={getHikerLabel} />
         </aside>
       </main>
 
       <DroneModal drone={selectedDrone} onClose={() => setSelectedDrone(null)} />
-      <HikerSummaryModal
-        isOpen={hikerSummaryOpen}
-        onClose={() => setHikerSummaryOpen(false)}
+      <HikerModal
+        hiker={selectedPlacedHiker}
+        label={selectedPlacedHikerLabel}
+        editable={hikerPlacementEditable}
+        onMovementChange={onHikerMovementChange}
+        onClose={() => setSelectedHikerId(null)}
+      />
+      <SearchSummaryModal
+        isOpen={searchSummaryOpen}
+        onClose={() => setSearchSummaryOpen(false)}
         targets={completedTargetsSorted}
         getHikerLabel={getHikerLabel}
+        onRecall={recallDrones}
         algorithm={completedMetrics?.algorithm ?? mission?.algorithm ?? selectedAlgorithm}
+        algorithmOptions={algorithmOptions}
         completionElapsedSeconds={completionElapsedSeconds}
         metrics={completedMetrics}
       />

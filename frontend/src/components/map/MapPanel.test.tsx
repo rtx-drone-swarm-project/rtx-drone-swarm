@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   polyline: vi.fn((_props: Record<string, unknown>) => null),
   makeCentroidIcon: vi.fn((_label: string, _phase?: string | null) => ({ icon: "centroid" })),
   makeDroneIcon: vi.fn((_label: string, _role?: string | null, _heading?: number) => ({ icon: "drone" })),
+  makePlacedHikerIcon: vi.fn((_label: string, _movement: string, _locked?: boolean) => ({ icon: "placed-hiker" })),
   makeTargetCircleIcon: vi.fn((_label: string, _status?: string | null) => ({ icon: "target" }))
 }));
 let mapEventHandlers: Record<string, () => void> = {};
@@ -40,10 +41,12 @@ vi.mock("react-leaflet", () => ({
 }));
 
 vi.mock("./MapBBoxDrawer", () => ({ default: () => null }));
+vi.mock("./MapClickSelector", () => ({ default: () => null }));
 vi.mock("./MapRecenter", () => ({ default: () => null }));
 vi.mock("./icons", () => ({
   makeCentroidIcon: mocks.makeCentroidIcon,
   makeDroneIcon: mocks.makeDroneIcon,
+  makePlacedHikerIcon: mocks.makePlacedHikerIcon,
   makeTargetCircleIcon: mocks.makeTargetCircleIcon
 }));
 
@@ -55,8 +58,15 @@ const defaultProps = {
   missionActive: false,
   validDrones: [],
   targets: [],
+  placedHikers: [],
+  hikerPlacementEditable: false,
+  hikerPlacementMode: false,
   getHikerLabel: (id: string | number) => `Hiker ${id}`,
+  getPlacedHikerLabel: (_hiker: any, index: number) => `Hiker ${index + 1}`,
   setSelectedDrone: vi.fn(),
+  onSelectHiker: vi.fn(),
+  onPlaceHiker: vi.fn(),
+  onMoveHiker: vi.fn(),
   onSelectArea: vi.fn()
 };
 
@@ -73,6 +83,7 @@ describe("MapPanel", () => {
     mocks.polyline.mockClear();
     mocks.makeCentroidIcon.mockClear();
     mocks.makeDroneIcon.mockClear();
+    mocks.makePlacedHikerIcon.mockClear();
     mocks.makeTargetCircleIcon.mockClear();
     mapEventHandlers = {};
   });
@@ -239,5 +250,41 @@ describe("MapPanel", () => {
         className: "sweep-drone-trail"
       })
     );
+  });
+
+  it("renders placed hikers as draggable markers before mission start", () => {
+    const onMoveHiker = vi.fn();
+    const onSelectHiker = vi.fn();
+    render(
+      <MapPanel
+        {...defaultProps}
+        hikerPlacementEditable
+        placedHikers={[{ id: "hiker-1", lat: 33.51, lon: -117.21, movement: "stationary" }]}
+        onMoveHiker={onMoveHiker}
+        onSelectHiker={onSelectHiker}
+      />
+    );
+
+    expect(mocks.makePlacedHikerIcon).toHaveBeenCalledWith("Hiker 1", "stationary", false);
+    const markerProps = mocks.marker.mock.calls.map(([props]) => props).find((props) => props.draggable === true);
+    expect(markerProps?.position).toEqual([33.51, -117.21]);
+  });
+
+  it("hides placed hiker markers that already exist as runtime targets", () => {
+    render(
+      <MapPanel
+        {...defaultProps}
+        missionActive
+        targets={[{ id: "hiker-1", lat: 33.51, lon: -117.21, status: "wandering" }]}
+        placedHikers={[
+          { id: "hiker-1", lat: 33.51, lon: -117.21, movement: "stationary" },
+          { id: "hiker-2", lat: 33.52, lon: -117.22, movement: "moving" }
+        ]}
+      />
+    );
+
+    expect(mocks.makeTargetCircleIcon).toHaveBeenCalledWith("Hiker hiker-1", "wandering");
+    expect(mocks.makePlacedHikerIcon).toHaveBeenCalledTimes(1);
+    expect(mocks.makePlacedHikerIcon).toHaveBeenCalledWith("Hiker 2", "moving", true);
   });
 });

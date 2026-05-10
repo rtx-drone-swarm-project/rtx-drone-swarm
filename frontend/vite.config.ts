@@ -8,6 +8,8 @@ export default defineConfig({
     host: "0.0.0.0",
     proxy: {
       "/missions": "http://backend:8000",
+      "/algorithms": "http://backend:8000",
+      "/benchmark": "http://backend:8000",
       "/health": "http://backend:8000",
       "/ws": {
         target: "ws://backend:8000",

@@ -7,10 +7,15 @@ import os
 
 SWARM_COMMAND_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "swarm_command.py"
 LAUNCH_SITL_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "launch_sitl.sh"
+BENCHMARK_DB_PATH = Path(os.environ.get(
+    "BENCHMARK_DB_PATH",
+    str(Path(__file__).resolve().parents[1] / "data" / "benchmarks.db"),
+))
 
 DEFAULT_DISPATCH_HOST = "127.0.0.1"
 DEFAULT_DISPATCH_TIMEOUT_SECONDS = 15.0
 DEFAULT_DISPATCH_ALT = 30.0
+DEFAULT_RECALL_ALT = 30.0
 
 DISPATCH_MAX_WORKERS = 15
 SLEEP_BETWEEN_DISPATCH_SECONDS = 0.5

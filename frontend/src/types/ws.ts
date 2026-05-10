@@ -1,5 +1,7 @@
 import type { EntityId, Target, TelemetryDrone } from "./mission";
 
+export type MissionStatus = "idle" | "searching" | "search_complete" | "paused" | "recalling" | "mission_complete";
+
 export type TelemetryMessage = {
   type: "telemetry";
   drones?: TelemetryDrone[];
@@ -7,7 +9,7 @@ export type TelemetryMessage = {
 
 export type MissionStatusMessage = {
   type: "mission_status";
-  status?: string;
+  status: MissionStatus;
   progress?: number;
   targets?: Target[];
   mission_id?: EntityId;
@@ -27,6 +29,15 @@ export type TargetFoundMessage = {
   found_at?: number;
 };
 
+export type BenchmarkProgressMessage = {
+  type: "benchmark_progress";
+  run_id?: string;
+  completed?: number;
+  total?: number;
+  status?: string;
+  error?: string;
+};
+
 export type UnknownMessage = {
   type?: string;
   [key: string]: unknown;
@@ -37,4 +48,5 @@ export type WsMessage =
   | MissionStatusMessage
   | MissionProgressMessage
   | TargetFoundMessage
+  | BenchmarkProgressMessage
   | UnknownMessage;

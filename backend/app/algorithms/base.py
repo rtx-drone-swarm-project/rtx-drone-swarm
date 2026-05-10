@@ -2,6 +2,7 @@ from typing import List, Dict, Tuple
 import numpy as np
 import math
 import pyned2lla
+from app.models import Mission
 
 # Distance (degrees) within which a drone detects a target.
 # Algorithms use this for sweep row density.  simulation.py imports from here
@@ -10,7 +11,7 @@ DETECTION_RADIUS = 0.002
 
 def build_search_grid(bounds: dict, n: int = 100) -> np.ndarray:
     """
-    Build an n×n grid of [lat, lon] points covering the mission bounds.
+    Build an n*n grid of [lat, lon] points covering the mission bounds.
     Returns shape (n*n, 2) array of [lat, lon] points.
     Used by Voronoi/APF algorithms and as the legacy coverage grid.
     """
@@ -30,10 +31,10 @@ def build_search_grid(bounds: dict, n: int = 100) -> np.ndarray:
 def build_dense_coverage_grid(bounds: dict) -> np.ndarray:
     """Dense grid at DETECTION_RADIUS spacing for accurate area-coverage measurement.
 
-    Each cell represents a DETECTION_RADIUS × DETECTION_RADIUS patch of ground.
+    Each cell represents a DETECTION_RADIUS * DETECTION_RADIUS patch of ground.
     Coverage % = (cells visited within DETECTION_RADIUS of any drone) / total cells.
-    This is far more accurate than the sparse 15×15 grid, whose checkpoints are
-    ~0.007° apart — 3.5× DETECTION_RADIUS — so the sweep algorithm can cover 100%
+    This is far more accurate than the sparse 15*15 grid, whose checkpoints are
+    ~0.007° apart — 3.5* DETECTION_RADIUS — so the sweep algorithm can cover 100%
     of the area while marking only ~15% on the old metric.
 
     The max bound is always included as an explicit endpoint so non-multiple
@@ -51,10 +52,15 @@ def build_dense_coverage_grid(bounds: dict) -> np.ndarray:
     return np.column_stack([ll.ravel(), lo.ravel()])
 
 class BaseSearchAlgorithm:
-    def initialize(self, mission: dict) -> None:
+    algorithm_key: str | None = None
+    display_name: str | None = None
+    description: str | None = None
+    display_order: int = 100
+
+    def initialize(self, mission: Mission) -> None:
         """Run once when the mission starts (generate grids or waypoints)"""
         pass
 
-    def get_target_waypoints(self, mission: dict, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
+    def get_target_waypoints(self, mission: Mission, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
         """Run every simulation tick to get the next target coordinate for each free drone."""
         raise NotImplementedError("Every algorithm must implement get_target_waypoints()")

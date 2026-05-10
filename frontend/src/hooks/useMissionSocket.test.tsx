@@ -28,6 +28,7 @@ describe("useMissionSocket", () => {
     const onMissionStatus = vi.fn();
     const onMissionProgress = vi.fn();
     const onTargetFound = vi.fn();
+    const onBenchmarkProgress = vi.fn();
 
     function Harness() {
       useMissionSocket({
@@ -36,7 +37,8 @@ describe("useMissionSocket", () => {
         onTelemetry,
         onMissionStatus,
         onMissionProgress,
-        onTargetFound
+        onTargetFound,
+        onBenchmarkProgress
       });
       return null;
     }
@@ -47,14 +49,16 @@ describe("useMissionSocket", () => {
     socket.onopen?.();
 
     socket.onmessage?.({ data: JSON.stringify({ type: "telemetry", drones: [{ id: "d1", lat: 1, lon: 2 }] }) });
-    socket.onmessage?.({ data: JSON.stringify({ type: "mission_status", status: "running", mission_id: "m1" }) });
+    socket.onmessage?.({ data: JSON.stringify({ type: "mission_status", status: "searching", mission_id: "m1" }) });
     socket.onmessage?.({ data: JSON.stringify({ type: "mission_progress", progress: 42 }) });
     socket.onmessage?.({ data: JSON.stringify({ type: "target_found", target_id: "t1", lat: 1, lon: 2 }) });
+    socket.onmessage?.({ data: JSON.stringify({ type: "benchmark_progress", run_id: "b1", completed: 1, total: 3 }) });
 
     expect(onConnectedChange).toHaveBeenCalledWith(true);
     expect(onTelemetry).toHaveBeenCalledTimes(1);
     expect(onMissionStatus).toHaveBeenCalledTimes(1);
     expect(onMissionProgress).toHaveBeenCalledTimes(1);
     expect(onTargetFound).toHaveBeenCalledTimes(1);
+    expect(onBenchmarkProgress).toHaveBeenCalledTimes(1);
   });
 });
