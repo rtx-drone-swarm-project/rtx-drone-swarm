@@ -28,7 +28,9 @@ def _rng_int(rng, high: int) -> int:
         return int(rng.integers(0, high))
     if hasattr(rng, "randrange"):
         return int(rng.randrange(high))
-    return int(rng.randint(0, high))
+    if high <= 0:
+        return 0
+    return int(rng.randint(0, high - 1))
 
 
 def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5, rng=None):
