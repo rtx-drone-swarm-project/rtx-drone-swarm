@@ -1,22 +1,30 @@
 from typing import List, Dict, Tuple
 import numpy as np
 import math
+import pyned2lla
 
 # Distance (degrees) within which a drone detects a target.
 # Algorithms use this for sweep row density.  simulation.py imports from here
 # so both always use the same value.
 DETECTION_RADIUS = 0.002
 
-def build_search_grid(bounds: dict, n: int = 15) -> np.ndarray:
+def build_search_grid(bounds: dict, n: int = 100) -> np.ndarray:
     """
     Build an n×n grid of [lat, lon] points covering the mission bounds.
     Returns shape (n*n, 2) array of [lat, lon] points.
     Used by Voronoi/APF algorithms and as the legacy coverage grid.
     """
-    lats = np.linspace(bounds["min_lat"], bounds["max_lat"], n)
-    lons = np.linspace(bounds["min_lon"], bounds["max_lon"], n)
-    ll, lo = np.meshgrid(lats, lons)
-    return np.column_stack([ll.ravel(), lo.ravel()])
+    D2R = math.pi/180
+    len, _ = pyned2lla.lla2ned(bounds["min_lat"]*math.pi/180, bounds["min_lon"]*D2R, 0, bounds["max_lat"]*math.pi/180, bounds["min_lon"]*D2R, 0, pyned2lla.wgs84())[:2]
+    _, height = pyned2lla.lla2ned(bounds["min_lat"]*math.pi/180, bounds["min_lon"]*D2R, 0, bounds["min_lat"]*math.pi/180, bounds["max_lon"]*D2R, 0, pyned2lla.wgs84())[:2]
+    
+    x_coords = np.arange(n, dtype=float)
+    y_coords = np.arange(n, dtype=float)
+    x_coords *= len / n
+    y_coords *= height / n
+    xx, yy = np.meshgrid(x_coords, y_coords)
+    
+    return np.column_stack([xx.ravel(), yy.ravel()])
 
 
 def build_dense_coverage_grid(bounds: dict) -> np.ndarray:

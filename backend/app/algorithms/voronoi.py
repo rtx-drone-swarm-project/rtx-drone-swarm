@@ -1,25 +1,46 @@
 import math
 import numpy as np
+import pyned2lla
 from typing import List, Dict, Tuple
 from app.algorithms.base import BaseSearchAlgorithm
 
-def lloyd_step(grid_points: np.ndarray, centroids: np.ndarray):
+def lloyd_step(grid_points: np.ndarray, centroids: np.ndarray, bounds):
     """
     One iteration of Lloyd's algorithm in 2D lat/lon space.
     """
-    k = len(centroids)
-    distances = np.linalg.norm(grid_points[:, np.newaxis] - centroids, axis=2)
-    labels = np.argmin(distances, axis=1)
+    D2R = math.pi/180
+    R2D = 180/math.pi
+    lat = bounds["min_lat"]
+    lon = bounds["min_lon"]
+
+    for i in range(len(centroids)):
+        centroids[i] = pyned2lla.lla2ned(lat*D2R, lon*D2R, 0, centroids[i][0]*D2R, centroids[i][1]*D2R, 0, pyned2lla.wgs84())[:2] # convert to NED coordinates
+
+    k = len(centroids) # number of centroids
+
+    distances = np.linalg.norm(grid_points[:, np.newaxis] - centroids, axis=2) # compute distances from points to centroids
+    labels = np.argmin(distances, axis=1) # assign points to nearest centroid
 
     new_centroids = []
-    for i in range(k):
-        cluster_pts = grid_points[labels == i]
-        if len(cluster_pts) > 0:
-            new_centroids.append(cluster_pts.mean(axis=0))
-        else:
-            new_centroids.append(centroids[i])
 
-    return np.array(new_centroids), labels
+    for i in range(k): # compute new centroid for each
+        cluster_points = grid_points[labels == i]
+
+        if len(cluster_points) > 0: # if cluster has points, move towards mean, else random point in subregion
+            target = cluster_points.mean(axis=0)
+        else:
+            target = grid_points[np.random.randint(0, len(grid_points))]
+
+        new_centroids.append(target)
+
+    new_centroids = np.array(new_centroids)
+
+    for i in range(len(centroids)):
+        centroids[i] = pyned2lla.ned2lla(lat*D2R, lon*D2R, 0, new_centroids[i][0], new_centroids[i][1], 0, pyned2lla.wgs84())[:2] # convert back to lat/lon
+
+    centroids *= R2D # convert to degrees
+        
+    return centroids, labels
 
 def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5):
     k = len(centroids)
@@ -169,7 +190,7 @@ class VoronoiCoverage(BaseSearchAlgorithm):
                 pos_list.append([dlat, dlon])
                 
         positions = np.array(pos_list)
-        new_centroids, _ = lloyd_step(grid_np, positions)
+        new_centroids, _ = lloyd_step(grid_np, positions, mission["bounds"])
         
         for drone, centroid in zip(free_drones, new_centroids):
             # Ensure we return standard Python floats, not numpy types, so it's JSON serializable
