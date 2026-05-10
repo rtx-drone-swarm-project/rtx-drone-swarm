@@ -280,7 +280,7 @@ async def recall_mission(mission_id: str):
     mission = mission_db[mission_id]
     # Prevent invalid transitions
     if mission.status != "search_complete":
-        raise HTTPException(status_code=400, detail="Mission is not running")
+        raise HTTPException(status_code=400, detail="Mission must be 'search_complete' to initiate recall")
 
     # If already recalling, do nothing
     if mission.status == "recalling":

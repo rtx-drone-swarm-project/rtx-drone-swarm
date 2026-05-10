@@ -34,6 +34,7 @@ import type {
 import type {
   BenchmarkProgressMessage,
   MissionProgressMessage,
+  MissionStatus,
   MissionStatusMessage,
   TargetFoundMessage,
   TelemetryMessage
@@ -63,7 +64,7 @@ export default function App() {
   const [telemetry, setTelemetry] = useState<TelemetryDrone[]>([]);
   const [mission, setMission] = useState<MissionState>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [missionStatus, setMissionStatus] = useState("idle");
+  const [missionStatus, setMissionStatus] = useState<MissionStatus>("idle");
   const [progress, setProgress] = useState(0);
   const [targets, setTargets] = useState<Target[]>([]);
   const [foundHikers, setFoundHikers] = useState<FoundHiker[]>([]);
@@ -359,7 +360,7 @@ export default function App() {
     }
   }, [hikerPlacementEditable]);
 
-  const { startMission, stopMission, resetMissionLock, recallDrones, resetDrones } = useMissionActions({
+  const { startMission, stopMission, resetMissionLock, recallDrones } = useMissionActions({
     apiBase,
     missionLocked,
     selectedBounds,
@@ -594,6 +595,7 @@ export default function App() {
           />
           <ActionsPanel
             selectedBounds={selectedBounds}
+            missionStatus={missionStatus}
             missionActive={missionActive}
             missionLocked={missionLocked}
             validDroneCount={validDroneCount}
@@ -603,6 +605,7 @@ export default function App() {
             onAlgorithmChange={onAlgorithmChange}
             onStartMission={startMission}
             onStopMission={stopMission}
+            onRecallDrones={recallDrones}
             onResetMission={onResetMission}
           />
           <HikerSetupPanel
@@ -641,7 +644,6 @@ export default function App() {
         targets={completedTargetsSorted}
         getHikerLabel={getHikerLabel}
         onRecall={recallDrones}
-        onReset={resetDrones}
         algorithm={completedMetrics?.algorithm ?? mission?.algorithm ?? selectedAlgorithm}
         algorithmOptions={algorithmOptions}
         completionElapsedSeconds={completionElapsedSeconds}

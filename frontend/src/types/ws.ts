@@ -1,5 +1,7 @@
 import type { EntityId, Target, TelemetryDrone } from "./mission";
 
+export type MissionStatus = "idle" | "searching" | "search_complete" | "paused" | "recalling" | "mission_complete";
+
 export type TelemetryMessage = {
   type: "telemetry";
   drones?: TelemetryDrone[];
@@ -7,7 +9,7 @@ export type TelemetryMessage = {
 
 export type MissionStatusMessage = {
   type: "mission_status";
-  status: "idle" | "searching" | "search_complete" | "paused" | "recalling" | "mission_complete";
+  status: MissionStatus;
   progress?: number;
   targets?: Target[];
   mission_id?: EntityId;
