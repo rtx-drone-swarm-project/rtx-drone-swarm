@@ -985,7 +985,7 @@ body,
 
 .drone-icon-wrap {
   transform: rotate(var(--drone-rotation, 0deg));
-  transform-origin: center;
+  transform-origin: center center;
   transition: transform 0.35s linear;
 }
 

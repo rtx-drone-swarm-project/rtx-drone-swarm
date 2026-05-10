@@ -21,36 +21,46 @@ function InterpolatedDrone({ drone, label, setSelectedDrone }: {
   const startPos = useRef<[number, number]>([drone.lat, drone.lon]);
   const startTime = useRef<number>(performance.now());
   
-  // Track visual heading
+  const startHeading = useRef<number>(drone.heading || 0);
   const currentVisualHeading = useRef<number>(drone.heading || 0);
-  const targetHeading = useRef<number>(drone.heading || 0);
 
-  const TICK_DURATION = 500; 
- 
+  const TICK_DURATION = 500;
   const ROTATION_DURATION = 450; 
 
   const animate = () => {
     const now = performance.now();
     const elapsed = now - startTime.current;
     
+    // 1. POSITION: Linear (500ms)
     const tPos = Math.min(elapsed / TICK_DURATION, 0.99);
 
-    
     const linearRot = Math.min(elapsed / ROTATION_DURATION, 1.0);
+    // Quadratic Ease-Out is smoother than Cubic: 1 - (1 - x)^2
+    const tRot = 1 - (1 - linearRot) * (1 - linearRot);
 
-    const tRot = 1 - Math.pow(1 - linearRot, 3);
-
+    // Position Calculation
     const currentLat = startPos.current[0] + (drone.lat - startPos.current[0]) * tPos;
     const currentLon = startPos.current[1] + (drone.lon - startPos.current[1]) * tPos;
 
-    let diff = targetHeading.current - currentVisualHeading.current;
+    // Heading Calculation (Shortest Path)
+    let diff = (drone.heading || 0) - startHeading.current;
     diff = ((diff + 180) % 360 + 360) % 360 - 180;
     
-    const displayHeading = currentVisualHeading.current + (diff * tRot);
+    const displayHeading = startHeading.current + (diff * tRot);
+    currentVisualHeading.current = displayHeading;
 
     if (markerRef.current) {
+      // 1. Safe LatLng update (keeps clicks working perfectly)
       markerRef.current.setLatLng([currentLat, currentLon]);
-      markerRef.current.setIcon(makeDroneIcon(label, drone.role, displayHeading));
+      
+      // 2. Safe CSS Variable update (keeps CSS centering intact and avoids wobble)
+      const el = markerRef.current.getElement();
+      if (el) {
+        const iconInner = el.querySelector('.drone-icon-wrap') as HTMLElement;
+        if (iconInner) {
+          iconInner.style.setProperty('--drone-rotation', `${displayHeading}deg`);
+        }
+      }
     }
 
     requestRef.current = requestAnimationFrame(animate);
@@ -58,14 +68,12 @@ function InterpolatedDrone({ drone, label, setSelectedDrone }: {
 
   useEffect(() => {
     if (markerRef.current) {
+      // Sync position for next segment
       const currentOnScreen = markerRef.current.getLatLng();
       startPos.current = [currentOnScreen.lat, currentOnScreen.lng];
       
-      let lastDiff = targetHeading.current - currentVisualHeading.current;
-      lastDiff = ((lastDiff + 180) % 360 + 360) % 360 - 180;
-      currentVisualHeading.current = currentVisualHeading.current + lastDiff;
-      
-      targetHeading.current = drone.heading || 0;
+      // Capture exactly where the heading is right now to start the next turn
+      startHeading.current = currentVisualHeading.current;
     }
     
     startTime.current = performance.now();
