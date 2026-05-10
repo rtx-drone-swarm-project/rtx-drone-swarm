@@ -383,10 +383,10 @@ export default function App() {
   });
 
   useEffect(() => {
-  if (!mission || !targets.length) return;
-  const allFound = targets.every(t => t.status === "found");
-  if (!allFound) return;
-  if (summaryMissionId === mission.id) return;
+    if (!mission || !targets.length) return;
+    const allFound = targets.every((t) => t.status === "found");
+    if (!allFound) return;
+    if (summaryMissionId === mission.id) return;
 
     setCompletionElapsedSeconds(elapsedSeconds);
     setCompletedTargets(targets);

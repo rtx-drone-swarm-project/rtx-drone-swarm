@@ -8,6 +8,99 @@ import MapControlStack from "./MapControlStack";
 import MapRecenter from "./MapRecenter";
 import { makeCentroidIcon, makeDroneIcon, makePlacedHikerIcon, makeTargetCircleIcon } from "./icons";
 
+import L from "leaflet"
+
+import { useState, useEffect, useRef } from "react";
+
+function InterpolatedDrone({ drone, label, setSelectedDrone }: { 
+  drone: any, 
+  label: string, 
+  setSelectedDrone: (d: any) => void 
+}) {
+  const markerRef = useRef<L.Marker>(null);
+  const requestRef = useRef<number>();
+  
+  const startPos = useRef<[number, number]>([drone.lat, drone.lon]);
+  const startTime = useRef<number>(performance.now());
+  
+  const startHeading = useRef<number>(drone.heading || 0);
+  const currentVisualHeading = useRef<number>(drone.heading || 0);
+
+  const TICK_DURATION = 500;
+  const ROTATION_DURATION = 450; 
+
+  const animate = () => {
+    const now = performance.now();
+    const elapsed = now - startTime.current;
+    
+    // 1. POSITION: Linear (500ms)
+    const tPos = Math.min(elapsed / TICK_DURATION, 0.99);
+
+    const linearRot = Math.min(elapsed / ROTATION_DURATION, 1.0);
+    // Quadratic Ease-Out is smoother than Cubic: 1 - (1 - x)^2
+    const tRot = 1 - (1 - linearRot) * (1 - linearRot);
+
+    // Position Calculation
+    const currentLat = startPos.current[0] + (drone.lat - startPos.current[0]) * tPos;
+    const currentLon = startPos.current[1] + (drone.lon - startPos.current[1]) * tPos;
+
+    // Heading Calculation (Shortest Path)
+    let diff = (drone.heading || 0) - startHeading.current;
+    diff = ((diff + 180) % 360 + 360) % 360 - 180;
+    
+    const displayHeading = startHeading.current + (diff * tRot);
+    currentVisualHeading.current = displayHeading;
+
+    if (markerRef.current) {
+      // 1. Safe LatLng update (keeps clicks working perfectly)
+      markerRef.current.setLatLng([currentLat, currentLon]);
+      
+      // 2. Safe CSS Variable update (keeps CSS centering intact and avoids wobble)
+      const el = markerRef.current.getElement();
+      if (el) {
+        const iconInner = el.querySelector('.drone-icon-wrap') as HTMLElement;
+        if (iconInner) {
+          iconInner.style.setProperty('--drone-rotation', `${displayHeading}deg`);
+        }
+      }
+    }
+
+    requestRef.current = requestAnimationFrame(animate);
+  };
+
+  useEffect(() => {
+    if (markerRef.current) {
+      // Sync position for next segment
+      const currentOnScreen = markerRef.current.getLatLng();
+      startPos.current = [currentOnScreen.lat, currentOnScreen.lng];
+      
+      // Capture exactly where the heading is right now to start the next turn
+      startHeading.current = currentVisualHeading.current;
+    }
+    
+    startTime.current = performance.now();
+    requestRef.current = requestAnimationFrame(animate);
+    
+    return () => {
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    };
+  }, [drone.lat, drone.lon, drone.heading]);
+
+  return (
+    <Marker
+      ref={markerRef}
+      position={startPos.current}
+      icon={makeDroneIcon(label, drone.role, currentVisualHeading.current)}
+      eventHandlers={{
+        click: (e) => {
+          L.DomEvent.stopPropagation(e);
+          setSelectedDrone(drone);
+        },
+      }}
+    />
+  );
+}
+
 type MapPanelProps = {
   defaultCenter: [number, number];
   defaultZoom: number;
@@ -31,6 +124,8 @@ type MapPanelProps = {
 };
 
 const TRAIL_COLORS = ["#34d399", "#60a5fa", "#f472b6", "#fbbf24", "#a78bfa", "#22d3ee", "#fb7185", "#4ade80"];
+
+
 
 function trailColorForIndex(idx: number): string {
   return TRAIL_COLORS[idx % TRAIL_COLORS.length];
@@ -123,7 +218,7 @@ export default function MapPanel({
             );
           })}
 
-        {validDrones.map((drone, idx) => {
+        {/*{validDrones.map((drone, idx) => {
           const rawId = String(drone.id);
           const label = rawId.startsWith("D") ? rawId : `D${rawId || idx + 1}`;
           return (
@@ -134,6 +229,19 @@ export default function MapPanel({
               eventHandlers={{
                 click: () => setSelectedDrone(drone)
               }}
+            />
+          );
+        })} */}
+
+        {validDrones.map((drone, idx) => {
+          const rawId = String(drone.id);
+          const label = rawId.startsWith("D") ? rawId : `D${rawId || idx + 1}`;
+          return (
+            <InterpolatedDrone
+              key={`${String(drone.id)}-${drone.role ?? "normal"}`}
+              drone={drone}
+              label={label}
+              setSelectedDrone={setSelectedDrone}
             />
           );
         })}
