@@ -1,9 +1,10 @@
 import { ALGORITHM_OPTIONS, type AlgorithmOption, type Bounds, type MissionRecord } from "../../types/mission";
+import type { MissionStatus } from "../../types/ws";
 import CollapsibleSection from "../common/CollapsibleSection";
 
 type ActionsPanelProps = {
   selectedBounds: Bounds | null;
-  missionStatus: string;
+  missionStatus: MissionStatus;
   missionActive: boolean;
   missionLocked: boolean;
   validDroneCount: number;
@@ -31,6 +32,7 @@ export default function ActionsPanel({
   onResetMission
 }: ActionsPanelProps) {
   const selectorDisabled = missionActive || missionLocked;
+  const missionRunning = missionStatus === "searching" || missionStatus === "recalling";
 
   return (
     <CollapsibleSection title="Actions">
@@ -83,7 +85,7 @@ export default function ActionsPanel({
         Recall Drones
       </button>
 
-      <button className="action-btn reset" onClick={onResetMission} disabled={missionActive}>
+      <button className="action-btn reset" onClick={onResetMission} disabled={missionRunning}>
         Reset Mission
       </button>
     </CollapsibleSection>
