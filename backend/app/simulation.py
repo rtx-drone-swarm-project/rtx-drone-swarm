@@ -122,26 +122,23 @@ def _assign_confirmation_drone(mission: Mission, target: dict, finder_drone: dic
     target["status"] = "confirming"
     return confirmer
 
-def _send_live_drone_modes(mission: Mission, live_drone_ids: set[str], mode: str) -> None:
-    """Send mode commands to live drones."""
-    if not live_drone_ids:
-        return
 
-    airborne_states = sitl_bridge.get_states_by_sysid()
+def _send_live_drone_hold_position(mission, live_drone_ids):
     for drone in mission.drones:
+        sysid = drone.get("sysid")
+
         if str(drone.get("id")) not in live_drone_ids:
             continue
 
-        sysid = drone.get("sysid")
-        if not sysid or sitl_bridge.is_dispatching(sysid):
+        lat = drone.get("lat")
+        lon = drone.get("lon")
+        alt = drone.get("alt")
+
+        if lat is None or lon is None or alt is None:
             continue
 
-        state = airborne_states.get(sysid, {})
-        rel_alt = float(state.get("alt") or 0)
-        if not state.get("armed") or rel_alt < 3.0:
-            continue
+        sitl_bridge.send_goto(sysid, lat, lon, alt)
 
-        sitl_bridge.send_mode(sysid, mode)
 
 def _send_live_drone_gotos(mission: Mission, live_drone_ids: set[str], waypoint_map: dict) -> None:
     """Send goto commands to live drones toward targets, queued points, or centroids.
@@ -442,7 +439,6 @@ async def simulation_loop(mission_id: str):
     if not getattr(mission, "status", None):
         mission.status = "searching"
     recall_sent = mission.status == "recalling"
-    hover_sent = mission.status == "paused"
 
     active_strategy = get_algorithm(mission.algorithm)
     active_strategy.initialize(mission)
@@ -481,14 +477,10 @@ async def simulation_loop(mission_id: str):
             all_targets_found = await _finalize_mission_progress(mission)
             if all_targets_found:
                 mission.status = "search_complete"
-                if not hover_sent:
-                    _send_live_drone_modes(mission, live_drone_ids, "LOITER")
-                    hover_sent = True
+                _send_live_drone_hold_position(mission, live_drone_ids)
 
         elif mission.status == "search_complete":
-            if not hover_sent:
-                _send_live_drone_modes(mission, live_drone_ids, "LOITER")
-                hover_sent = True
+            pass
 
         elif mission.status == "paused":
             pass
