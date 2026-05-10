@@ -265,4 +265,130 @@ describe("App integration", () => {
       }
     ]);
   });
+
+  it("restarts hiker numbering after clearing all hikers", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+
+    const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/benchmark/runs")) {
+        return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
+      }
+      if (url.endsWith("/missions")) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m-clear", status: "idle", progress: 0 }) });
+      }
+      if (url.endsWith("/missions/m-clear/start")) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m-clear", status: "searching", progress: 0, targets: [] }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ algorithms: [] }) });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Hiker" }));
+    fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
+    fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear All Hikers" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Hiker" }));
+    fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start Mission" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-clear/start"))).toBe(true);
+    });
+
+    const createMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions"));
+    expect(createMissionRequest).toBeTruthy();
+    if (!createMissionRequest) throw new Error("missing create mission request");
+    const body = JSON.parse(String(createMissionRequest[1]?.body));
+
+    expect(body.hikers).toEqual([
+      {
+        id: "hiker-1",
+        lat: 33.5,
+        lon: -117.2,
+        found: false,
+        movement: "stationary"
+      }
+    ]);
+  });
+
+  it("restarts hiker numbering after resetting the mission", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+
+    let missionNumber = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/benchmark/runs")) {
+        return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
+      }
+      if (url.endsWith("/missions") && init?.method === "POST") {
+        missionNumber += 1;
+        return Promise.resolve({ ok: true, json: async () => ({ id: `m-reset-${missionNumber}`, status: "idle", progress: 0 }) });
+      }
+      if (url.endsWith("/missions/m-reset-1/start")) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m-reset-1", status: "searching", progress: 0, targets: [] }) });
+      }
+      if (url.endsWith("/missions/m-reset-1/stop")) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m-reset-1", status: "paused", progress: 0, targets: [] }) });
+      }
+      if (url.endsWith("/missions/m-reset-1") && init?.method === "DELETE") {
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      }
+      if (url.endsWith("/missions/m-reset-2/start")) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m-reset-2", status: "searching", progress: 0, targets: [] }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ algorithms: [] }) });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Hiker" }));
+    fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
+    fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start Mission" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-reset-1/start"))).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop Mission" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-reset-1/stop"))).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset Mission" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/missions/m-reset-1") && init?.method === "DELETE")).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Hiker" }));
+    fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start Mission" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-reset-2/start"))).toBe(true);
+    });
+
+    const createMissionRequests = fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/missions") && init?.method === "POST");
+    const secondBody = JSON.parse(String(createMissionRequests[1][1]?.body));
+
+    expect(secondBody.hikers).toEqual([
+      {
+        id: "hiker-1",
+        lat: 33.5,
+        lon: -117.2,
+        found: false,
+        movement: "stationary"
+      }
+    ]);
+  });
 });

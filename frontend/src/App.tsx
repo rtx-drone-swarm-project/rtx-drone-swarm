@@ -469,6 +469,7 @@ export default function App() {
 
   const onResetMission = useCallback(() => {
     runningMissionIdRef.current = null;
+    nextHikerNumberRef.current = 1;
     setDroneTrails({});
     setPlacedHikers([]);
     setSelectedHikerId(null);
@@ -528,6 +529,7 @@ export default function App() {
 
   const onClearHikers = useCallback(() => {
     if (!hikerPlacementEditable) return;
+    nextHikerNumberRef.current = 1;
     setPlacedHikers([]);
     setSelectedHikerId(null);
     setIsPlacingHiker(false);

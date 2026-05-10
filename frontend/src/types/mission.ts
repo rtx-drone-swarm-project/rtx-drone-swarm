@@ -1,5 +1,3 @@
-export type MissionStatus = "idle" | "running" | "stopped" | "complete";
-
 export type AlgorithmOption = string;
 
 export type AlgorithmMetadata = {

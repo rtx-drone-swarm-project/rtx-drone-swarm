@@ -269,4 +269,22 @@ describe("MapPanel", () => {
     const markerProps = mocks.marker.mock.calls.map(([props]) => props).find((props) => props.draggable === true);
     expect(markerProps?.position).toEqual([33.51, -117.21]);
   });
+
+  it("hides placed hiker markers that already exist as runtime targets", () => {
+    render(
+      <MapPanel
+        {...defaultProps}
+        missionActive
+        targets={[{ id: "hiker-1", lat: 33.51, lon: -117.21, status: "wandering" }]}
+        placedHikers={[
+          { id: "hiker-1", lat: 33.51, lon: -117.21, movement: "stationary" },
+          { id: "hiker-2", lat: 33.52, lon: -117.22, movement: "moving" }
+        ]}
+      />
+    );
+
+    expect(mocks.makeTargetCircleIcon).toHaveBeenCalledWith("Hiker hiker-1", "wandering");
+    expect(mocks.makePlacedHikerIcon).toHaveBeenCalledTimes(1);
+    expect(mocks.makePlacedHikerIcon).toHaveBeenCalledWith("Hiker 2", "moving", true);
+  });
 });

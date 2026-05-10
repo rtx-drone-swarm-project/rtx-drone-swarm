@@ -59,6 +59,7 @@ export default function MapPanel({
 }: MapPanelProps) {
   const sweepActive = selectedAlgorithm === "sweep" && missionActive;
   const rectBounds = selectedBounds ? boundsToLeaflet(selectedBounds) : null;
+  const runtimeTargetIds = new Set(targets.map((target) => String(target.id)));
 
   return (
     <div className={`map-wrap ${hikerPlacementMode ? "is-placing-hiker" : ""}`}>
@@ -149,6 +150,7 @@ export default function MapPanel({
         })}
 
         {placedHikers.map((hiker, index) => {
+          if (runtimeTargetIds.has(String(hiker.id))) return null;
           const label = getPlacedHikerLabel(hiker, index);
           return (
             <Marker
