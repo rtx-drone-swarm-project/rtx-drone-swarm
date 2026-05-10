@@ -1,5 +1,3 @@
-export type MissionStatus = "idle" | "running" | "stopped" | "complete";
-
 export type AlgorithmOption = string;
 
 export type AlgorithmMetadata = {
@@ -99,6 +97,15 @@ export type BenchmarkRequestPayload = {
 
 export type EntityId = string | number;
 
+export type HikerMovement = "stationary" | "moving";
+
+export type PlacedHiker = {
+  id: string;
+  lat: number;
+  lon: number;
+  movement: HikerMovement;
+};
+
 export type Bounds = {
   min_lat: number;
   max_lat: number;
@@ -130,6 +137,7 @@ export type Target = {
   lat: number;
   lon: number;
   status?: string;
+  movement?: HikerMovement;
 };
 
 export type FoundHiker = {
@@ -210,5 +218,6 @@ export type MissionCreateRequest = {
     lat: number;
     lon: number;
     found: boolean;
+    movement?: HikerMovement;
   }>;
 };

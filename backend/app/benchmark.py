@@ -208,6 +208,7 @@ async def run_headless_trial(
 
         all_targets_found = await _finalize_mission_progress(mission)
         if all_targets_found:
+            mission["status"] = "complete"
             break
 
     elapsed = int(mission.get("elapsed_seconds", 0))
