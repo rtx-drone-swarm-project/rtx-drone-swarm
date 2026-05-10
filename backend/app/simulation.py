@@ -51,6 +51,8 @@ async def _emit_target_found(mission: Mission, target: dict, drone_id: Optional[
         return
     found_ids.add(target["id"])
     target["found_at"] = mission.elapsed_seconds
+    if getattr(mission, "_suppress_broadcasts", False):
+        return
     await manager.broadcast(
         {
             "type": "target_found",
@@ -219,6 +221,8 @@ async def _update_drones_for_tick(mission: Mission, live_drone_ids: set[str], wa
     state either toward an assigned target, toward a centroid, or with simple
     bounded wandering when they have no coverage point yet.
     """
+    rng = getattr(mission, "_rng", random)
+    bounds = mission.bounds
     for drone in mission.drones:
         has_live_telemetry = str(drone.get("id")) in live_drone_ids
         target_id = drone.get("assigned_target_id")
@@ -241,16 +245,14 @@ async def _update_drones_for_tick(mission: Mission, live_drone_ids: set[str], wa
             d_lat = target["lat"] - drone["lat"]
             d_lon = target["lon"] - drone["lon"]
             dist = math.hypot(d_lat, d_lon)
-
-            
             if dist > TARGET_STOP_RADIUS:
-                
-                '''if not has_live_telemetry:
-                    drone["lat"] += (d_lat / dist) * SPEED
-                    drone["lon"] += (d_lon / dist) * SPEED 
-                    drone["lat"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)        #ONLY FOR USING MOCK DATA, NOT NEEDED?
-                    drone["lon"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)'''
-                    
+                if not has_live_telemetry and getattr(mission, "_move_assigned_sim_drones", False):
+                    step_lat = (d_lat / dist) * SPEED
+                    step_lon = (d_lon / dist) * SPEED
+                    drone["lat"] += step_lat
+                    drone["lon"] += step_lon
+                    _bounce_entity(drone, bounds, step_lat, step_lon)
+
                 continue
 
             if target.get("status") in ["detected", "wandering"]:
@@ -295,15 +297,21 @@ async def _update_drones_for_tick(mission: Mission, live_drone_ids: set[str], wa
             d_lon = waypoint[1] - drone["lon"]
             dist = math.hypot(d_lat, d_lon)
             if dist > TARGET_STOP_RADIUS:
-                drone["lat"] += (d_lat / dist) * SPEED
-                drone["lon"] += (d_lon / dist) * SPEED
-                drone["lat"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
-                drone["lon"] += random.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
-            _bounce_entity(drone, mission.bounds, d_lat, d_lon)
+                step_lat = (d_lat / dist) * SPEED
+                step_lon = (d_lon / dist) * SPEED
+                jitter_lat = rng.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+                jitter_lon = rng.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+                applied_lat = step_lat + jitter_lat
+                applied_lon = step_lon + jitter_lon
+                drone["lat"] += applied_lat
+                drone["lon"] += applied_lon
+                _bounce_entity(drone, bounds, applied_lat, applied_lon)
+            else:
+                _bounce_entity(drone, bounds, 0.0, 0.0)
         elif not has_live_telemetry:
             # If no centroid exists yet, fall back to bounded random wandering.
             if "vx" not in drone:
-                angle = random.uniform(0, 2 * math.pi)
+                angle = rng.uniform(0, 2 * math.pi)
                 drone["vx"] = SPEED * math.cos(angle)
                 drone["vy"] = SPEED * math.sin(angle)
             drone["lat"] += drone["vx"]
@@ -321,16 +329,20 @@ def _update_targets_for_tick(mission: Mission) -> None:
     if not mission.targets:
         return
 
+    rng = getattr(mission, "_rng", random)
+    bounds = mission.bounds
     for target in mission.targets:
         if target.get("status", "wandering") != "wandering":
             continue
-        if "vx" not in target:
-            angle = random.uniform(0, 2 * math.pi)
-            target["vx"] = SPEED / 2 * math.cos(angle)
-            target["vy"] = SPEED / 2 * math.sin(angle)
-        target["lat"] += target["vx"]
-        target["lon"] += target["vy"]
-        _bounce_entity(target, mission.bounds, target["vx"], target["vy"])
+        target_can_move = target.get("movement", "moving") != "stationary"
+        if target_can_move and not getattr(mission, "_static_targets", False):
+            if "vx" not in target:
+                angle = rng.uniform(0, 2 * math.pi)
+                target["vx"] = SPEED / 2 * math.cos(angle)
+                target["vy"] = SPEED / 2 * math.sin(angle)
+            target["lat"] += target["vx"]
+            target["lon"] += target["vy"]
+            _bounce_entity(target, bounds, target["vx"], target["vy"])
 
         nearest_drone = None
         min_dist = float("inf")

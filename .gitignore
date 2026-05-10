@@ -18,8 +18,11 @@ _*
 *.raw
 watch_*
 *.pyc
+backend/data/*.db
+backend/data/*.db-*
 
 # Allowlist
 !__init__.py
 !.github/
 !.env.example
+!backend/data/.gitkeep

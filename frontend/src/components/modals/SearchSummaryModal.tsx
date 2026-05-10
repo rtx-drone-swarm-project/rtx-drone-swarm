@@ -1,4 +1,4 @@
-import { algorithmDisplayLabel, type MissionMetrics, type Target } from "../../types/mission";
+import { algorithmDisplayLabel, type AlgorithmMetadata, type MissionMetrics, type Target } from "../../types/mission";
 
 type SearchSummaryModalProps = {
   isOpen: boolean;
@@ -7,11 +7,22 @@ type SearchSummaryModalProps = {
   getHikerLabel: (targetId: string | number) => string;
   onRecall: () => void;
   algorithm?: string;
+  algorithmOptions: AlgorithmMetadata[];
   completionElapsedSeconds?: number;
   metrics?: MissionMetrics | null;
 };
 
-export default function SearchSummaryModal({ isOpen, onClose, targets, getHikerLabel, onRecall, algorithm, completionElapsedSeconds, metrics }: SearchSummaryModalProps) {
+export default function SearchSummaryModal({
+  isOpen,
+  onClose,
+  targets,
+  getHikerLabel,
+  onRecall,
+  algorithm,
+  algorithmOptions,
+  completionElapsedSeconds,
+  metrics
+}: SearchSummaryModalProps) {
   if (!isOpen || !targets.length) return null;
 
   return (
@@ -37,7 +48,7 @@ export default function SearchSummaryModal({ isOpen, onClose, targets, getHikerL
                 {algorithm && (
                   <>
                     <span>Algorithm</span>
-                    <strong>{algorithmDisplayLabel(algorithm)}</strong>
+                    <strong>{algorithmDisplayLabel(algorithm, algorithmOptions)}</strong>
                   </>
                 )}
                 {completionElapsedSeconds != null && completionElapsedSeconds > 0 && (

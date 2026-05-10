@@ -1,10 +1,12 @@
 import { MapContainer, Marker, Polyline, Rectangle, TileLayer } from "react-leaflet";
-import type { AlgorithmOption, Bounds, SelectedDrone, Target, ValidDrone } from "../../types/mission";
+import type { LeafletEvent, Marker as LeafletMarker } from "leaflet";
+import type { AlgorithmOption, Bounds, PlacedHiker, SelectedDrone, Target, ValidDrone } from "../../types/mission";
 import { boundsToLeaflet } from "../../utils/geo";
 import MapBBoxDrawer from "./MapBBoxDrawer";
+import MapClickSelector from "./MapClickSelector";
 import MapControlStack from "./MapControlStack";
 import MapRecenter from "./MapRecenter";
-import { makeCentroidIcon, makeDroneIcon, makeTargetCircleIcon } from "./icons";
+import { makeCentroidIcon, makeDroneIcon, makePlacedHikerIcon, makeTargetCircleIcon } from "./icons";
 
 type MapPanelProps = {
   defaultCenter: [number, number];
@@ -14,8 +16,15 @@ type MapPanelProps = {
   missionActive: boolean;
   validDrones: ValidDrone[];
   targets: Target[];
+  placedHikers: PlacedHiker[];
+  hikerPlacementEditable: boolean;
+  hikerPlacementMode: boolean;
   getHikerLabel: (targetId: string | number) => string;
+  getPlacedHikerLabel: (hiker: PlacedHiker, index: number) => string;
   setSelectedDrone: (value: SelectedDrone) => void;
+  onSelectHiker: (hikerId: string) => void;
+  onPlaceHiker: (lat: number, lon: number) => void;
+  onMoveHiker: (hikerId: string, lat: number, lon: number) => void;
   onSelectArea: (lat: number, lon: number, bounds: Bounds) => void;
   droneTrails?: Record<string, [number, number][]>;
   selectedAlgorithm?: AlgorithmOption;
@@ -35,17 +44,25 @@ export default function MapPanel({
   missionActive,
   validDrones,
   targets,
+  placedHikers,
+  hikerPlacementEditable,
+  hikerPlacementMode,
   getHikerLabel,
+  getPlacedHikerLabel,
   setSelectedDrone,
+  onSelectHiker,
+  onPlaceHiker,
+  onMoveHiker,
   onSelectArea,
   droneTrails,
   selectedAlgorithm
 }: MapPanelProps) {
   const sweepActive = selectedAlgorithm === "sweep" && missionActive;
   const rectBounds = selectedBounds ? boundsToLeaflet(selectedBounds) : null;
+  const runtimeTargetIds = new Set(targets.map((target) => String(target.id)));
 
   return (
-    <div className="map-wrap">
+    <div className={`map-wrap ${hikerPlacementMode ? "is-placing-hiker" : ""}`}>
       <MapContainer center={defaultCenter} zoom={defaultZoom} zoomControl={false} className="leaflet-map">
         <MapRecenter center={mapCenter} />
         <TileLayer
@@ -53,8 +70,9 @@ export default function MapPanel({
           attribution="&copy; OpenStreetMap contributors"
         />
         <MapControlStack drones={validDrones} />
+        <MapClickSelector enabled={hikerPlacementMode && hikerPlacementEditable} onSelect={onPlaceHiker} />
         <MapBBoxDrawer
-          enabled={!missionActive}
+          enabled={!missionActive && !hikerPlacementMode}
           onBoundsDrawn={(drawnBounds) => {
             const centerLat = (drawnBounds.min_lat + drawnBounds.max_lat) / 2;
             const centerLon = (drawnBounds.min_lon + drawnBounds.max_lon) / 2;
@@ -127,6 +145,27 @@ export default function MapPanel({
               key={`${target.id}-${target.status ?? "wandering"}`}
               position={[target.lat, target.lon]}
               icon={makeTargetCircleIcon(label, target.status)}
+            />
+          );
+        })}
+
+        {placedHikers.map((hiker, index) => {
+          if (runtimeTargetIds.has(String(hiker.id))) return null;
+          const label = getPlacedHikerLabel(hiker, index);
+          return (
+            <Marker
+              key={hiker.id}
+              position={[hiker.lat, hiker.lon]}
+              icon={makePlacedHikerIcon(label, hiker.movement, !hikerPlacementEditable)}
+              draggable={hikerPlacementEditable}
+              eventHandlers={{
+                click: () => onSelectHiker(hiker.id),
+                dragend: (event: LeafletEvent) => {
+                  const marker = event.target as LeafletMarker;
+                  const latLng = marker.getLatLng();
+                  onMoveHiker(hiker.id, latLng.lat, latLng.lng);
+                }
+              }}
             />
           );
         })}

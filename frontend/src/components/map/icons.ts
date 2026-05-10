@@ -52,6 +52,46 @@ export function makeTargetCircleIcon(label: string, status?: string | null) {
   });
 }
 
+export function makePlacedHikerIcon(label: string, movement: "stationary" | "moving", locked = false) {
+  const safeLabel = escapeHtml(label);
+  const fillColor = locked ? "#64748b" : movement === "moving" ? "#f97316" : "#22c55e";
+  const accentMarkup =
+    movement === "moving"
+      ? '<circle cx="24" cy="8" r="4" fill="#f97316" stroke="white" stroke-width="2"/><text x="24" y="11" text-anchor="middle" fill="white" font-size="8" font-weight="bold">&#8594;</text>'
+      : '<circle cx="24" cy="8" r="4" fill="#22c55e" stroke="white" stroke-width="2"/><text x="24" y="11" text-anchor="middle" fill="white" font-size="9" font-weight="bold">&#9679;</text>';
+
+  return L.divIcon({
+    className: "placed-hiker-label-marker",
+    html: `
+      <div class="target-marker-shell placed-hiker-marker ${locked ? "is-locked" : ""}" style="--marker-label-bg-start: ${fillColor}; --marker-label-bg-end: ${fillColor};">
+        <div class="map-hover-label">${safeLabel}</div>
+        <div class="target-icon-wrap">
+          <svg width="32" height="32" viewBox="0 0 32 32" class="target-icon-svg">
+            <circle cx="16" cy="10" r="5" fill="${fillColor}" stroke="white" stroke-width="2" />
+            <path
+              d="M 16 15 L 16 24 M 11 19 L 21 19 M 16 24 L 12 28 M 16 24 L 20 28"
+              stroke="${fillColor}"
+              stroke-width="3"
+              stroke-linecap="round"
+              fill="none"
+            />
+            <path
+              d="M 16 15 L 16 24 M 11 19 L 21 19 M 16 24 L 12 28 M 16 24 L 20 28"
+              stroke="white"
+              stroke-width="1.5"
+              stroke-linecap="round"
+              fill="none"
+            />
+            ${accentMarkup}
+          </svg>
+        </div>
+      </div>
+    `,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16]
+  });
+}
+
 export function makeTargetTriangleIcon() {
   return makeTargetCircleIcon("Hiker", "found");
 }

@@ -1,4 +1,4 @@
-import { ALGORITHM_OPTIONS, type AlgorithmOption, type Bounds, type MissionRecord } from "../../types/mission";
+import type { AlgorithmMetadata, AlgorithmOption, Bounds, MissionRecord } from "../../types/mission";
 import type { MissionStatus } from "../../types/ws";
 import CollapsibleSection from "../common/CollapsibleSection";
 
@@ -10,6 +10,7 @@ type ActionsPanelProps = {
   validDroneCount: number;
   mission: MissionRecord | null;
   selectedAlgorithm: AlgorithmOption;
+  algorithmOptions: AlgorithmMetadata[];
   onAlgorithmChange: (algorithm: AlgorithmOption) => void;
   onStartMission: () => void;
   onStopMission: () => void;
@@ -25,6 +26,7 @@ export default function ActionsPanel({
   validDroneCount,
   mission,
   selectedAlgorithm,
+  algorithmOptions,
   onAlgorithmChange,
   onStartMission,
   onStopMission,
@@ -47,8 +49,8 @@ export default function ActionsPanel({
           onChange={(e) => onAlgorithmChange(e.target.value as AlgorithmOption)}
           disabled={selectorDisabled}
         >
-          {ALGORITHM_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
+          {algorithmOptions.map((opt) => (
+            <option key={opt.key} value={opt.key}>
               {opt.label}
             </option>
           ))}

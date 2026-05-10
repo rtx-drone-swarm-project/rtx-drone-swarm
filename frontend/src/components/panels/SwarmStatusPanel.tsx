@@ -1,4 +1,4 @@
-import { algorithmDisplayLabel } from "../../types/mission";
+import { algorithmDisplayLabel, type AlgorithmMetadata } from "../../types/mission";
 import { formatElapsed, statusLabel } from "../../utils/format";
 import CollapsibleSection from "../common/CollapsibleSection";
 import SearchingLabel from "../common/SearchingLabel";
@@ -12,6 +12,7 @@ type SwarmStatusPanelProps = {
   lostHikerCount: number;
   telemetryMode: string;
   selectedAlgorithm: string;
+  algorithmOptions: AlgorithmMetadata[];
 };
 
 export default function SwarmStatusPanel({
@@ -22,9 +23,10 @@ export default function SwarmStatusPanel({
   missionStatus,
   lostHikerCount,
   telemetryMode,
-  selectedAlgorithm
+  selectedAlgorithm,
+  algorithmOptions
 }: SwarmStatusPanelProps) {
-  const algorithmLabel = algorithmDisplayLabel(selectedAlgorithm);
+  const algorithmLabel = algorithmDisplayLabel(selectedAlgorithm, algorithmOptions);
   return (
     <CollapsibleSection title="Swarm Status">
       <div className="kv-grid">

@@ -12,8 +12,12 @@ The backend has three main jobs:
 
 At runtime the flow looks like this:
 
-- `app/main.py` starts FastAPI, mounts routes, starts the SITL telemetry bridge, and launches idle telemetry broadcasting.
+- `app/main.py` starts FastAPI, mounts routes, initializes benchmark storage, starts the SITL telemetry bridge, and launches idle telemetry broadcasting.
+- `app/routes/algorithms.py` exposes dynamically discovered search algorithms for frontend controls.
 - `app/routes/missions.py` creates missions, starts them, and triggers background dispatch plus `simulation_loop`.
+- `app/routes/benchmark.py` starts headless algorithm comparisons, reads persisted benchmark history, and exports trial rows as CSV.
+- `app/benchmark.py` runs paired algorithm scenarios without SITL commands or per-tick broadcasts.
+- `app/benchmark_db.py` owns the SQLite schema and query helpers for `backend/data/benchmarks.db`.
 - `app/sitl.py` maintains MAVLink TCP connections to SITL drones, tracks readiness and flight state, and sends direct dispatch or goto commands.
 - `app/simulation.py` runs the mission tick loop: it syncs live drone telemetry, computes centroid coverage, moves drones and targets, detects findings, derives progress from found targets, and broadcasts mission state.
 - `app/ws.py` broadcasts telemetry and mission updates to the frontend over `WS /ws`.
@@ -26,7 +30,10 @@ At runtime the flow looks like this:
 |------|----------------|
 | `app/main.py` | FastAPI app wiring, CORS setup, lifespan hooks, and symbol re-exports used by tests. |
 | `app/settings.py` | Shared constants, helper script paths, SITL host/port defaults, dispatch defaults, and concurrency limits. |
-| `app/models.py` | Pydantic request/response models for missions and dispatch payloads. |
+| `app/models.py` | Pydantic request/response models for missions, benchmarks, and dispatch payloads. |
+| `app/algorithms/__init__.py` | Dynamic algorithm discovery and registry used by missions, benchmarks, and UI metadata. |
+| `app/benchmark.py` | Headless paired-scenario benchmark runner for algorithm comparison. |
+| `app/benchmark_db.py` | SQLite schema, persistence helpers, aggregation, and CSV export. |
 | `app/missions.py` | Mission-state helpers: sysid resolution, script result normalization, coverage-point assignment, SITL sync, and dispatch preflight shaping. |
 | `app/dispatch.py` | Dispatch execution helpers. Supports either direct in-process dispatch through `sitl_bridge` or the external `scripts/swarm_command.py` helper. |
 | `app/sitl.py` | `SITLTelemetryBridge`, telemetry cache, readiness polling, direct MAVLink dispatch flow, idle telemetry broadcasting, and frontend-facing SITL snapshots. |
@@ -38,7 +45,9 @@ At runtime the flow looks like this:
 
 | Path | Responsibility |
 |------|----------------|
+| `app/routes/algorithms.py` | Discovered search algorithm metadata endpoint. |
 | `app/routes/health.py` | Lightweight liveness endpoint. |
+| `app/routes/benchmark.py` | Algorithm benchmark start/history/detail/export endpoints. |
 | `app/routes/missions.py` | Mission create/read/start/dispatch/stop/delete endpoints. |
 | `app/routes/sitl.py` | SITL bridge inspection and manual dispatch smoke-test endpoints. |
 | `app/routes/ws.py` | Telemetry WebSocket endpoint for browser clients. |
@@ -50,14 +59,20 @@ At runtime the flow looks like this:
 | Route | Purpose |
 |------|---------|
 | `GET /health` | Returns `{"ok": true}` when the backend is up. |
+| `GET /algorithms` | Returns discovered algorithm keys, labels, descriptions, modules, and class names. |
 | `POST /missions` | Creates an in-memory mission from bounds, drones, and optional hikers. |
 | `GET /missions/{mission_id}` | Returns the stored mission object. |
 | `POST /missions/{mission_id}/start` | Marks a mission running, seeds targets and grid points, optionally starts SITL, and launches simulation plus startup dispatch. |
+| `GET /missions/{mission_id}/metrics` | Returns mission coverage and target-find metrics. |
 | `POST /missions/{mission_id}/dispatch-targets` | Dispatches specific drones to explicit coordinates through the helper-script flow. |
 | `POST /missions/{mission_id}/stop` | Marks a mission stopped and broadcasts the state change. |
 | `DELETE /missions/{mission_id}` | Removes a mission from the in-memory store. |
 | `GET /sitl/status` | Returns bridge config plus the latest cached state for each connected drone. |
 | `POST /sitl/test-dispatch/{sysid}` | Runs a direct dispatch against one connected drone for smoke testing. |
+| `POST /benchmark` | Starts a background headless benchmark and returns a persisted `run_id`. |
+| `GET /benchmark/runs` | Lists recent benchmark runs. |
+| `GET /benchmark/{run_id}` | Returns one run, raw trials, and aggregate metric summaries. |
+| `GET /benchmark/export?run_id=...` | Exports one benchmark run as CSV. Full local export requires explicit `?all_runs=true`. |
 
 ### WebSocket endpoint
 
@@ -102,12 +117,21 @@ These are the functions worth reading first if you need to change behavior.
 - `app/simulation.py:_finalize_mission_progress`
   Derives progress from the number of found targets and completes the mission once every target is found.
 
+### Algorithms
+
+- `app/algorithms/__init__.py:discover_algorithms`
+  Imports modules in `backend/app/algorithms/` and registers concrete `BaseSearchAlgorithm` subclasses. Set `algorithm_key`, `display_name`, `description`, and `display_order` on the class for stable API keys and clean UI labels.
+- `app/routes/algorithms.py:get_algorithms`
+  Feeds the Actions panel, Benchmark panel, status labels, and summary labels. Frontend algorithm controls should consume this endpoint rather than maintaining a second hardcoded list.
+
 ## State and Data Ownership
 
-- Mission state lives in the in-memory `mission_db` dictionary in `app/missions.py`.
+- Mission state lives in the in-memory `missions_db` dictionary in `app/missions.py`.
+- Benchmark trial history lives in local SQLite at `backend/data/benchmarks.db`; that file is ignored by git.
+- Benchmark runs left `running` by a backend restart are marked `failed` on startup so the UI does not poll stale jobs forever.
 - Live drone telemetry lives in the bridge cache inside `app/sitl.py`.
 - During each simulation tick, live SITL state is copied into the mission's drone list so the frontend receives one coherent mission view.
-- The backend does not currently persist missions to a database; a restart clears mission state.
+- The backend does not currently persist missions to a database; a restart clears mission state. Benchmark history persists locally unless `backend/data/benchmarks.db` is deleted.
 
 ## Local Run and Verification
 

@@ -126,7 +126,7 @@ def test_create_mission():
         assert res_drone["lat"] == req_drone["lat"]
         assert res_drone["lon"] == req_drone["lon"]
         assert res_drone["status"] == "idle"
-    assert data["hikers"] == mission_data["hikers"]
+    assert data["hikers"] == [{**mission_data["hikers"][0], "movement": "moving"}]
 
 
 def test_get_mission_returns_stored_bounds():
@@ -192,6 +192,93 @@ def test_start_mission():
     second_start_response = client.post(f"/missions/{mission_id}/start")
     assert second_start_response.status_code == 400
     assert second_start_response.json() == {"detail": "Only 'idle' missions can be started"}
+
+
+def test_start_mission_uses_supplied_hikers():
+    mission_data = {
+        "name": "Manual Hiker Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 35.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.5, "lon": -117.5}
+        ],
+        "hikers": [
+            {"id": "hiker-1", "lat": 34.6, "lon": -117.6, "found": False, "movement": "stationary"},
+            {"id": "hiker-2", "lat": 34.7, "lon": -117.7, "found": False, "movement": "moving"},
+        ],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    start_response = client.post(f"/missions/{mission_id}/start")
+    assert start_response.status_code == 200
+    targets = start_response.json()["targets"]
+
+    assert targets == [
+        {
+            "id": "hiker-1",
+            "lat": 34.6,
+            "lon": -117.6,
+            "status": "wandering",
+            "assigned_drone_id": None,
+            "movement": "stationary",
+        },
+        {
+            "id": "hiker-2",
+            "lat": 34.7,
+            "lon": -117.7,
+            "status": "wandering",
+            "assigned_drone_id": None,
+            "movement": "moving",
+        },
+    ]
+
+
+def test_stationary_targets_do_not_wander():
+    mission = create_test_mission()
+    mission.targets = [
+        {
+            "id": "hiker-1",
+            "lat": 0.02,
+            "lon": 0.02,
+            "status": "wandering",
+            "movement": "stationary",
+        }
+    ]
+    mission.drones = [{"id": "drone1", "lat": 0.0, "lon": 0.0}]
+
+    simulation_module._update_targets_for_tick(mission)
+
+    assert mission.targets[0]["lat"] == 0.02
+    assert mission.targets[0]["lon"] == 0.02
+    assert "vx" not in mission.targets[0]
+
+
+def test_waypoint_bounce_uses_applied_tick_delta_including_jitter():
+    class FixedJitter:
+        def __init__(self):
+            self.values = [simulation_module.JITTER_DEG / 2, 0.0]
+
+        def uniform(self, _low, _high):
+            return self.values.pop(0)
+
+    mission = create_test_mission(
+        bounds=Bounds(min_lat=0.0, max_lat=0.04, min_lon=0.0, max_lon=0.04),
+        drones=[Drone(id="drone1", lat=0.0399, lon=0.02)],
+    )
+    mission._rng = FixedJitter()
+
+    asyncio.run(simulation_module._update_drones_for_tick(mission, set(), {"drone1": (0.05, 0.02)}))
+
+    drone = mission.drones[0]
+    assert drone["lat"] == mission.bounds["max_lat"]
+    assert drone["vx"] == -(simulation_module.SPEED + simulation_module.JITTER_DEG / 2)
+    assert "vy" not in drone
     
 def test_stop_mission():
     mission_data = {
@@ -1204,7 +1291,7 @@ def test_voronoi_aco_preserves_state_by_drone_id_when_membership_changes():
     captures = []
     call_count = {"n": 0}
 
-    def fake_lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5):
+    def fake_lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5, rng=None):
         call_count["n"] += 1
         captures.append((old_centroids.copy(), pheromone.copy()))
         if call_count["n"] == 1:
@@ -1234,6 +1321,73 @@ def test_get_algorithm_returns_distinct_voronoi_aco_instances():
     a = get_algorithm("voronoi_aco")
     b = get_algorithm("voronoi_aco")
     assert a is not b
+
+
+def test_algorithms_endpoint_lists_discovered_registry_metadata():
+    response = client.get("/algorithms")
+    assert response.status_code == 200
+    algorithms = response.json()["algorithms"]
+    by_key = {item["key"]: item for item in algorithms}
+
+    assert {"voronoi", "voronoi_aco", "vaco", "apf", "sweep"}.issubset(by_key.keys())
+    assert by_key["voronoi"]["label"] == "Voronoi (Lloyd's)"
+    assert by_key["voronoi_aco"]["label"] == "Voronoi (ACO)"
+    assert by_key["vaco"]["label"] == "VACO Hybrid Coverage (Kaydee)"
+    assert by_key["vaco"]["class_name"] == "VoronoiACOHybridCoverage"
+
+
+def test_algorithm_discovery_picks_up_drop_in_module(tmp_path):
+    import importlib
+    import sys
+
+    import app.algorithms as registry
+
+    original_path = list(registry.__path__)
+    module_name = "plugplay_temp_algorithm"
+    qualified_module = f"app.algorithms.{module_name}"
+    plugin_dir = tmp_path / "algorithm_plugins"
+    plugin_dir.mkdir()
+    (plugin_dir / f"{module_name}.py").write_text(
+        """
+from app.algorithms.base import BaseSearchAlgorithm
+
+
+class PlugPlayTempAlgorithm(BaseSearchAlgorithm):
+    algorithm_key = "plugplay_temp"
+    display_name = "Plug Play Temp"
+    description = "Temporary pytest algorithm proving registry discovery."
+    display_order = 999
+
+    def get_target_waypoints(self, mission, free_drones):
+        return {
+            drone["id"]: (float(drone["lat"]), float(drone["lon"]))
+            for drone in free_drones
+        }
+""",
+        encoding="utf-8",
+    )
+
+    try:
+        registry.__path__ = original_path + [str(plugin_dir)]
+        sys.modules.pop(qualified_module, None)
+        importlib.invalidate_caches()
+
+        discovered = registry.discover_algorithms(force=True)
+        assert "plugplay_temp" in discovered
+
+        algo = registry.get_algorithm("plugplay_temp")
+        assert type(algo).__name__ == "PlugPlayTempAlgorithm"
+        assert algo.get_target_waypoints({}, [{"id": "d1", "lat": 1, "lon": 2}]) == {"d1": (1.0, 2.0)}
+
+        response = client.get("/algorithms")
+        assert response.status_code == 200
+        by_key = {item["key"]: item for item in response.json()["algorithms"]}
+        assert by_key["plugplay_temp"]["label"] == "Plug Play Temp"
+    finally:
+        registry.__path__ = original_path
+        sys.modules.pop(qualified_module, None)
+        importlib.invalidate_caches()
+        registry.discover_algorithms(force=True)
 
 
 def test_row_endpoints_lawnmower_alternates_direction():
@@ -1445,3 +1599,365 @@ def test_normalize_script_results_matches_expected_assignments_by_sysid_and_dron
     assert normalized[2]["sysid"] == 3
     assert normalized[2]["success"] is False
     assert "No dispatch result returned" in normalized[2]["message"]
+
+
+def test_headless_benchmark_trial_returns_search_metrics():
+    from app.benchmark import run_headless_trial
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01}
+    result = asyncio.run(
+        run_headless_trial(
+            run_id="bench-test",
+            algorithm="voronoi",
+            iteration=1,
+            scenario_seed=123,
+            bounds=bounds,
+            drone_starts=[{"id": "d1", "lat": 0.005, "lon": 0.005, "status": "idle"}],
+            target_starts=[
+                {
+                    "id": "t1",
+                    "lat": 0.005,
+                    "lon": 0.005,
+                    "status": "wandering",
+                    "assigned_drone_id": None,
+                }
+            ],
+            timeout_seconds=5,
+        )
+    )
+
+    assert result["algorithm"] == "voronoi"
+    assert result["targets_total"] == 1
+    assert result["targets_found"] == 1
+    assert result["first_find_seconds"] is not None
+    assert 0.0 <= result["coverage_pct"] <= 100.0
+    assert "coverage_per_drone_second" in result
+    assert "redundant_coverage_pct" in result
+
+
+def test_headless_benchmark_trial_supports_voronoi_aco():
+    from app.benchmark import run_headless_trial
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01}
+    result = asyncio.run(
+        run_headless_trial(
+            run_id="bench-aco-test",
+            algorithm="voronoi_aco",
+            iteration=1,
+            scenario_seed=456,
+            bounds=bounds,
+            drone_starts=[{"id": "d1", "lat": 0.005, "lon": 0.005, "status": "idle"}],
+            target_starts=[
+                {
+                    "id": "t1",
+                    "lat": 0.005,
+                    "lon": 0.005,
+                    "status": "wandering",
+                    "assigned_drone_id": None,
+                }
+            ],
+            timeout_seconds=5,
+        )
+    )
+
+    assert result["algorithm"] == "voronoi_aco"
+    assert result["targets_total"] == 1
+    assert 0.0 <= result["coverage_pct"] <= 100.0
+
+
+def test_headless_benchmark_trial_is_deterministic_without_global_rng_mutation():
+    import random
+    import numpy as np
+
+    from app.benchmark import run_headless_trial
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01}
+    kwargs = {
+        "run_id": "bench-rng-test",
+        "algorithm": "apf",
+        "iteration": 1,
+        "scenario_seed": 789,
+        "bounds": bounds,
+        "drone_starts": [{"id": "d1", "lat": 0.001, "lon": 0.001, "status": "idle"}],
+        "target_starts": [
+            {
+                "id": "t1",
+                "lat": 0.009,
+                "lon": 0.009,
+                "status": "wandering",
+                "assigned_drone_id": None,
+            }
+        ],
+        "timeout_seconds": 5,
+    }
+
+    random.seed(12345)
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    result_a = asyncio.run(run_headless_trial(**kwargs))
+    result_b = asyncio.run(run_headless_trial(**kwargs))
+
+    assert result_a == result_b
+    assert random.getstate() == python_state
+    current_numpy_state = np.random.get_state()
+    assert current_numpy_state[0] == numpy_state[0]
+    assert np.array_equal(current_numpy_state[1], numpy_state[1])
+    assert current_numpy_state[2:] == numpy_state[2:]
+
+
+def _benchmark_trial_row(run_id: str, algorithm: str = "sweep") -> dict:
+    return {
+        "run_id": run_id,
+        "algorithm": algorithm,
+        "iteration": 1,
+        "scenario_seed": 99,
+        "bounds_json": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+        "drone_count": 1,
+        "target_count": 1,
+        "timeout_seconds": 5,
+        "elapsed_seconds": 5,
+        "first_find_seconds": 2.0,
+        "avg_find_seconds": 2.0,
+        "last_find_seconds": 2.0,
+        "completion_elapsed_seconds": 2.0,
+        "coverage_pct": 80.0,
+        "miss_pct": 20.0,
+        "redundant_coverage_pct": 0.0,
+        "coverage_per_drone_second": 16.0,
+        "hiker_find_rate": 0.2,
+        "total_distance_traveled_m": 10.0,
+        "avg_distance_per_drone_m": 10.0,
+        "max_distance_single_drone_m": 10.0,
+        "time_to_50_coverage": 3,
+        "time_to_80_coverage": 5,
+        "time_to_95_coverage": None,
+        "targets_found": 1,
+        "targets_total": 1,
+        "status": "complete",
+    }
+
+
+def test_benchmark_run_routes_read_sqlite_rows(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+
+    monkeypatch.setattr(benchmark_db, "DB_PATH", tmp_path / "benchmarks.db")
+    benchmark_db.create_run(
+        "bench-route-test",
+        {
+            "algorithms": ["sweep"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+        },
+        total_trials=1,
+    )
+    benchmark_db.insert_trial(_benchmark_trial_row("bench-route-test"))
+    benchmark_db.finish_run("bench-route-test", "complete")
+
+    response = client.get("/benchmark/bench-route-test")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == "bench-route-test"
+    assert payload["completed_trials"] == 1
+    assert payload["summary"]["sweep"]["coverage_pct"]["mean"] == 80.0
+
+    export_response = client.get("/benchmark/export?run_id=bench-route-test")
+    assert export_response.status_code == 200
+    assert "text/csv" in export_response.headers["content-type"]
+    assert "bench-route-test" in export_response.text
+
+
+def test_benchmark_get_run_uses_stored_summary_for_finished_runs(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+
+    monkeypatch.setattr(benchmark_db, "DB_PATH", tmp_path / "benchmarks.db")
+    benchmark_db.create_run(
+        "bench-stored-summary",
+        {
+            "algorithms": ["sweep"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+        },
+        total_trials=1,
+    )
+    benchmark_db.insert_trial(_benchmark_trial_row("bench-stored-summary"))
+    stored_summary = {"sweep": {"count": 1, "coverage_pct": {"mean": 123.0}}}
+    benchmark_db.finish_run("bench-stored-summary", "complete", summary=stored_summary)
+
+    def fail_aggregate(_trials):
+        raise AssertionError("finished runs should use stored summary_json")
+
+    monkeypatch.setattr(benchmark_db, "aggregate_trials", fail_aggregate)
+
+    run = benchmark_db.get_run("bench-stored-summary")
+    assert run is not None
+    assert run["summary"] == stored_summary
+    assert len(run["trials"]) == 1
+
+
+def test_benchmark_get_run_recomputes_summary_for_running_runs(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+
+    monkeypatch.setattr(benchmark_db, "DB_PATH", tmp_path / "benchmarks.db")
+    benchmark_db.create_run(
+        "bench-running-summary",
+        {
+            "algorithms": ["sweep"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+        },
+        total_trials=1,
+    )
+    benchmark_db.insert_trial(_benchmark_trial_row("bench-running-summary"))
+
+    def aggregate(trials):
+        assert len(trials) == 1
+        return {"recomputed": {"count": len(trials)}}
+
+    monkeypatch.setattr(benchmark_db, "aggregate_trials", aggregate)
+
+    run = benchmark_db.get_run("bench-running-summary")
+    assert run is not None
+    assert run["summary"] == {"recomputed": {"count": 1}}
+
+
+def test_benchmark_export_requires_run_scope():
+    response = client.get("/benchmark/export")
+    assert response.status_code == 400
+    assert "run_id" in response.json()["detail"]
+
+
+def test_mark_interrupted_benchmark_runs_failed(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+
+    monkeypatch.setattr(benchmark_db, "DB_PATH", tmp_path / "benchmarks.db")
+    benchmark_db.create_run(
+        "bench-stale-test",
+        {
+            "algorithms": ["sweep"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+        },
+        total_trials=1,
+    )
+
+    assert benchmark_db.mark_interrupted_runs() == 1
+    run = benchmark_db.get_run("bench-stale-test")
+    assert run is not None
+    assert run["status"] == "failed"
+    assert "restarted" in run["error"]
+
+
+def test_benchmark_db_reinitializes_if_file_is_deleted(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+
+    db_path = tmp_path / "benchmarks.db"
+    monkeypatch.setattr(benchmark_db, "DB_PATH", db_path)
+    benchmark_db.init_db()
+    assert db_path.exists()
+
+    db_path.unlink()
+    benchmark_db.create_run(
+        "bench-recreated-db",
+        {
+            "algorithms": ["sweep"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+        },
+        total_trials=1,
+    )
+
+    run = benchmark_db.get_run("bench-recreated-db")
+    assert run is not None
+    assert run["status"] == "running"
+
+
+def test_benchmark_job_persists_paired_algorithm_trials(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+    from app.benchmark import run_benchmark_job, total_trials
+    from app.models import BenchmarkRequest, Bounds
+
+    monkeypatch.setattr(benchmark_db, "DB_PATH", tmp_path / "benchmarks.db")
+    request = BenchmarkRequest(
+        algorithms=["voronoi", "sweep"],
+        iterations=1,
+        bounds=Bounds(min_lat=0.0, max_lat=0.01, min_lon=0.0, max_lon=0.01),
+        drone_count=1,
+        target_count=1,
+        timeout_seconds=5,
+        seed=123,
+    )
+    benchmark_db.create_run("bench-job-test", request.model_dump(), total_trials(request))
+
+    asyncio.run(run_benchmark_job("bench-job-test", request))
+
+    run = benchmark_db.get_run("bench-job-test")
+    assert run is not None
+    assert run["status"] == "complete"
+    assert run["completed_trials"] == 2
+    assert sorted(run["summary"].keys()) == ["sweep", "voronoi"]
+    scenario_seeds = {trial["scenario_seed"] for trial in run["trials"]}
+    assert scenario_seeds == {123}
+
+
+def test_benchmark_rejects_unknown_algorithm():
+    response = client.post(
+        "/benchmark",
+        json={
+            "algorithms": ["missing"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+        },
+    )
+    assert response.status_code == 400
+    assert "Unknown algorithm" in response.json()["detail"]
+
+
+def test_benchmark_rejects_empty_algorithm_list():
+    response = client.post(
+        "/benchmark",
+        json={
+            "algorithms": [],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_benchmark_rejects_negative_seed():
+    response = client.post(
+        "/benchmark",
+        json={
+            "algorithms": ["sweep"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+            "seed": -1,
+        },
+    )
+
+    assert response.status_code == 422

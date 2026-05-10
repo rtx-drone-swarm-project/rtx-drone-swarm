@@ -154,12 +154,31 @@ class NavigationController:
 # ══════════════════════════════════════════════════════════════════
 
 class VoronoiACOHybridCoverage(BaseSearchAlgorithm):
-    
+    algorithm_key = "vaco"
+    display_name = "VACO Hybrid Coverage (Kaydee)"
+    description = "Kaydee's Voronoi-ACO hybrid implementation with pheromone-guided sweep navigation."
+    display_order = 25
+
     COVERAGE_THRESHOLD = 0.85  # Trigger Lloyd repartition when all drones ≥85% covered
+
+    @staticmethod
+    def _mget(mission, key: str, default=None):
+        if isinstance(mission, dict):
+            return mission.get(key, default)
+        return getattr(mission, key, default)
+
+    @staticmethod
+    def _mset(mission, key: str, value) -> None:
+        if isinstance(mission, dict):
+            mission[key] = value
+        else:
+            setattr(mission, key, value)
     
     def initialize(self, mission: dict) -> None:
         """Set up pheromone grid, planner, and per-drone navigation state."""
-        bounds = mission["bounds"]
+        bounds = self._mget(mission, "bounds")
+        if bounds is None:
+            raise ValueError("Mission bounds are required for vaco initialization")
         span = max(
             bounds["max_lat"] - bounds["min_lat"],
             bounds["max_lon"] - bounds["min_lon"]
@@ -199,11 +218,11 @@ class VoronoiACOHybridCoverage(BaseSearchAlgorithm):
         planner.lloyd_active = False  # Start unlocked
         
         # Store in mission state
-        mission["_rtx_grid"] = grid
-        mission["_rtx_planner"] = planner
-        mission["_rtx_territories"] = {}  # drone_id → np.ndarray
-        mission["_rtx_navigators"] = {}   # drone_id → NavigationController
-        mission["_rtx_bootstrapped"] = False
+        self._mset(mission, "_rtx_grid", grid)
+        self._mset(mission, "_rtx_planner", planner)
+        self._mset(mission, "_rtx_territories", {})  # drone_id → np.ndarray
+        self._mset(mission, "_rtx_navigators", {})   # drone_id → NavigationController
+        self._mset(mission, "_rtx_bootstrapped", False)
         
         log.info(
             "[RTX] Initialized: grid %dx%d, evap=%.2f, coverage_threshold=%.0f%%",
@@ -224,8 +243,8 @@ class VoronoiACOHybridCoverage(BaseSearchAlgorithm):
         3. Deposit pheromone at current position each tick
         4. Repartition when ALL drones exceed coverage threshold
         """
-        planner = mission.get("_rtx_planner")
-        grid = mission.get("_rtx_grid")
+        planner = self._mget(mission, "_rtx_planner")
+        grid = self._mget(mission, "_rtx_grid")
         if planner is None or grid is None:
             log.warning("[RTX] Planner/grid not initialized — skipping tick")
             return {}
@@ -239,9 +258,9 @@ class VoronoiACOHybridCoverage(BaseSearchAlgorithm):
             return {}
         
         # ── Bootstrap Lloyd partition (runs once) ──────────────────────
-        if not mission.get("_rtx_bootstrapped"):
+        if not self._mget(mission, "_rtx_bootstrapped", False):
             self._run_lloyd_partition(mission, valid_drones, planner)
-            mission["_rtx_bootstrapped"] = True
+            self._mset(mission, "_rtx_bootstrapped", True)
             planner.transition_to_aco()  # Unlock navigation
             log.info("[RTX] Bootstrap complete — navigation unlocked")
         
@@ -249,10 +268,13 @@ class VoronoiACOHybridCoverage(BaseSearchAlgorithm):
         for drone in valid_drones:
             grid.deposit(drone["lat"], drone["lon"])
         
+        territories = self._mget(mission, "_rtx_territories", {})
+        navigators = self._mget(mission, "_rtx_navigators", {})
+
         # ── Check for repartition trigger ──────────────────────────────
         coverages = []
         for drone in valid_drones:
-            territory = mission["_rtx_territories"].get(drone["id"])
+            territory = territories.get(drone["id"])
             if territory is None or len(territory) == 0:
                 continue
             drone_state = DroneState(
@@ -278,15 +300,15 @@ class VoronoiACOHybridCoverage(BaseSearchAlgorithm):
         waypoints = {}
         for drone in valid_drones:
             drone_id = drone["id"]
-            territory = mission["_rtx_territories"].get(drone_id)
+            territory = territories.get(drone_id)
             if territory is None or len(territory) == 0:
                 continue
             
             # Get or create navigator for this drone
-            nav = mission["_rtx_navigators"].get(drone_id)
+            nav = navigators.get(drone_id)
             if nav is None:
                 nav = NavigationController(drone_id, territory)
-                mission["_rtx_navigators"][drone_id] = nav
+                navigators[drone_id] = nav
             
             # Update territory if it changed (Lloyd repartition)
             nav.set_territory(territory, drone["lat"], drone["lon"])
@@ -309,10 +331,11 @@ class VoronoiACOHybridCoverage(BaseSearchAlgorithm):
             DroneState(id=d["id"], lat=d["lat"], lon=d["lon"])
             for d in drones
         ]
+        territories = self._mget(mission, "_rtx_territories", {})
         
         # Preserve existing territories (Lloyd updates them in-place)
         for s in states:
-            existing = mission["_rtx_territories"].get(s.id)
+            existing = territories.get(s.id)
             if existing is not None:
                 s.territory = existing
         
@@ -321,7 +344,7 @@ class VoronoiACOHybridCoverage(BaseSearchAlgorithm):
         # Write back to mission state
         for s in states:
             if s.territory is not None and len(s.territory) > 0:
-                mission["_rtx_territories"][s.id] = s.territory
+                territories[s.id] = s.territory
         
         log.info(
             "[RTX] Lloyd partition: %d drones, cell counts=%s",

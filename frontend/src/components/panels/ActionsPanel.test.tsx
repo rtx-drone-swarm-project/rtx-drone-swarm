@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ActionsPanel from "./ActionsPanel";
+import { DEFAULT_ALGORITHM_OPTIONS } from "../../types/mission";
 import type { MissionStatus } from "../../types/ws";
 
 function renderPanel(overrides: Partial<React.ComponentProps<typeof ActionsPanel>> = {}) {
@@ -17,6 +18,7 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof ActionsPanel
     validDroneCount: 15,
     mission: null,
     selectedAlgorithm: "voronoi" as const,
+    algorithmOptions: DEFAULT_ALGORITHM_OPTIONS,
     onAlgorithmChange: vi.fn(),
     onStartMission: vi.fn(),
     onStopMission: vi.fn(),
