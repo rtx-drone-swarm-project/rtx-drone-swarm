@@ -154,7 +154,11 @@ class NavigationController:
 # ══════════════════════════════════════════════════════════════════
 
 class VoronoiACOHybridCoverage(BaseSearchAlgorithm):
-    
+    algorithm_key = "vaco"
+    display_name = "VACO Hybrid Coverage (Kaydee)"
+    description = "Kaydee's Voronoi-ACO hybrid implementation with pheromone-guided sweep navigation."
+    display_order = 25
+
     COVERAGE_THRESHOLD = 0.85  # Trigger Lloyd repartition when all drones ≥85% covered
 
     @staticmethod

@@ -245,8 +245,6 @@ async def _update_drones_for_tick(mission: Mission, live_drone_ids: set[str], wa
             d_lat = target["lat"] - drone["lat"]
             d_lon = target["lon"] - drone["lon"]
             dist = math.hypot(d_lat, d_lon)
-
-            
             if dist > TARGET_STOP_RADIUS:
                 if not has_live_telemetry and getattr(mission, "_move_assigned_sim_drones", False):
                     step_lat = (d_lat / dist) * SPEED
@@ -301,13 +299,15 @@ async def _update_drones_for_tick(mission: Mission, live_drone_ids: set[str], wa
             if dist > TARGET_STOP_RADIUS:
                 step_lat = (d_lat / dist) * SPEED
                 step_lon = (d_lon / dist) * SPEED
-                drone["lat"] += step_lat
-                drone["lon"] += step_lon
-                drone["lat"] += rng.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
-                drone["lon"] += rng.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
-                _bounce_entity(drone, bounds, step_lat, step_lon)
+                jitter_lat = rng.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+                jitter_lon = rng.uniform(-JITTER_DEG / 2, JITTER_DEG / 2)
+                applied_lat = step_lat + jitter_lat
+                applied_lon = step_lon + jitter_lon
+                drone["lat"] += applied_lat
+                drone["lon"] += applied_lon
+                _bounce_entity(drone, bounds, applied_lat, applied_lon)
             else:
-                _bounce_entity(drone, bounds, d_lat, d_lon)
+                _bounce_entity(drone, bounds, 0.0, 0.0)
         elif not has_live_telemetry:
             # If no centroid exists yet, fall back to bounded random wandering.
             if "vx" not in drone:

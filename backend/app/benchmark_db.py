@@ -244,7 +244,11 @@ def get_run(run_id: str) -> dict[str, Any] | None:
 
     decoded = _decode_run(run_row)
     decoded["trials"] = [_decode_trial(row) for row in trials]
-    decoded["summary"] = aggregate_trials(decoded["trials"])
+    stored_summary = decoded.get("summary")
+    if decoded.get("status") != "running" and stored_summary:
+        decoded["summary"] = stored_summary
+    else:
+        decoded["summary"] = aggregate_trials(decoded["trials"])
     return decoded
 
 

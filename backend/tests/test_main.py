@@ -257,6 +257,28 @@ def test_stationary_targets_do_not_wander():
     assert mission.targets[0]["lat"] == 0.02
     assert mission.targets[0]["lon"] == 0.02
     assert "vx" not in mission.targets[0]
+
+
+def test_waypoint_bounce_uses_applied_tick_delta_including_jitter():
+    class FixedJitter:
+        def __init__(self):
+            self.values = [simulation_module.JITTER_DEG / 2, 0.0]
+
+        def uniform(self, _low, _high):
+            return self.values.pop(0)
+
+    mission = create_test_mission(
+        bounds=Bounds(min_lat=0.0, max_lat=0.04, min_lon=0.0, max_lon=0.04),
+        drones=[Drone(id="drone1", lat=0.0399, lon=0.02)],
+    )
+    mission._rng = FixedJitter()
+
+    asyncio.run(simulation_module._update_drones_for_tick(mission, set(), {"drone1": (0.05, 0.02)}))
+
+    drone = mission.drones[0]
+    assert drone["lat"] == mission.bounds["max_lat"]
+    assert drone["vx"] == -(simulation_module.SPEED + simulation_module.JITTER_DEG / 2)
+    assert "vy" not in drone
     
 def test_stop_mission():
     mission_data = {
@@ -1307,9 +1329,11 @@ def test_algorithms_endpoint_lists_discovered_registry_metadata():
     algorithms = response.json()["algorithms"]
     by_key = {item["key"]: item for item in algorithms}
 
-    assert {"voronoi", "voronoi_aco", "apf", "sweep"}.issubset(by_key.keys())
+    assert {"voronoi", "voronoi_aco", "vaco", "apf", "sweep"}.issubset(by_key.keys())
     assert by_key["voronoi"]["label"] == "Voronoi (Lloyd's)"
     assert by_key["voronoi_aco"]["label"] == "Voronoi (ACO)"
+    assert by_key["vaco"]["label"] == "VACO Hybrid Coverage (Kaydee)"
+    assert by_key["vaco"]["class_name"] == "VoronoiACOHybridCoverage"
 
 
 def test_algorithm_discovery_picks_up_drop_in_module(tmp_path):
@@ -1681,6 +1705,38 @@ def test_headless_benchmark_trial_is_deterministic_without_global_rng_mutation()
     assert current_numpy_state[2:] == numpy_state[2:]
 
 
+def _benchmark_trial_row(run_id: str, algorithm: str = "sweep") -> dict:
+    return {
+        "run_id": run_id,
+        "algorithm": algorithm,
+        "iteration": 1,
+        "scenario_seed": 99,
+        "bounds_json": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+        "drone_count": 1,
+        "target_count": 1,
+        "timeout_seconds": 5,
+        "elapsed_seconds": 5,
+        "first_find_seconds": 2.0,
+        "avg_find_seconds": 2.0,
+        "last_find_seconds": 2.0,
+        "completion_elapsed_seconds": 2.0,
+        "coverage_pct": 80.0,
+        "miss_pct": 20.0,
+        "redundant_coverage_pct": 0.0,
+        "coverage_per_drone_second": 16.0,
+        "hiker_find_rate": 0.2,
+        "total_distance_traveled_m": 10.0,
+        "avg_distance_per_drone_m": 10.0,
+        "max_distance_single_drone_m": 10.0,
+        "time_to_50_coverage": 3,
+        "time_to_80_coverage": 5,
+        "time_to_95_coverage": None,
+        "targets_found": 1,
+        "targets_total": 1,
+        "status": "complete",
+    }
+
+
 def test_benchmark_run_routes_read_sqlite_rows(tmp_path, monkeypatch):
     import app.benchmark_db as benchmark_db
 
@@ -1697,37 +1753,7 @@ def test_benchmark_run_routes_read_sqlite_rows(tmp_path, monkeypatch):
         },
         total_trials=1,
     )
-    benchmark_db.insert_trial(
-        {
-            "run_id": "bench-route-test",
-            "algorithm": "sweep",
-            "iteration": 1,
-            "scenario_seed": 99,
-            "bounds_json": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
-            "drone_count": 1,
-            "target_count": 1,
-            "timeout_seconds": 5,
-            "elapsed_seconds": 5,
-            "first_find_seconds": 2.0,
-            "avg_find_seconds": 2.0,
-            "last_find_seconds": 2.0,
-            "completion_elapsed_seconds": 2.0,
-            "coverage_pct": 80.0,
-            "miss_pct": 20.0,
-            "redundant_coverage_pct": 0.0,
-            "coverage_per_drone_second": 16.0,
-            "hiker_find_rate": 0.2,
-            "total_distance_traveled_m": 10.0,
-            "avg_distance_per_drone_m": 10.0,
-            "max_distance_single_drone_m": 10.0,
-            "time_to_50_coverage": 3,
-            "time_to_80_coverage": 5,
-            "time_to_95_coverage": None,
-            "targets_found": 1,
-            "targets_total": 1,
-            "status": "complete",
-        }
-    )
+    benchmark_db.insert_trial(_benchmark_trial_row("bench-route-test"))
     benchmark_db.finish_run("bench-route-test", "complete")
 
     response = client.get("/benchmark/bench-route-test")
@@ -1741,6 +1767,66 @@ def test_benchmark_run_routes_read_sqlite_rows(tmp_path, monkeypatch):
     assert export_response.status_code == 200
     assert "text/csv" in export_response.headers["content-type"]
     assert "bench-route-test" in export_response.text
+
+
+def test_benchmark_get_run_uses_stored_summary_for_finished_runs(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+
+    monkeypatch.setattr(benchmark_db, "DB_PATH", tmp_path / "benchmarks.db")
+    benchmark_db.create_run(
+        "bench-stored-summary",
+        {
+            "algorithms": ["sweep"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+        },
+        total_trials=1,
+    )
+    benchmark_db.insert_trial(_benchmark_trial_row("bench-stored-summary"))
+    stored_summary = {"sweep": {"count": 1, "coverage_pct": {"mean": 123.0}}}
+    benchmark_db.finish_run("bench-stored-summary", "complete", summary=stored_summary)
+
+    def fail_aggregate(_trials):
+        raise AssertionError("finished runs should use stored summary_json")
+
+    monkeypatch.setattr(benchmark_db, "aggregate_trials", fail_aggregate)
+
+    run = benchmark_db.get_run("bench-stored-summary")
+    assert run is not None
+    assert run["summary"] == stored_summary
+    assert len(run["trials"]) == 1
+
+
+def test_benchmark_get_run_recomputes_summary_for_running_runs(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+
+    monkeypatch.setattr(benchmark_db, "DB_PATH", tmp_path / "benchmarks.db")
+    benchmark_db.create_run(
+        "bench-running-summary",
+        {
+            "algorithms": ["sweep"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+        },
+        total_trials=1,
+    )
+    benchmark_db.insert_trial(_benchmark_trial_row("bench-running-summary"))
+
+    def aggregate(trials):
+        assert len(trials) == 1
+        return {"recomputed": {"count": len(trials)}}
+
+    monkeypatch.setattr(benchmark_db, "aggregate_trials", aggregate)
+
+    run = benchmark_db.get_run("bench-running-summary")
+    assert run is not None
+    assert run["summary"] == {"recomputed": {"count": 1}}
 
 
 def test_benchmark_export_requires_run_scope():
