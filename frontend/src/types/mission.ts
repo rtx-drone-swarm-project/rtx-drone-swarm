@@ -40,6 +40,7 @@ export type BenchmarkTrial = {
   algorithm: string;
   iteration: number;
   scenario_seed: number;
+  scenario_profile?: string;
   bounds?: Bounds;
   drone_count: number;
   target_count: number;
@@ -79,6 +80,7 @@ export type BenchmarkRun = {
     drone_count?: number;
     target_count?: number;
     timeout_seconds?: number;
+    scenario_profile?: string;
   };
   summary?: BenchmarkSummary;
   trials?: BenchmarkTrial[];
@@ -92,7 +94,15 @@ export type BenchmarkRequestPayload = {
   drone_count: number;
   target_count: number;
   timeout_seconds: number;
+  scenario_profile?: string;
   seed?: number;
+};
+
+export type BenchmarkScenarioProfile = {
+  key: string;
+  label: string;
+  description: string;
+  targets_move: boolean;
 };
 
 export type EntityId = string | number;
