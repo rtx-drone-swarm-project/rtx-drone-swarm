@@ -54,7 +54,15 @@ def _rng_int(rng, high: int) -> int:
     return int(rng.randint(0, high - 1))
 
 
-def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.5, rng=None):
+def lloyd_step_aco(X, centroids, old_centroids, pheromone, bounds, decay=0.9, deposit=0.5, rng=None):
+    D2R = math.pi/180
+    R2D = 180/math.pi
+    lat = bounds["min_lat"]
+    lon = bounds["min_lon"]
+
+    for i in range(len(centroids)):
+        centroids[i] = pyned2lla.lla2ned(lat*D2R, lon*D2R, 0, centroids[i][0]*D2R, centroids[i][1]*D2R, 0, pyned2lla.wgs84())[:2] # convert to NED coordinates
+
     k = len(centroids)
     rng = rng or np.random.default_rng()
 
@@ -92,6 +100,11 @@ def lloyd_step_aco(X, centroids, old_centroids, pheromone, decay=0.9, deposit=0.
 
     # pheromone_intensity = pheromone.sum(axis=1)
     # pheromone_intensity = pheromone_intensity / (pheromone_intensity.max() + 1e-8)
+
+    for i in range(len(centroids)):
+        centroids[i] = pyned2lla.ned2lla(lat*D2R, lon*D2R, 0, new_centroids[i][0], new_centroids[i][1], 0, pyned2lla.wgs84())[:2] # convert back to lat/lon
+
+    centroids *= R2D # convert to degrees
 
     return new_centroids, labels, pheromone
 
@@ -187,6 +200,7 @@ class VoronoiACOCoverage(BaseSearchAlgorithm):
             positions,
             self.old_centroids,
             self.pheromone_matrix,
+            mission.bounds,
             rng=getattr(mission, "_np_rng", self._np_rng),
         )
 
@@ -249,7 +263,7 @@ class VoronoiCoverage(BaseSearchAlgorithm):
             seeds = _balanced_partition_seeds(bounds, k)
             virtual_np = seeds
             for _ in range(100):
-                virtual_np, _ = lloyd_step(grid_np, virtual_np)
+                virtual_np, _ = lloyd_step(grid_np, virtual_np, bounds)
             if isinstance(mission, dict):
                 mission["virtual_centroids"] = virtual_np.tolist()
             else:
@@ -259,7 +273,7 @@ class VoronoiCoverage(BaseSearchAlgorithm):
         virtual_np = np.array(current_virtual)
 
 
-        new_centroids, _ = lloyd_step(grid_np, virtual_np, mission["bounds"])
+        new_centroids, _ = lloyd_step(grid_np, virtual_np, mission.bounds)
         
         # Save the updated optimized points back into the mission dictionary
         if isinstance(mission, dict):
