@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
@@ -142,10 +142,14 @@ describe("App integration", () => {
     //   expect(screen.getAllByText("Sweep (Voronoi + Lawnmower)").length).toBeGreaterThan(1);
     // });
 
-    fireEvent.click(screen.getByRole("button", { name: "Recall Drones" }));
+    const summaryDialog = screen.getByRole("dialog", { name: "Search summary" });
+    fireEvent.click(within(summaryDialog).getByRole("button", { name: "Recall Drones" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Start Mission" })).toBeTruthy();
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://localhost:8000/missions/m1/recall",
+        expect.objectContaining({ method: "POST" })
+      );
     });
   });
 

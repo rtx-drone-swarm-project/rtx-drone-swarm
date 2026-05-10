@@ -1,8 +1,10 @@
 import { ALGORITHM_OPTIONS, type AlgorithmOption, type Bounds, type MissionRecord } from "../../types/mission";
+import type { MissionStatus } from "../../types/ws";
 import CollapsibleSection from "../common/CollapsibleSection";
 
 type ActionsPanelProps = {
   selectedBounds: Bounds | null;
+  missionStatus: MissionStatus;
   missionActive: boolean;
   missionLocked: boolean;
   validDroneCount: number;
@@ -11,11 +13,13 @@ type ActionsPanelProps = {
   onAlgorithmChange: (algorithm: AlgorithmOption) => void;
   onStartMission: () => void;
   onStopMission: () => void;
+  onRecallDrones: () => void;
   onResetMission: () => void;
 };
 
 export default function ActionsPanel({
   selectedBounds,
+  missionStatus,
   missionActive,
   missionLocked,
   validDroneCount,
@@ -24,9 +28,11 @@ export default function ActionsPanel({
   onAlgorithmChange,
   onStartMission,
   onStopMission,
+  onRecallDrones,
   onResetMission
 }: ActionsPanelProps) {
   const selectorDisabled = missionActive || missionLocked;
+  const missionRunning = missionStatus === "searching" || missionStatus === "recalling";
 
   return (
     <CollapsibleSection title="Actions">
@@ -67,11 +73,19 @@ export default function ActionsPanel({
         <div className="hint-text warning-text">Warning: only {validDroneCount} valid drones (15 recommended).</div>
       )}
 
-      <button className="action-btn stop" onClick={onStopMission} disabled={!mission?.id || !missionActive}>
+      <button
+        className="action-btn stop"
+        onClick={onStopMission}
+        disabled={!mission?.id || !["searching", "recalling"].includes(missionStatus)}
+      >
         Stop Mission
       </button>
 
-      <button className="action-btn reset" onClick={onResetMission} disabled={missionActive}>
+      <button className="action-btn recall" onClick={onRecallDrones} disabled={!mission?.id || !(missionStatus === "search_complete")}>
+        Recall Drones
+      </button>
+
+      <button className="action-btn reset" onClick={onResetMission} disabled={missionRunning}>
         Reset Mission
       </button>
     </CollapsibleSection>

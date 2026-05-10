@@ -6,13 +6,12 @@ type SearchSummaryModalProps = {
   targets: Target[];
   getHikerLabel: (targetId: string | number) => string;
   onRecall: () => void;
-  onReset: () => void;
   algorithm?: string;
   completionElapsedSeconds?: number;
   metrics?: MissionMetrics | null;
 };
 
-export default function SearchSummaryModal({ isOpen, onClose, targets, getHikerLabel, onRecall, onReset, algorithm, completionElapsedSeconds, metrics }: SearchSummaryModalProps) {
+export default function SearchSummaryModal({ isOpen, onClose, targets, getHikerLabel, onRecall, algorithm, completionElapsedSeconds, metrics }: SearchSummaryModalProps) {
   if (!isOpen || !targets.length) return null;
 
   return (
@@ -85,7 +84,6 @@ export default function SearchSummaryModal({ isOpen, onClose, targets, getHikerL
 
         <div className="search-summary-footer">
           <button type="button" className="action-btn start" onClick={() => { onRecall(); onClose(); }}>Recall Drones</button>
-          <button type="button" className="action-btn start" onClick={() => { onReset(); onClose(); }}>Reset Simulation</button>
         </div>
       </div>
     </div>
