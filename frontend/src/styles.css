@@ -379,6 +379,17 @@ body,
   cursor: not-allowed;
 }
 
+.action-btn.recall {
+  background: rgb(71 85 105 / 0.95);
+  color: #f8fafc;
+}
+
+.action-btn.recall:disabled {
+  background: rgb(51 65 85 / 0.5);
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
 .action-btn.reset {
   background: rgb(71 85 105 / 0.95);
   color: #f8fafc;

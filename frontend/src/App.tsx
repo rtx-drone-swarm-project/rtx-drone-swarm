@@ -30,11 +30,11 @@ import type {
 import type {
   BenchmarkProgressMessage,
   MissionProgressMessage,
+  MissionStatus,
   MissionStatusMessage,
   TargetFoundMessage,
   TelemetryMessage
 } from "./types/ws";
-import { normalizeMissionStatus } from "./utils/format";
 import { customAreaBounds } from "./utils/geo";
 import { parseCoordinate } from "./utils/validate";
 
@@ -49,7 +49,7 @@ export default function App() {
   const [telemetry, setTelemetry] = useState<TelemetryDrone[]>([]);
   const [mission, setMission] = useState<MissionState>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [missionStatus, setMissionStatus] = useState("idle");
+  const [missionStatus, setMissionStatus] = useState<MissionStatus>("idle");
   const [progress, setProgress] = useState(0);
   const [targets, setTargets] = useState<Target[]>([]);
   const [foundHikers, setFoundHikers] = useState<FoundHiker[]>([]);
@@ -315,7 +315,7 @@ export default function App() {
     onBenchmarkProgress: setBenchmarkProgress
   });
 
-  const { startMission, stopMission, resetMissionLock, recallDrones, resetDrones } = useMissionActions({
+  const { startMission, stopMission, resetMissionLock, recallDrones } = useMissionActions({
     apiBase,
     missionLocked,
     selectedBounds,
@@ -337,10 +337,10 @@ export default function App() {
   });
 
   useEffect(() => {
-  if (!mission || !targets.length) return;
-  const allFound = targets.every(t => t.status === "found");
-  if (!allFound) return;
-  if (summaryMissionId === mission.id) return;
+    if (!mission || !targets.length) return;
+    const allFound = targets.every((t) => t.status === "found");
+    if (!allFound) return;
+    if (summaryMissionId === mission.id) return;
 
     setCompletionElapsedSeconds(elapsedSeconds);
     setCompletedTargets(targets);
@@ -480,6 +480,7 @@ export default function App() {
           />
           <ActionsPanel
             selectedBounds={selectedBounds}
+            missionStatus={missionStatus}
             missionActive={missionActive}
             missionLocked={missionLocked}
             validDroneCount={validDroneCount}
@@ -489,6 +490,7 @@ export default function App() {
             onAlgorithmChange={onAlgorithmChange}
             onStartMission={startMission}
             onStopMission={stopMission}
+            onRecallDrones={recallDrones}
             onResetMission={onResetMission}
           />
           <BenchmarkPanel
@@ -509,7 +511,6 @@ export default function App() {
         targets={completedTargetsSorted}
         getHikerLabel={getHikerLabel}
         onRecall={recallDrones}
-        onReset={resetDrones}
         algorithm={completedMetrics?.algorithm ?? mission?.algorithm ?? selectedAlgorithm}
         algorithmOptions={algorithmOptions}
         completionElapsedSeconds={completionElapsedSeconds}

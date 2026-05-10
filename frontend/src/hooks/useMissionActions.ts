@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { createMissionClient } from "../api/missionClient";
 import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionState, Target, ValidDrone } from "../types/mission";
+import type { MissionStatus } from "../types/ws";
 
 type UseMissionActionsArgs = {
   apiBase: string;
@@ -11,7 +12,7 @@ type UseMissionActionsArgs = {
   validDroneCount: number;
   mission: MissionState;
   setMission: (value: MissionState) => void;
-  setMissionStatus: (value: string) => void;
+  setMissionStatus: (value: MissionStatus) => void;
   setProgress: (value: number) => void;
   setTargets: (value: Target[]) => void;
   setElapsedSeconds: (value: number) => void;
@@ -174,16 +175,10 @@ export default function useMissionActions({
     await missionClient.recallMission(mission.id);
   };
 
-  const resetDrones = async () => {
-    if (!mission?.id) return;
-    await missionClient.resetMission(mission.id);
-  };
-
   return {
     startMission,
     stopMission,
     resetMissionLock,
     recallDrones,
-    resetDrones,
   };
 }

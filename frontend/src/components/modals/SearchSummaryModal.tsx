@@ -6,7 +6,6 @@ type SearchSummaryModalProps = {
   targets: Target[];
   getHikerLabel: (targetId: string | number) => string;
   onRecall: () => void;
-  onReset: () => void;
   algorithm?: string;
   algorithmOptions: AlgorithmMetadata[];
   completionElapsedSeconds?: number;
@@ -19,7 +18,6 @@ export default function SearchSummaryModal({
   targets,
   getHikerLabel,
   onRecall,
-  onReset,
   algorithm,
   algorithmOptions,
   completionElapsedSeconds,
@@ -33,7 +31,7 @@ export default function SearchSummaryModal({
         className="modal-panel"
         role="dialog"
         aria-modal="true"
-        aria-label= "Search summary"
+        aria-label="Search summary"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
@@ -97,7 +95,6 @@ export default function SearchSummaryModal({
 
         <div className="search-summary-footer">
           <button type="button" className="action-btn start" onClick={() => { onRecall(); onClose(); }}>Recall Drones</button>
-          <button type="button" className="action-btn start" onClick={() => { onReset(); onClose(); }}>Reset Simulation</button>
         </div>
       </div>
     </div>
