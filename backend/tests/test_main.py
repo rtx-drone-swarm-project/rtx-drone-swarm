@@ -1968,6 +1968,28 @@ def test_benchmark_scenario_profiles_are_deterministic_and_mark_movement():
     assert all(target["movement"] == "stationary" for target in stationary["targets"])
 
 
+def test_benchmark_scenario_profile_metadata_must_have_generation_branch(monkeypatch):
+    import app.benchmark as benchmark
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.02, "min_lon": 0.0, "max_lon": 0.02}
+    monkeypatch.setitem(
+        benchmark.SCENARIO_PROFILES,
+        "metadata_only_profile",
+        {
+            "label": "Metadata Only",
+            "description": "Regression guard for scenario metadata/generation drift.",
+            "targets_move": False,
+        },
+    )
+
+    try:
+        benchmark._build_scenario(bounds, 1, 1, 321, "metadata_only_profile")
+    except ValueError as exc:
+        assert "Unhandled scenario_profile: metadata_only_profile" in str(exc)
+    else:
+        raise AssertionError("Expected unhandled scenario profile to raise ValueError")
+
+
 def test_moving_benchmark_scenario_targets_move_on_tick():
     from app.benchmark import AttrDict, _build_scenario
     from app.simulation import _update_targets_for_tick

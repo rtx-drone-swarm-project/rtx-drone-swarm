@@ -12,11 +12,13 @@ import L from "leaflet"
 
 import { useState, useEffect, useRef } from "react";
 
-function InterpolatedDrone({ drone, label, setSelectedDrone }: { 
-  drone: any, 
-  label: string, 
-  setSelectedDrone: (d: any) => void 
-}) {
+type InterpolatedDroneProps = {
+  drone: ValidDrone;
+  label: string;
+  setSelectedDrone: (value: SelectedDrone) => void;
+};
+
+function InterpolatedDrone({ drone, label, setSelectedDrone }: InterpolatedDroneProps) {
   const markerRef = useRef<L.Marker>(null);
   const requestRef = useRef<number>();
   

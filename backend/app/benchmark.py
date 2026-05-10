@@ -372,6 +372,8 @@ def _build_scenario(
     elif scenario_profile == "diverging_group":
         drones = _sample_uniform_points(rng, bounds, drone_count)
         targets = _sample_cluster_points(rng, bounds, target_count, _random_center(rng, bounds))
+    else:
+        raise ValueError(f"Unhandled scenario_profile: {scenario_profile}")
     return {
         "drones": [
             {
