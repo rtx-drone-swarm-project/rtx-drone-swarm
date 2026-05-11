@@ -168,7 +168,15 @@ class SITLTelemetryBridge:
                 continue
 
             d_state = drone.get_state()
-            d_recall_phase = drone.get_recall_state().get("phase")
+            d_recall_state = drone.get_recall_state()
+            d_recall_phase = d_recall_state.get("phase")
+            d_target_state = drone.get_target_location()
+
+            target_lat = d_target_state.get("lat")
+            target_lon = d_target_state.get("lon")
+            if d_recall_phase and d_recall_state.get("target_lat") is not None and d_recall_state.get("target_lon") is not None:
+                target_lat = d_recall_state.get("target_lat")
+                target_lon = d_recall_state.get("target_lon")
             
             has_pos = bool(d_state["lat"] and d_state["lon"])
             
@@ -186,6 +194,8 @@ class SITLTelemetryBridge:
                 "heading": d_state["heading"],
                 "armed": d_state["armed"],
                 "mode": d_state["mode"],
+                "target_lat": target_lat,
+                "target_lon": target_lon,
                 "recall_phase": d_recall_phase,
                 "telemetry_source": "sitl",           # ADDED THIS FOR FRONTEND
                 "has_position": has_pos,
@@ -263,20 +273,31 @@ class SITLTelemetryBridge:
         finally:
             self._dispatching_sysids.discard(sysid)
 
-    def recall_drone(self, sysid: int, drone_id: Optional[str] = None) -> dict:
+    def recall_drone(
+        self,
+        sysid: int,
+        drone_id: Optional[str] = None,
+        target_lat: Optional[float] = None,
+        target_lon: Optional[float] = None,
+    ) -> dict:
         try:
             drone = self._get_drone(sysid)
             if not drone:
                 return {"drone_id": drone_id, "sysid": sysid, "success": False, "message": "Not connected"}
 
-            home = drone.capture_home_location_if_unset()
-            if home.get("lat") is None or home.get("lon") is None:
-                return {
-                    "drone_id": drone_id,
-                    "sysid": sysid,
-                    "success": False,
-                    "message": "Home location not captured",
-                }
+            recall_lat = target_lat
+            recall_lon = target_lon
+            if recall_lat is None or recall_lon is None:
+                home = drone.capture_home_location_if_unset()
+                recall_lat = home.get("lat")
+                recall_lon = home.get("lon")
+                if recall_lat is None or recall_lon is None:
+                    return {
+                        "drone_id": drone_id,
+                        "sysid": sysid,
+                        "success": False,
+                        "message": "Home location not captured",
+                    }
 
             state = drone.get_state()
             if not state["armed"]:
@@ -288,11 +309,11 @@ class SITLTelemetryBridge:
                 drone.set_mode("GUIDED")
             
             return_alt = max(float(state.get("rel_alt") or 0.0), float(DEFAULT_RECALL_ALT))
-            self.send_goto(sysid, home["lat"], home["lon"], return_alt)
+            self.send_goto(sysid, float(recall_lat), float(recall_lon), return_alt)
             drone.set_recall_state(
                 "returning",
-                home_lat=home["lat"],
-                home_lon=home["lon"],
+                target_lat=float(recall_lat),
+                target_lon=float(recall_lon),
                 last_action_at=time.time(),
             )
 
@@ -300,7 +321,7 @@ class SITLTelemetryBridge:
                 "drone_id": drone_id,
                 "sysid": sysid,
                 "success": True,
-                "message": "Recall initiated: returning to stored home in GUIDED mode",
+                "message": "Recall initiated: returning to recall target in GUIDED mode",
             }
         
         except Exception as exc:
@@ -364,13 +385,13 @@ class SITLTelemetryBridge:
             drone.set_mode(mode)
 
     def _handle_returning(self, drone, recall: dict):
-        home_lat = recall.get("home_lat")
-        home_lon = recall.get("home_lon")
-        if home_lat is None or home_lon is None:
+        target_lat = recall.get("target_lat")
+        target_lon = recall.get("target_lon")
+        if target_lat is None or target_lon is None:
             drone.set_recall_state("error", last_action_at=time.time())
             return
 
-        distance = drone.distance_to(float(home_lat), float(home_lon))
+        distance = drone.distance_to(float(target_lat), float(target_lon))
 
         if distance <= 3.0:
             if not drone.is_mode("LAND"):
@@ -383,7 +404,7 @@ class SITLTelemetryBridge:
         # Retry goto every 10s
         if time.time() - float(recall.get("last_action_at") or 0.0) >= 10:
             alt = max(float(drone.get_state().get("rel_alt") or 0.0), float(DEFAULT_RECALL_ALT))
-            drone.goto(float(home_lat), float(home_lon), alt)
+            drone.goto(float(target_lat), float(target_lon), alt)
             drone.set_recall_state("returning", last_action_at=time.time())
 
         else:

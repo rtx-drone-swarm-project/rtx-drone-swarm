@@ -19,6 +19,7 @@ from app.models import MissionCreate, Mission
 
 
 mission_db: Dict[str, Mission] = {}
+RECALL_HOME_RADIUS_METERS = 10.0
 
 
 def _coerce_sysid(value: object) -> Optional[int]:
@@ -137,11 +138,16 @@ def _sync_mission_drones_with_sitl(mission: Mission) -> set[str]:
 
         lat = live_state.get("lat")
         lon = live_state.get("lon")
+        target_lat = live_state.get("target_lat")
+        target_lon = live_state.get("target_lon")
         alt = live_state.get("alt")
 
         if lat is not None and lon is not None:
             drone["lat"] = float(lat)
             drone["lon"] = float(lon)
+        if target_lat is not None and target_lon is not None:
+            drone["target_lat"] = float(target_lat)
+            drone["target_lon"] = float(target_lon)
         if alt is not None:
             drone["alt"] = float(alt)
 
@@ -185,6 +191,44 @@ def _mission_bounds_center(bounds: dict) -> Tuple[float, float]:
         (float(bounds["min_lat"]) + float(bounds["max_lat"])) / 2.0,
         (float(bounds["min_lon"]) + float(bounds["max_lon"])) / 2.0,
     )
+
+
+def _meters_to_lat_delta(meters: float) -> float:
+    return meters / 110_574.0
+
+
+def _meters_to_lon_delta(meters: float, latitude: float) -> float:
+    return meters / (111_320.0 * max(abs(math.cos(math.radians(latitude))), 1e-6))
+
+
+def _build_recall_assignments(mission: Mission, radius_m: float = RECALL_HOME_RADIUS_METERS) -> List[dict]:
+    """Return mission-home recall targets spaced evenly around the mission home."""
+    mission_home = getattr(mission, "home", None) or {}
+    home_lat = mission_home.get("lat")
+    home_lon = mission_home.get("lon")
+    if home_lat is None or home_lon is None:
+        return []
+
+    drones = getattr(mission, "drones", [])
+    drone_count = len(drones)
+    if drone_count == 0:
+        return []
+
+    assignments: List[dict] = []
+    for index, drone in enumerate(drones):
+        angle = (2.0 * math.pi * index) / drone_count if drone_count > 1 else 0.0
+        target_lat = float(home_lat) + _meters_to_lat_delta(radius_m * math.sin(angle))
+        target_lon = float(home_lon) + _meters_to_lon_delta(radius_m * math.cos(angle), float(home_lat))
+        assignments.append(
+            {
+                "drone_id": str(drone.get("id")) if drone.get("id") is not None else None,
+                "sysid": _coerce_sysid(drone.get("sysid")) or index + 1,
+                "lat": target_lat,
+                "lon": target_lon,
+            }
+        )
+
+    return assignments
 
 
 def _generate_coverage_points(bounds: dict, drone_count: int) -> List[Tuple[float, float]]:

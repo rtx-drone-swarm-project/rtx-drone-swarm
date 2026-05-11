@@ -135,6 +135,22 @@ describe("missionClient", () => {
     );
   });
 
+  it("updates mission home with the expected patch request", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", home: { lat: 8.1, lon: 9.2 } }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMissionClient("http://localhost:8000");
+    await client.updateMissionHome("m1", { lat: 8.1, lon: 9.2 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/missions/m1/home",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ lat: 8.1, lon: 9.2 })
+      })
+    );
+  });
+
   it("starts and reads benchmark runs", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ run_id: "b1", status: "running" }) })

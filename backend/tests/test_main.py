@@ -4,7 +4,7 @@ import numpy as np
 import logging
 from fastapi.testclient import TestClient
 from app import app
-from app.models import Mission, MissionCreate, Drone, Bounds
+from app.models import Mission, MissionCreate, Drone, Bounds, Coordinate
 from app.main import mission_db, simulation_loop, manager, _sync_mission_drones_with_sitl, sitl_bridge
 from app.algorithms.base import DETECTION_RADIUS
 from app.algorithms.boustrophedon import (
@@ -29,6 +29,7 @@ import app.simulation as simulation_module
 import app.dispatch as dispatch_module
 import app.sitl as sitl_module
 import app.connect_swarm as connect_swarm_module
+import app.recall as recall_module
 
 client = TestClient(app)
 
@@ -38,6 +39,7 @@ def create_test_mission(
     bounds=None,
     name="test-mission",
     algorithm="voronoi",
+    home=None,
 ):
     bounds = bounds or Bounds(
         min_lat=0.0,
@@ -54,6 +56,7 @@ def create_test_mission(
         name=name,
         bounds=bounds,
         drones=drones,
+        home=home,
         algorithm=algorithm,
     )
     mission = Mission(id, mission_data)
@@ -108,6 +111,51 @@ def test_sitl_status_endpoint_includes_last_connect_error():
     finally:
         sitl_bridge.get_states_by_sysid = original_get_states
         sitl_bridge._last_connect_error = original_last_connect_error
+
+
+def test_get_states_by_sysid_prefers_recall_target_during_recall():
+    class FakeDrone:
+        def __init__(self):
+            self.sysid = 7
+
+        def get_state(self):
+            return {
+                "lat": 33.51,
+                "lon": -117.21,
+                "rel_alt": 20.0,
+                "groundspeed": 5.0,
+                "heading": 90.0,
+                "armed": True,
+                "mode": "GUIDED",
+                "timestamp": 1.0,
+            }
+
+        def get_recall_state(self):
+            return {
+                "phase": "returning",
+                "target_lat": 34.25,
+                "target_lon": -118.45,
+                "last_action_at": 1.0,
+            }
+
+        def get_target_location(self):
+            return {"lat": 33.515, "lon": -117.205, "alt": 30.0}
+
+        def is_prearm_passed(self):
+            return True
+
+        def is_ekf_gps_ready(self):
+            return True
+
+    bridge = sitl_module.SITLTelemetryBridge()
+    bridge.ensure_connected = lambda force=False: True
+    bridge.update_recall_states = lambda: None
+    bridge.swarm.drones = [FakeDrone()]
+
+    states = bridge.get_states_by_sysid()
+
+    assert states[7]["target_lat"] == 34.25
+    assert states[7]["target_lon"] == -118.45
 
 def test_create_mission():
     mission_data = {
@@ -180,6 +228,76 @@ def test_create_mission_uses_explicit_home_when_provided():
     assert response.status_code == 200
     data = response.json()
     assert data["home"] == {"lat": 34.9, "lon": -117.1}
+
+
+def test_update_mission_home_persists_new_location():
+    mission_data = {
+        "name": "Mutable Home Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 35.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.2, "lon": -117.8},
+        ],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+
+    response = client.patch(f"/missions/{mission_id}/home", json={"lat": 34.9, "lon": -117.1})
+
+    assert response.status_code == 200
+    assert response.json()["home"] == {"lat": 34.9, "lon": -117.1}
+
+
+def test_build_recall_assignments_spaces_drones_around_mission_home():
+    mission = create_test_mission(
+        drones=[
+            Drone(id="drone1", lat=34.2, lon=-117.8, sysid=1),
+            Drone(id="drone2", lat=34.4, lon=-117.6, sysid=2),
+        ],
+        home=Coordinate(lat=34.3, lon=-117.7),
+    )
+
+    assignments = missions_app._build_recall_assignments(mission)
+
+    assert len(assignments) == 2
+    assert assignments[0]["sysid"] == 1
+    assert assignments[1]["sysid"] == 2
+    assert assignments[0]["lat"] == assignments[1]["lat"]
+    assert assignments[0]["lon"] != assignments[1]["lon"]
+    assert abs(assignments[0]["lat"] - 34.3) < 0.0001
+    assert abs(assignments[0]["lon"] - (-117.7)) < 0.001
+
+
+def test_run_direct_recall_uses_mission_home_formation_targets():
+    mission = create_test_mission(
+        drones=[
+            Drone(id="drone1", lat=34.2, lon=-117.8, sysid=1),
+            Drone(id="drone2", lat=34.4, lon=-117.6, sysid=2),
+        ],
+        home=Coordinate(lat=34.3, lon=-117.7),
+    )
+
+    calls = []
+    original_recall_drone = recall_module.sitl_bridge.recall_drone
+    recall_module.sitl_bridge.recall_drone = lambda **kwargs: calls.append(kwargs) or {
+        "drone_id": kwargs["drone_id"],
+        "sysid": kwargs["sysid"],
+        "success": True,
+        "message": "ok",
+    }
+    try:
+        results = recall_module.run_direct_recall(mission)
+    finally:
+        recall_module.sitl_bridge.recall_drone = original_recall_drone
+
+    assert len(results) == 2
+    assert len(calls) == 2
+    assert calls[0]["target_lat"] == calls[1]["target_lat"]
+    assert calls[0]["target_lon"] != calls[1]["target_lon"]
 
 
 def test_get_mission_returns_stored_bounds():

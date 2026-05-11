@@ -31,7 +31,8 @@ import type {
   Target,
   TelemetryDrone,
   ValidDrone,
-  Coordinate
+  Coordinate,
+  EntityId
 } from "./types/mission";
 import type {
   BenchmarkProgressMessage,
@@ -46,6 +47,12 @@ import { parseCoordinate } from "./utils/validate";
 
 const DEFAULT_CENTER: [number, number] = [33.5, -117.2];
 const DEFAULT_ZOOM = 13;
+
+function toFiniteNumberOrNull(value: unknown): number | null {
+  if (value == null) return null;
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
 
 function isPointInsideBounds(lat: number, lon: number, bounds: Bounds) {
   return lat >= bounds.min_lat && lat <= bounds.max_lat && lon >= bounds.min_lon && lon <= bounds.max_lon;
@@ -84,13 +91,13 @@ export default function App() {
   const [homeLat, setHomeLat] = useState(DEFAULT_CENTER[0].toFixed(6));
   const [homeLon, setHomeLon] = useState(DEFAULT_CENTER[1].toFixed(6));
   const [isValidHomeCoord, setIsValidHomeCoord] = useState(true);
-  const [homeLocation, setHomeLocation] = useState<Coordinate | null>(null);
+  const [userSelectedHomeLocation, setUserSelectedHomeLocation] = useState<Coordinate | null>(null);
   const [homeManuallySet, setHomeManuallySet] = useState(false);
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(DEFAULT_CENTER);
   const [mapAutocentered, setMapAutocentered] = useState(false);
   const [selectedBounds, setSelectedBounds] = useState<Bounds | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
-  const [selectedDrone, setSelectedDrone] = useState<SelectedDrone>(null);
+  const [selectedDroneId, setSelectedDroneId] = useState<EntityId | null>(null);
   const [searchSummaryOpen, setSearchSummaryOpen] = useState(false);
   const [completedTargets, setCompletedTargets] = useState<Target[]>([]);
   const [summaryMissionId, setSummaryMissionId] = useState<string | number | null>(null);
@@ -147,16 +154,17 @@ export default function App() {
             role: typeof drone.role === "string" ? drone.role : null
           };
 
-          const altNum = Number(drone.alt);
-          const headingNum = Number(drone.heading);
-          const groundspeedNum = Number(drone.groundspeed);
-          const targetLatNum = Number(drone.target_lat);
-          const targetLonNum = Number(drone.target_lon);
-          if (Number.isFinite(altNum)) normalizedDrone.alt = altNum;
-          if (Number.isFinite(headingNum)) normalizedDrone.heading = headingNum;
-          if (Number.isFinite(groundspeedNum)) normalizedDrone.groundspeed = groundspeedNum;
-          if (Number.isFinite(targetLatNum)) normalizedDrone.target_lat = targetLatNum;
-          if (Number.isFinite(targetLonNum)) normalizedDrone.target_lon = targetLonNum;
+          const altNum = toFiniteNumberOrNull(drone.alt);
+          const headingNum = toFiniteNumberOrNull(drone.heading);
+          const groundspeedNum = toFiniteNumberOrNull(drone.groundspeed);
+          const targetLatNum = toFiniteNumberOrNull(drone.target_lat);
+          const targetLonNum = toFiniteNumberOrNull(drone.target_lon);
+          
+          if (altNum != null) normalizedDrone.alt = altNum;
+          if (headingNum != null) normalizedDrone.heading = headingNum;
+          if (groundspeedNum != null) normalizedDrone.groundspeed = groundspeedNum;
+          if (targetLatNum != null) normalizedDrone.target_lat = targetLatNum;
+          if (targetLonNum != null) normalizedDrone.target_lon = targetLonNum;
 
           if (
             Array.isArray(drone.sweep_centroid) &&
@@ -180,7 +188,14 @@ export default function App() {
 
   const validDroneCount = validDrones.length;
   const derivedSpawnHome = useMemo(() => averageCoordinate(validDrones), [validDrones]);
-  const effectiveHomeLocation = homeLocation ?? mission?.home ?? derivedSpawnHome;
+  const effectiveHomeLocation = userSelectedHomeLocation ?? mission?.home ?? derivedSpawnHome;
+  const selectedDrone = useMemo(
+    () =>
+      selectedDroneId == null
+        ? null
+        : validDrones.find((drone) => String(drone.id) === String(selectedDroneId)) ?? null,
+    [selectedDroneId, validDrones]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -266,7 +281,7 @@ export default function App() {
   }, [getPlacedHikerLabel, placedHikers, selectedPlacedHiker]);
 
   useEffect(() => {
-    if (missionStatus !== "searching") return;
+    if (missionStatus === "idle" || missionStatus === "mission_complete") return;
     const interval = window.setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
@@ -433,7 +448,7 @@ export default function App() {
 
   useEffect(() => {
     if (!mission?.home) return;
-    setHomeLocation(mission.home);
+    setUserSelectedHomeLocation(mission.home);
     setHomeLat(mission.home.lat.toFixed(6));
     setHomeLon(mission.home.lon.toFixed(6));
     setHomeManuallySet(false);
@@ -523,7 +538,7 @@ export default function App() {
     [applyHomeNavigation, homeLat]
   );
 
-  const onSetMissionHome = useCallback(() => {
+  const onSetMissionHome = useCallback(async () => {
     const latValue = parseCoordinate(homeLat, -90, 90);
     const lonValue = parseCoordinate(homeLon, -180, 180);
     if (latValue == null || lonValue == null) {
@@ -531,10 +546,18 @@ export default function App() {
       return;
     }
     setIsValidHomeCoord(true);
-    setHomeLocation({ lat: latValue, lon: lonValue });
+    setUserSelectedHomeLocation({ lat: latValue, lon: lonValue });
     setHomeManuallySet(true);
     setMapCenter([latValue, lonValue]);
-  }, [homeLat, homeLon]);
+    if (!mission?.id) return;
+
+    try {
+      const updatedMission = await apiClient.updateMissionHome(mission.id, { lat: latValue, lon: lonValue });
+      setMission(updatedMission);
+    } catch (err) {
+      console.warn(`Mission home update failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [homeLat, homeLon, mission?.id, apiClient]);
 
   const onAlgorithmChange = useCallback((algorithm: AlgorithmOption) => {
     setSelectedAlgorithm(algorithm);
@@ -546,7 +569,7 @@ export default function App() {
     runningMissionIdRef.current = null;
     nextHikerNumberRef.current = 1;
     setDroneTrails({});
-    setHomeLocation(null);
+    setUserSelectedHomeLocation(null);
     setHomeManuallySet(false);
     setPlacedHikers([]);
     setSelectedHikerId(null);
@@ -633,7 +656,7 @@ export default function App() {
           hikerPlacementMode={isPlacingHiker}
           getHikerLabel={getHikerLabel}
           getPlacedHikerLabel={getPlacedHikerLabel}
-          setSelectedDrone={setSelectedDrone}
+          setSelectedDrone={(drone) => setSelectedDroneId(drone?.id ?? null)}
           onSelectHiker={setSelectedHikerId}
           onPlaceHiker={onPlaceHiker}
           onMoveHiker={onMoveHiker}
@@ -719,7 +742,7 @@ export default function App() {
         </aside>
       </main>
 
-      <DroneModal drone={selectedDrone} onClose={() => setSelectedDrone(null)} />
+      <DroneModal drone={selectedDrone} onClose={() => setSelectedDroneId(null)} />
       <HikerModal
         hiker={selectedPlacedHiker}
         label={selectedPlacedHikerLabel}

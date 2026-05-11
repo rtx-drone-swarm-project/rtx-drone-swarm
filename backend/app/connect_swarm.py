@@ -30,7 +30,7 @@ class Drone:
         self.target_location = {"lat": None, "lon": None, "alt": None}
         self.home_location = {"lat": None, "lon": None, "alt": None}
         self.recall_phase = None
-        self.recall_home = {"lat": None, "lon": None}
+        self.recall_target = {"lat": None, "lon": None}
         self.recall_last_action_at = 0.0
 
         self.last_hb = None
@@ -134,16 +134,18 @@ class Drone:
     def set_recall_state(
         self,
         phase,
-        home_lat=None,
-        home_lon=None,
+        target_lat=None,
+        target_lon=None,
         last_action_at=None,
     ):
         with self._lock:
             self.recall_phase = phase
-            if home_lat is not None:
-                self.recall_home["lat"] = home_lat
-            if home_lon is not None:
-                self.recall_home["lon"] = home_lon
+            if target_lat is not None:
+                self.recall_target["lat"] = target_lat
+                self.target_location["lat"] = target_lat
+            if target_lon is not None:
+                self.recall_target["lon"] = target_lon
+                self.target_location["lon"] = target_lon
             if last_action_at is not None:
                 self.recall_last_action_at = float(last_action_at)
 
@@ -151,10 +153,14 @@ class Drone:
         with self._lock:
             return {
                 "phase": self.recall_phase,
-                "home_lat": self.recall_home["lat"],
-                "home_lon": self.recall_home["lon"],
+                "target_lat": self.recall_target["lat"],
+                "target_lon": self.recall_target["lon"],
                 "last_action_at": self.recall_last_action_at,
             }
+
+    def get_target_location(self):
+        with self._lock:
+            return self.target_location.copy()
 
     def set_mode(self, mode_name):
         mode_map = self.conn.mode_mapping()

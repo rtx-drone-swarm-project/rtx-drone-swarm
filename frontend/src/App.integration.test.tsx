@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
@@ -10,6 +10,8 @@ vi.mock("./components/map/MapPanel", () => ({
   default: (props: {
     onSelectArea: (lat: number, lon: number, bounds: any) => void;
     onPlaceHiker?: (lat: number, lon: number) => void;
+    validDrones?: Array<Record<string, unknown>>;
+    setSelectedDrone: (drone: Record<string, unknown>) => void;
   }) => {
     mocks.mapPanelProps.push(props);
     return (
@@ -26,6 +28,14 @@ vi.mock("./components/map/MapPanel", () => ({
           }
         >
           Select Area
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (props.validDrones?.[0]) props.setSelectedDrone(props.validDrones[0]);
+          }}
+        >
+          Select Drone
         </button>
         <button type="button" onClick={() => props.onPlaceHiker?.(33.5, -117.2)}>
           Place Hiker On Map
@@ -185,6 +195,112 @@ describe("App integration", () => {
     });
   });
 
+  it("relocates the home icon and recenters the map when mission home is set", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal("fetch", vi.fn());
+
+    render(<App />);
+
+    const homeSection = screen.getByText("Home").closest("section");
+    expect(homeSection).toBeTruthy();
+    if (!homeSection) throw new Error("Home section not found");
+
+    const homePanel = within(homeSection);
+    const [homeLatInput, homeLonInput] = homePanel.getAllByRole("textbox");
+
+    fireEvent.change(homeLatInput, { target: { value: "34.100000" } });
+    fireEvent.change(homeLonInput, { target: { value: "-118.300000" } });
+    fireEvent.click(homePanel.getByRole("button", { name: "Set Mission Home" }));
+
+    await waitFor(() => {
+      const latestProps = mocks.mapPanelProps[mocks.mapPanelProps.length - 1];
+      expect(latestProps.homeLocation).toEqual({ lat: 34.1, lon: -118.3 });
+      expect(latestProps.mapCenter).toEqual([34.1, -118.3]);
+    });
+  });
+
+  it("defaults the home panel and home marker to the drones' initial spawnpoint before mission start", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal("fetch", vi.fn());
+
+    render(<App />);
+
+    const socket = MockWebSocket.instances[0];
+    socket.sendMessage({
+      type: "telemetry",
+      drones: [
+        { id: "d1", lat: 34.1, lon: -118.3 },
+        { id: "d2", lat: 34.3, lon: -118.1 }
+      ]
+    });
+
+    await waitFor(() => {
+      const latestProps = mocks.mapPanelProps[mocks.mapPanelProps.length - 1];
+      expect(latestProps.homeLocation).toEqual({ lat: 34.2, lon: -118.19999999999999 });
+    });
+
+    const homeSection = screen.getByText("Home").closest("section");
+    expect(homeSection).toBeTruthy();
+    if (!homeSection) throw new Error("Home section not found");
+
+    const [homeLatInput, homeLonInput] = within(homeSection).getAllByRole("textbox") as HTMLInputElement[];
+    expect(homeLatInput.value).toBe("34.200000");
+    expect(homeLonInput.value).toBe("-118.200000");
+  });
+
+  it("relocates the home icon and recenters the map when mission home is set", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal("fetch", vi.fn());
+
+    render(<App />);
+
+    const homeSection = screen.getByText("Home").closest("section");
+    expect(homeSection).toBeTruthy();
+    if (!homeSection) throw new Error("Home section not found");
+
+    const homePanel = within(homeSection);
+    const [homeLatInput, homeLonInput] = homePanel.getAllByRole("textbox");
+
+    fireEvent.change(homeLatInput, { target: { value: "34.100000" } });
+    fireEvent.change(homeLonInput, { target: { value: "-118.300000" } });
+    fireEvent.click(homePanel.getByRole("button", { name: "Set Mission Home" }));
+
+    await waitFor(() => {
+      const latestProps = mocks.mapPanelProps[mocks.mapPanelProps.length - 1];
+      expect(latestProps.homeLocation).toEqual({ lat: 34.1, lon: -118.3 });
+      expect(latestProps.mapCenter).toEqual([34.1, -118.3]);
+    });
+  });
+
+  it("defaults the home panel and home marker to the drones' initial spawnpoint before mission start", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal("fetch", vi.fn());
+
+    render(<App />);
+
+    const socket = MockWebSocket.instances[0];
+    socket.sendMessage({
+      type: "telemetry",
+      drones: [
+        { id: "d1", lat: 34.1, lon: -118.3 },
+        { id: "d2", lat: 34.3, lon: -118.1 }
+      ]
+    });
+
+    await waitFor(() => {
+      const latestProps = mocks.mapPanelProps[mocks.mapPanelProps.length - 1];
+      expect(latestProps.homeLocation).toEqual({ lat: 34.2, lon: -118.19999999999999 });
+    });
+
+    const homeSection = screen.getByText("Home").closest("section");
+    expect(homeSection).toBeTruthy();
+    if (!homeSection) throw new Error("Home section not found");
+
+    const [homeLatInput, homeLonInput] = within(homeSection).getAllByRole("textbox") as HTMLInputElement[];
+    expect(homeLatInput.value).toBe("34.200000");
+    expect(homeLonInput.value).toBe("-118.200000");
+  });
+
   it("keeps accumulating drone trails across repeated running status updates", async () => {
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
     vi.stubGlobal("fetch", vi.fn());
@@ -221,6 +337,164 @@ describe("App integration", () => {
     });
   });
 
+  it("persists mission home changes made after mission start", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "idle", progress: 0, home: { lat: 33.5, lon: -117.2 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "searching", progress: 0, home: { lat: 33.5, lon: -117.2 }, targets: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "searching", progress: 0, home: { lat: 34.25, lon: -118.45 }, targets: [] }) });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start Mission" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const homeSection = screen.getByText("Home").closest("section");
+    expect(homeSection).toBeTruthy();
+    if (!homeSection) throw new Error("Home section not found");
+
+    const homePanel = within(homeSection);
+    const [homeLatInput, homeLonInput] = homePanel.getAllByRole("textbox");
+    fireEvent.change(homeLatInput, { target: { value: "34.250000" } });
+    fireEvent.change(homeLonInput, { target: { value: "-118.450000" } });
+    fireEvent.click(homePanel.getByRole("button", { name: "Set Mission Home" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining("/missions/m1/home"),
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ lat: 34.25, lon: -118.45 })
+      })
+    );
+  });
+
+  it("updates the drone modal assigned target to the recall target during recall", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal("fetch", vi.fn());
+
+    render(<App />);
+
+    const socket = MockWebSocket.instances[0];
+    socket.sendMessage({
+      type: "telemetry",
+      drones: [
+        {
+          id: "7",
+          sysid: 7,
+          lat: 33.51,
+          lon: -117.21,
+          target_lat: 33.515,
+          target_lon: -117.205,
+          telemetry_source: "sitl",
+          armed: true,
+          mode: "GUIDED"
+        }
+      ]
+    });
+
+    await waitFor(() => {
+      const latestProps = mocks.mapPanelProps[mocks.mapPanelProps.length - 1];
+      expect(latestProps.validDrones).toHaveLength(1);
+    });
+
+    const latestProps = mocks.mapPanelProps[mocks.mapPanelProps.length - 1];
+    act(() => {
+      latestProps.setSelectedDrone(latestProps.validDrones[0]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("33.5150, -117.2050")).toBeTruthy();
+    });
+
+    socket.sendMessage({
+      type: "telemetry",
+      drones: [
+        {
+          id: "7",
+          sysid: 7,
+          lat: 33.52,
+          lon: -117.22,
+          target_lat: 34.25,
+          target_lon: -118.45,
+          telemetry_source: "sitl",
+          armed: true,
+          mode: "GUIDED",
+          status: "recalling"
+        }
+      ]
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("34.2500, -118.4500")).toBeTruthy();
+    });
+  });
+
+  it("does not serialize null telemetry targets as a 0,0 startup dispatch target", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "idle", progress: 0 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", status: "searching", progress: 0, targets: [] }) });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    const socket = MockWebSocket.instances[0];
+    socket.sendMessage({
+      type: "telemetry",
+      drones: [
+        {
+          id: "7",
+          sysid: 7,
+          lat: 33.51,
+          lon: -117.21,
+          target_lat: null,
+          target_lon: null,
+          telemetry_source: "sitl",
+          armed: true,
+          mode: "GUIDED"
+        }
+      ]
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start Mission" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const createMissionRequest = fetchMock.mock.calls[0];
+    const init = createMissionRequest[1] as RequestInit;
+    const body = JSON.parse(String(init.body));
+
+    expect(body.drones).toEqual([
+      {
+        id: "7",
+        sysid: 7,
+        lat: 33.51,
+        lon: -117.21
+      }
+    ]);
+    expect(body.drones[0]).not.toHaveProperty("target_lat");
+    expect(body.drones[0]).not.toHaveProperty("target_lon");
+  });
+
   it("locks the home panel while mission status is mission_complete", async () => {
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
     vi.stubGlobal("fetch", vi.fn());
@@ -232,6 +506,35 @@ describe("App integration", () => {
       type: "mission_status",
       mission_id: "m1",
       status: "mission_complete",
+      progress: 100,
+      targets: []
+    });
+
+    const homeSection = screen.getByText("Home").closest("section");
+    expect(homeSection).toBeTruthy();
+    if (!homeSection) throw new Error("Home section not found");
+
+    await waitFor(() => {
+      const homePanel = within(homeSection);
+      const [homeLatInput, homeLonInput] = homePanel.getAllByRole("textbox") as HTMLInputElement[];
+      const setHomeButton = homePanel.getByRole("button", { name: "Set Mission Home" }) as HTMLButtonElement;
+      expect(homeLatInput.disabled).toBe(true);
+      expect(homeLonInput.disabled).toBe(true);
+      expect(setHomeButton.disabled).toBe(true);
+    });
+  });
+
+  it("locks the home panel while mission status is recalling", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal("fetch", vi.fn());
+
+    render(<App />);
+
+    const socket = MockWebSocket.instances[0];
+    socket.sendMessage({
+      type: "mission_status",
+      mission_id: "m1",
+      status: "recalling",
       progress: 100,
       targets: []
     });

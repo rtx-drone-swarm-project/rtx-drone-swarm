@@ -9,7 +9,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 
 from app.dispatch import run_direct_dispatch, run_dispatch_script
-from app.models import DispatchTargetsRequest, MissionCreate, MissionStart, Mission
+from app.models import Coordinate, DispatchTargetsRequest, MissionCreate, MissionStart, Mission
 from app.algorithms.base import build_dense_coverage_grid
 from app.missions import (
     _assign_start_area_targets,
@@ -46,6 +46,20 @@ def get_mission(mission_id: str):
     if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
     return mission_db[mission_id].to_dict()
+
+
+@router.patch("/missions/{mission_id}/home")
+async def update_mission_home(mission_id: str, home: Coordinate):
+    """Update a mission's shared home location for map display and later recall."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    if mission.status in {"recalling", "mission_complete"}:
+        raise HTTPException(status_code=400, detail="Mission home cannot be changed in the current state")
+
+    mission.home = home.model_dump()
+    return mission.to_dict()
 
 
 async def _background_dispatch(mission: Mission, mission_id: str, assignments: List[dict]) -> None:

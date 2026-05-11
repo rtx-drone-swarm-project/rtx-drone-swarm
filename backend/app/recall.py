@@ -3,7 +3,7 @@
 import logging
 from typing import List
 
-from app.missions import _coerce_sysid
+from app.missions import _build_recall_assignments, _coerce_sysid
 from app.models import Mission
 from app.sitl import sitl_bridge
 
@@ -21,12 +21,26 @@ def check_recall_completion() -> bool:
 
 def run_direct_recall(mission: Mission) -> List[dict]:
     """Recall drones directly through the in-process SITL bridge."""
-    logger.info("Recall invoked. Returning drones to stored home, then landing and disarming")
+    logger.info("Recall invoked. Returning drones to mission home formation, then landing and disarming")
 
     results = []
-    for drone in getattr(mission, "drones", []):
-        drone_id = drone.get("id")
-        sysid = _coerce_sysid(drone.get("sysid"))
+    assignments = _build_recall_assignments(mission)
+    if not assignments:
+        logger.warning("Recall skipped because mission home is unavailable")
+        for drone in getattr(mission, "drones", []):
+            results.append(
+                {
+                    "drone_id": drone.get("id"),
+                    "sysid": _coerce_sysid(drone.get("sysid")),
+                    "success": False,
+                    "message": "Mission home unavailable for recall",
+                }
+            )
+        return results
+
+    for assignment in assignments:
+        drone_id = assignment.get("drone_id")
+        sysid = _coerce_sysid(assignment.get("sysid"))
 
         if sysid is None:
             logger.warning("Skipping drone %s due to invalid sysid", drone_id)
@@ -38,8 +52,11 @@ def run_direct_recall(mission: Mission) -> List[dict]:
             })
             continue
 
-        result = sitl_bridge.recall_drone(sysid=sysid, drone_id=str(drone_id))
+        result = sitl_bridge.recall_drone(
+            sysid=sysid,
+            drone_id=str(drone_id),
+            target_lat=float(assignment["lat"]),
+            target_lon=float(assignment["lon"]),
+        )
         results.append(result)
-
-    # logger.info("Recall results: %s", results)
     return results

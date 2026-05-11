@@ -17,6 +17,7 @@ async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Pro
 
 export type MissionApiClient = {
   createMission: (payload: MissionCreateRequest) => Promise<MissionRecord>;
+  updateMissionHome: (missionId: string | number, home: { lat: number; lon: number }) => Promise<MissionRecord>;
   startMission: (missionId: string | number, algorithm?: string) => Promise<MissionRecord>;
   stopMission: (missionId: string | number) => Promise<MissionRecord>;
   deleteMission: (missionId: string | number) => Promise<void>;
@@ -37,6 +38,13 @@ export function createMissionClient(apiBase: string): MissionApiClient {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
+      }),
+
+    updateMissionHome: (missionId, home) =>
+      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/home`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(home)
       }),
 
     startMission: (missionId, algorithm) =>
