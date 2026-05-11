@@ -16,10 +16,11 @@ function formatMetric(value: number | null | undefined, unit: string, digits = 0
 }
 
 function formatDroneStatus(drone: NonNullable<SelectedDrone>) {
-  if (typeof drone.mode === "string" && drone.mode.trim().length > 0) return drone.mode;
-  if (drone.armed === true) return "ARMED";
-  if (typeof drone.status === "string" && drone.status.trim().length > 0) return drone.status.toUpperCase();
-  return "IDLE";
+  const armed = drone.armed ? "ARMED" : "DISARMED";
+  if (typeof drone.status === "string" && drone.status.trim().length > 0) {
+    return armed + ` / ${drone.status.toUpperCase()}`;
+  }
+  return armed + " / IDLE";
 }
 
 export default function DroneModal({ drone, onClose }: DroneModalProps) {
