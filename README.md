@@ -111,7 +111,7 @@ When SITL is connected correctly, `/sitl/status` should report `connected_count 
 ## Operational Notes
 
 - `scripts/launch_sitl.sh` remains the underlying SITL launcher, but Docker Compose now starts it in a dedicated `sitl` service.
-- Algorithm benchmark history is stored locally in `backend/data/benchmarks.db`; the database file is gitignored and CSV export is available from the Benchmark panel.
+- Algorithm metrics history is stored locally in `backend/data/benchmarks.db`; the database file is gitignored and CSV export is available from the Metrics panel. The backend keeps `/benchmark` routes for compatibility.
 - `docker compose up --build` builds the backend, frontend, and SITL images.
 - Use `docker compose up -d --build` if you want the app stack to keep running in the background.
 - Compose auto-loads `.env` from the repo root; use `.env.example` as the template.

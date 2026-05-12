@@ -50,8 +50,11 @@ class SITLTelemetryBridge:
         self._connect_lock = threading.Lock()
         self._last_connect_error: str | None = None
         self._last_connect_attempt_at = 0.0
-        self._retry_interval_seconds = 5.0
-        self._stale_connection_seconds = 5.0
+        self._retry_interval_seconds = 3.0
+        # Allow up to two missed heartbeat cycles (ArduPilot sends at ~1 Hz) before
+        # declaring a drone stale.  5 s was too tight for a 15-drone SITL swarm under
+        # load and caused cascading full-reconnects on brief multiplexer blips.
+        self._stale_connection_seconds = 12.0
 
     def start(self) -> None:
         """Start the telemetry thread and attempt an initial TCP SITL connection."""
@@ -62,11 +65,24 @@ class SITLTelemetryBridge:
     def _connections_healthy(self) -> bool:
         if not self.swarm.drones:
             return False
-        return all(drone.is_connection_alive(self._stale_connection_seconds) for drone in self.swarm.drones)
+        return any(drone.is_connection_alive(self._stale_connection_seconds) for drone in self.swarm.drones)
+
+    def _count_healthy(self) -> int:
+        return sum(1 for d in self.swarm.drones if d.is_connection_alive(self._stale_connection_seconds))
 
     def _drop_stale_connections(self, reason: str) -> None:
         if not self.swarm.drones:
             return
+        healthy = self._count_healthy()
+        total = len(self.swarm.drones)
+        if healthy > 0:
+            # Partial degradation — keep live drones rather than wiping the swarm.
+            logger.warning(
+                "%s (%d/%d drones still healthy, not resetting swarm)", reason, healthy, total
+            )
+            self._last_connect_error = reason
+            return
+        # All drones are stale — full reset is the right call.
         logger.warning(reason)
         self.swarm.reset_connections()
         self._last_connect_error = reason
@@ -146,6 +162,11 @@ class SITLTelemetryBridge:
         self.update_recall_states()
         states = {}
         for drone in self.swarm.drones:
+            # Skip drones whose TCP socket has gone EOF — they will reconnect on the
+            # next ensure_connected cycle rather than polluting the telemetry dict.
+            if not drone.is_connection_alive(self._stale_connection_seconds):
+                continue
+
             d_state = drone.get_state()
             d_recall_phase = drone.get_recall_state().get("phase")
             

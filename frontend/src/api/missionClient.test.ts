@@ -113,7 +113,13 @@ describe("missionClient", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ run_id: "b1", status: "running" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ run_id: "b1", status: "complete" }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ runs: [{ run_id: "b1" }] }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ runs: [{ run_id: "b1" }] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          scenarios: [{ key: "uniform_random", label: "Uniform Random", description: "Baseline", targets_move: false }]
+        })
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     const client = createMissionClient("http://localhost:8000");
@@ -123,10 +129,12 @@ describe("missionClient", () => {
       bounds: { min_lat: 1, max_lat: 2, min_lon: 3, max_lon: 4 },
       drone_count: 5,
       target_count: 3,
-      timeout_seconds: 120
+      timeout_seconds: 120,
+      scenario_profile: "uniform_random"
     });
     await client.getBenchmarkRun("b1");
     await client.listBenchmarkRuns();
+    const scenarios = await client.listBenchmarkScenarios();
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -139,12 +147,15 @@ describe("missionClient", () => {
           bounds: { min_lat: 1, max_lat: 2, min_lon: 3, max_lon: 4 },
           drone_count: 5,
           target_count: 3,
-          timeout_seconds: 120
+          timeout_seconds: 120,
+          scenario_profile: "uniform_random"
         })
       })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(2, "http://localhost:8000/benchmark/b1", undefined);
     expect(fetchMock).toHaveBeenNthCalledWith(3, "http://localhost:8000/benchmark/runs", undefined);
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "http://localhost:8000/benchmark/scenarios", undefined);
+    expect(scenarios.scenarios[0].key).toBe("uniform_random");
   });
 
   it("lists discovered algorithms", async () => {
