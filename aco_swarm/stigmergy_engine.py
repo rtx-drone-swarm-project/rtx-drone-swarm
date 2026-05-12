@@ -74,7 +74,7 @@ class InMemoryPheromoneGrid:
     def get_gradient(self, lat: float, lon: float, radius: int = 2) -> Tuple[float, float]:
         """
         Return the least-visited neighbour cell within `radius` steps.
-
+ 
         Tie-breaking: when multiple cells share the minimum pheromone value
         (common at startup when the grid is all zeros), pick randomly among
         them rather than defaulting to the current cell — this ensures drones
