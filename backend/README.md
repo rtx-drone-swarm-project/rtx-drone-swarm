@@ -47,7 +47,7 @@ At runtime the flow looks like this:
 |------|----------------|
 | `app/routes/algorithms.py` | Discovered search algorithm metadata endpoint. |
 | `app/routes/health.py` | Lightweight liveness endpoint. |
-| `app/routes/benchmark.py` | Algorithm benchmark start/history/detail/export endpoints. |
+| `app/routes/benchmark.py` | Metrics compatibility start/history/detail/export endpoints. |
 | `app/routes/missions.py` | Mission create/read/start/dispatch/stop/delete endpoints. |
 | `app/routes/sitl.py` | SITL bridge inspection and manual dispatch smoke-test endpoints. |
 | `app/routes/ws.py` | Telemetry WebSocket endpoint for browser clients. |
@@ -71,6 +71,7 @@ At runtime the flow looks like this:
 | `POST /sitl/test-dispatch/{sysid}` | Runs a direct dispatch against one connected drone for smoke testing. |
 | `POST /benchmark` | Starts a background headless benchmark and returns a persisted `run_id`. |
 | `GET /benchmark/runs` | Lists recent benchmark runs. |
+| `GET /benchmark/scenarios` | Lists Metrics scenario profiles for the UI selector. |
 | `GET /benchmark/{run_id}` | Returns one run, raw trials, and aggregate metric summaries. |
 | `GET /benchmark/export?run_id=...` | Exports one benchmark run as CSV. Full local export requires explicit `?all_runs=true`. |
 
@@ -122,16 +123,16 @@ These are the functions worth reading first if you need to change behavior.
 - `app/algorithms/__init__.py:discover_algorithms`
   Imports modules in `backend/app/algorithms/` and registers concrete `BaseSearchAlgorithm` subclasses. Set `algorithm_key`, `display_name`, `description`, and `display_order` on the class for stable API keys and clean UI labels.
 - `app/routes/algorithms.py:get_algorithms`
-  Feeds the Actions panel, Benchmark panel, status labels, and summary labels. Frontend algorithm controls should consume this endpoint rather than maintaining a second hardcoded list.
+  Feeds the Actions panel, Metrics panel, status labels, and summary labels. Frontend algorithm controls should consume this endpoint rather than maintaining a second hardcoded list.
 
 ## State and Data Ownership
 
 - Mission state lives in the in-memory `missions_db` dictionary in `app/missions.py`.
-- Benchmark trial history lives in local SQLite at `backend/data/benchmarks.db`; that file is ignored by git.
-- Benchmark runs left `running` by a backend restart are marked `failed` on startup so the UI does not poll stale jobs forever.
+- Metrics trial history lives in local SQLite at `backend/data/benchmarks.db`; that file is ignored by git. The backend route/table names still use `benchmark` for compatibility.
+- Metrics runs left `running` by a backend restart are marked `failed` on startup so the UI does not poll stale jobs forever.
 - Live drone telemetry lives in the bridge cache inside `app/sitl.py`.
 - During each simulation tick, live SITL state is copied into the mission's drone list so the frontend receives one coherent mission view.
-- The backend does not currently persist missions to a database; a restart clears mission state. Benchmark history persists locally unless `backend/data/benchmarks.db` is deleted.
+- The backend does not currently persist missions to a database; a restart clears mission state. Metrics history persists locally unless `backend/data/benchmarks.db` is deleted.
 
 ## Local Run and Verification
 

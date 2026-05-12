@@ -41,6 +41,7 @@ TRIAL_COLUMNS = [
     "algorithm",
     "iteration",
     "scenario_seed",
+    "scenario_profile",
     "bounds_json",
     "drone_count",
     "target_count",
@@ -89,6 +90,7 @@ def init_db() -> None:
                 algorithm TEXT NOT NULL,
                 iteration INTEGER NOT NULL,
                 scenario_seed INTEGER NOT NULL,
+                scenario_profile TEXT NOT NULL DEFAULT 'uniform_random',
                 bounds_json TEXT NOT NULL,
                 drone_count INTEGER NOT NULL,
                 target_count INTEGER NOT NULL,
@@ -120,7 +122,23 @@ def init_db() -> None:
             ON benchmark_trials(run_id, algorithm);
             """
         )
+        _ensure_columns(conn)
     _INITIALIZED_DB_PATH = DB_PATH
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Append migration columns for existing local benchmark DBs."""
+    trial_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(benchmark_trials)").fetchall()
+    }
+    if "scenario_profile" not in trial_columns:
+        conn.execute(
+            """
+            ALTER TABLE benchmark_trials
+            ADD COLUMN scenario_profile TEXT NOT NULL DEFAULT 'uniform_random'
+            """
+        )
 
 
 def mark_interrupted_runs() -> int:

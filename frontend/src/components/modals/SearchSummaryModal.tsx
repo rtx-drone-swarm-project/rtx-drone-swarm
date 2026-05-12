@@ -31,7 +31,7 @@ export default function SearchSummaryModal({
         className="modal-panel"
         role="dialog"
         aria-modal="true"
-        aria-label= "Search summary"
+        aria-label="Search summary"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">

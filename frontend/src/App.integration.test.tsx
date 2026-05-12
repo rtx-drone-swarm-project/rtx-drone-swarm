@@ -70,6 +70,9 @@ describe("App integration", () => {
       if (url.endsWith("/benchmark/runs")) {
         return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
       }
+      if (url.endsWith("/benchmark/scenarios")) {
+        return Promise.resolve({ ok: true, json: async () => ({ scenarios: [] }) });
+      }
       if (url.endsWith("/missions")) {
         return Promise.resolve({ ok: true, json: async () => ({ id: "m1", status: "idle", progress: 0 }) });
       }
@@ -217,6 +220,9 @@ describe("App integration", () => {
       if (url.endsWith("/benchmark/runs")) {
         return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
       }
+      if (url.endsWith("/benchmark/scenarios")) {
+        return Promise.resolve({ ok: true, json: async () => ({ scenarios: [] }) });
+      }
       if (url.endsWith("/missions")) {
         return Promise.resolve({ ok: true, json: async () => ({ id: "m2", status: "idle", progress: 0 }) });
       }
@@ -274,6 +280,9 @@ describe("App integration", () => {
       if (url.endsWith("/benchmark/runs")) {
         return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
       }
+      if (url.endsWith("/benchmark/scenarios")) {
+        return Promise.resolve({ ok: true, json: async () => ({ scenarios: [] }) });
+      }
       if (url.endsWith("/missions")) {
         return Promise.resolve({ ok: true, json: async () => ({ id: "m-clear", status: "idle", progress: 0 }) });
       }
@@ -324,6 +333,9 @@ describe("App integration", () => {
       const url = String(input);
       if (url.endsWith("/benchmark/runs")) {
         return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
+      }
+      if (url.endsWith("/benchmark/scenarios")) {
+        return Promise.resolve({ ok: true, json: async () => ({ scenarios: [] }) });
       }
       if (url.endsWith("/missions") && init?.method === "POST") {
         missionNumber += 1;
