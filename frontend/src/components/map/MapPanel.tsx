@@ -19,7 +19,7 @@ type InterpolatedDroneProps = {
 };
 
 function InterpolatedDrone({ drone, label, setSelectedDrone }: InterpolatedDroneProps) {
-  const markerRef = useRef<L.Marker>(null);
+  const markerRef = useRef<LeafletMarker | null>(null);
   const requestRef = useRef<number>();
   
   const startPos = useRef<[number, number]>([drone.lat, drone.lon]);
