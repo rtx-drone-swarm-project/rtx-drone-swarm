@@ -11,8 +11,8 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 # Constants
-BOOTSTRAP_SPREAD_DEG = 0.003
-BOOTSTRAP_TIMEOUT_TICKS = 30
+BOOTSTRAP_SPREAD_DEG = 0.0001
+BOOTSTRAP_TIMEOUT_TICKS = 15
 
 class PlannerPhase(Enum):
     LLOYD = "lloyd"
