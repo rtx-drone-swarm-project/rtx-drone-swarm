@@ -8,9 +8,9 @@ import MapControlStack from "./MapControlStack";
 import MapRecenter from "./MapRecenter";
 import { makeCentroidIcon, makeDroneIcon, makePlacedHikerIcon, makeTargetCircleIcon } from "./icons";
 
-import L from "leaflet"
+import L from "leaflet";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 type InterpolatedDroneProps = {
   drone: ValidDrone;
