@@ -13,6 +13,7 @@ from app.algorithms.voronoi import VoronoiCoverage
 from app.algorithms.base import build_search_grid
 from app.settings import _positive_float_env
 import app.main as main_module
+import app.missions as missions_app
 import app.routes.missions as missions_routes
 import app.simulation as simulation_module
 import app.dispatch as dispatch_module
@@ -1188,7 +1189,7 @@ def test_generate_coverage_points_tracks_partition_policy():
     bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
 
     for k in [1, 2, 3, 4, 5, 7, 10, 13, 15, 16, 20, 25, 32]:
-        points = missions_routes._generate_coverage_points(bounds, k)
+        points = missions_app._generate_coverage_points(bounds, k)
         assert len(points) == k
         assert len(set(points)) == k
         for lat, lon in points:
@@ -1390,7 +1391,7 @@ def test_algorithms_endpoint_lists_discovered_registry_metadata():
     assert {"voronoi", "voronoi_aco", "vaco", "apf", "sweep"}.issubset(by_key.keys())
     assert by_key["voronoi"]["label"] == "Voronoi (Lloyd's)"
     assert by_key["voronoi_aco"]["label"] == "Voronoi (ACO)"
-    assert by_key["vaco"]["label"] == "VACO Hybrid Coverage (Kaydee)"
+    assert by_key["vaco"]["label"] == "VACO Hybrid (Optimized)"
     assert by_key["vaco"]["class_name"] == "VoronoiACOHybridCoverage"
 
 

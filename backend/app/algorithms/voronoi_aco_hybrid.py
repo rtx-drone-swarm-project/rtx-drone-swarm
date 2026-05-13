@@ -1,12 +1,12 @@
 import logging
 import math
 import threading
-import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+from app.algorithms.stigmergy_engine import GridConfig, InMemoryPheromoneGrid
 
 log = logging.getLogger(__name__)
 
@@ -107,10 +107,10 @@ class NavigationController:
         
         return np.array(thinned)
 
-    def get_waypoint(self, current_lat: float, current_lon: float) -> Tuple[float, float]:
+    def get_waypoint(self, current_lat: float, current_lon: float, mission_time_s: float) -> Tuple[float, float]:
         if self._current_waypoint is not None:
             dist = self._haversine_m(current_lat, current_lon, *self._current_waypoint)
-            elapsed = time.time() - self._wp_set_time
+            elapsed = mission_time_s - self._wp_set_time
             timeout = min(max(dist/self.SPEED_MS * self.TIMEOUT_FACTOR, self.TIMEOUT_MIN_S), self.TIMEOUT_MAX_S)
             
             if dist > self.WAYPOINT_THRESHOLD_M and elapsed < timeout:
@@ -120,7 +120,7 @@ class NavigationController:
         wp = self._sweep_order[self._sweep_index % len(self._sweep_order)]
         self._sweep_index += 1
         self._current_waypoint = (float(wp[0]), float(wp[1]))
-        self._wp_set_time = time.time()
+        self._wp_set_time = mission_time_s
         return self._current_waypoint
 
     @staticmethod
@@ -138,6 +138,15 @@ class VoronoiACOPlanner:
         self._repart_lock = threading.Lock()
         self._repart_pending = False
         self.phase = PlannerPhase.LLOYD
+        cfg = GridConfig(
+            lat_min=self.bounds["min_lat"],
+            lat_max=self.bounds["max_lat"],
+            lon_min=self.bounds["min_lon"],
+            lon_max=self.bounds["max_lon"],
+            rows=50,
+            cols=50,
+        )
+        self.pheromone_grid = InMemoryPheromoneGrid(cfg)
 
     def transition_to_aco(self):
         self.phase = PlannerPhase.ACO

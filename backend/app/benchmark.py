@@ -31,6 +31,7 @@ ALGORITHM_SEED_OFFSETS = {
     "voronoi_aco": 151,
     "apf": 202,
     "sweep": 303,
+    "vaco": 404,
     "pso": 606,
 }
 

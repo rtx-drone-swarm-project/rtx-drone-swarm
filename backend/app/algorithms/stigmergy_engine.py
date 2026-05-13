@@ -120,8 +120,12 @@ class InMemoryPheromoneGrid:
     def _evaporate_loop(self):
         while self._running:
             time.sleep(self.config.tick_interval)
-            with self._lock:
-                self.grid *= self.config.evaporation_rate
+            self.tick()
+
+    def tick(self):
+        """Apply one deterministic evaporation step."""
+        with self._lock:
+            self.grid *= self.config.evaporation_rate
 
     def deposit_path(
         self,
