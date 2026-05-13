@@ -38,15 +38,66 @@ from app.models import Mission
 logger = logging.getLogger(__name__)
 
 # Waypoint is consumed when the drone is within this distance of it.
-# DETECTION_RADIUS (0.002) >> TARGET_STOP_RADIUS in simulation.py (0.00055),
+# DETECTION_RADIUS (0.002) >> TARGET_STOP_RADIUS in simulation.py (0.00015),
 # so the simulation stops the drone first and we pop on the very next tick.
 _REACH_RADIUS = DETECTION_RADIUS
+_SEED_LLOYD_ITERS = 8
 
 
 def _voronoi_assign(grid: np.ndarray, seed_positions: np.ndarray) -> np.ndarray:
     """Label each grid point with the index of its nearest seed."""
     distances = np.linalg.norm(grid[:, np.newaxis] - seed_positions, axis=2)
     return np.argmin(distances, axis=1)
+
+
+def _partition_shape(bounds: dict, k: int) -> tuple[int, int]:
+    """Choose rows/cols for k seeds, preferring factor-aware, aspect-fit layouts.
+
+    - If k has non-trivial factors, pick the exact rows * cols factorization that
+      best matches the bounds aspect ratio.
+    - Otherwise (prime/awkward k), pick a near-square oversubscribed layout
+      using a combined slack + aspect-fit score.
+    """
+    if k <= 0:
+        return (0, 0)
+    if k == 1:
+        return (1, 1)
+
+    height = max(bounds["max_lat"] - bounds["min_lat"], 1e-9)
+    width = max(bounds["max_lon"] - bounds["min_lon"], 1e-9)
+    aspect = width / height  # ideal cols / rows
+
+    def _shape_key(rows: int, cols: int, include_slack: bool) -> tuple[float, int, int, int]:
+        ratio = max(cols / max(rows, 1), 1e-9)
+        ratio_err = abs(math.log(ratio / aspect))
+        orientation_penalty = 0
+        if aspect >= 1.0 and cols < rows:
+            orientation_penalty = 1
+        if aspect < 1.0 and rows < cols:
+            orientation_penalty = 1
+        slack = rows * cols - k
+        if include_slack:
+            # Combined objective: low oversubscription + good aspect fit.
+            # The k-normalized slack keeps the score scale stable across sizes.
+            return (slack / max(k, 1) + ratio_err, orientation_penalty, abs(rows - cols), slack)
+        return (ratio_err, orientation_penalty, abs(rows - cols), 0)
+
+    exact: list[tuple[int, int]] = []
+    for rows in range(2, int(math.sqrt(k)) + 1):
+        if k % rows != 0:
+            continue
+        cols = k // rows
+        exact.append((rows, cols))
+        if rows != cols:
+            exact.append((cols, rows))
+    if exact:
+        return min(exact, key=lambda rc: _shape_key(rc[0], rc[1], include_slack=False))
+
+    candidates: list[tuple[int, int]] = []
+    for rows in range(1, k + 1):
+        cols = math.ceil(k / rows)
+        candidates.append((rows, cols))
+    return min(candidates, key=lambda rc: _shape_key(rc[0], rc[1], include_slack=True))
 
 
 def _balanced_partition_seeds(bounds: dict, k: int) -> np.ndarray:
@@ -65,31 +116,71 @@ def _balanced_partition_seeds(bounds: dict, k: int) -> np.ndarray:
             (bounds["min_lon"] + bounds["max_lon"]) / 2,
         ]])
 
+    rows, cols = _partition_shape(bounds, k)
     height = max(bounds["max_lat"] - bounds["min_lat"], 1e-9)
     width = max(bounds["max_lon"] - bounds["min_lon"], 1e-9)
-    aspect = width / height  # >1 → wider than tall → prefer more columns
-
-    # Pick cols so cell aspect ≈ 1:1:  cols/rows ≈ aspect, rows*cols ≈ k
-    cols = max(1, int(round(math.sqrt(k * aspect))))
-    rows = math.ceil(k / cols)
-    # If the product overshoots significantly, try shrinking to avoid big empty gaps.
-    while rows * cols - k >= cols and rows > 1:
-        rows -= 1
-        cols = math.ceil(k / rows)
 
     lat_step = height / rows
     lon_step = width / cols
 
+    # How many seeds the last (possibly partial) row receives.
+    full_rows = k // cols
+    last_row_count = k % cols  # 0 means every row is full
+
     seeds = []
     for r in range(rows):
-        for c in range(cols):
-            seeds.append([
-                bounds["min_lat"] + (r + 0.5) * lat_step,
-                bounds["min_lon"] + (c + 0.5) * lon_step,
-            ])
-            if len(seeds) == k:
-                return np.array(seeds)
+        if last_row_count == 0 or r < full_rows:
+            # Full row: one seed per column, evenly spaced.
+            for c in range(cols):
+                seeds.append([
+                    bounds["min_lat"] + (r + 0.5) * lat_step,
+                    bounds["min_lon"] + (c + 0.5) * lon_step,
+                ])
+                if len(seeds) == k:
+                    return np.array(seeds)
+        else:
+            # Partial last row: spread seeds evenly across the FULL row width
+            # so each seed is centred in its own even sub-interval.
+            # e.g. k=13, cols=4, last_row_count=1 → single seed at 50% lon.
+            # e.g. k=10, cols=4, last_row_count=2 → seeds at 25% and 75% lon.
+            m = last_row_count
+            lat_centre = bounds["min_lat"] + (r + 0.5) * lat_step
+            for j in range(m):
+                lon_centre = bounds["min_lon"] + (j + 0.5) / m * width
+                seeds.append([lat_centre, lon_centre])
+                if len(seeds) == k:
+                    return np.array(seeds)
     return np.array(seeds[:k])
+
+
+def _lloyd_relax_seeds(dense_grid: np.ndarray, seeds: np.ndarray, n_iter: int) -> np.ndarray:
+    """Run n Lloyd passes so seed layout reflects Voronoi cell centroids."""
+    if n_iter <= 0 or len(seeds) <= 1:
+        return seeds
+    relaxed = seeds.copy()
+    for _ in range(n_iter):
+        labels = _voronoi_assign(dense_grid, relaxed)
+        updated = np.empty_like(relaxed)
+        for i in range(len(relaxed)):
+            cell = dense_grid[labels == i]
+            updated[i] = cell.mean(axis=0) if len(cell) > 0 else relaxed[i]
+        relaxed = updated
+    return relaxed
+
+
+def _partition_seeds(
+    bounds: dict,
+    k: int,
+    *,
+    lloyd_iters: int = 0,
+    dense_grid: np.ndarray | None = None,
+) -> np.ndarray:
+    """Generate partition seeds with optional Lloyd relaxation."""
+    seeds = _balanced_partition_seeds(bounds, k)
+    if lloyd_iters <= 0 or len(seeds) <= 1:
+        return seeds
+    grid = dense_grid if dense_grid is not None else _build_dense_grid(bounds)
+    return _lloyd_relax_seeds(grid, seeds, lloyd_iters)
 
 
 def _match_drones_to_seeds(
@@ -177,7 +268,12 @@ class VoronoiBoustrophedon(BaseSearchAlgorithm):
 
         # Partition is derived from bounds, not drone positions, so cells are
         # always equal-area regardless of how drones spawned/clustered.
-        seeds = _balanced_partition_seeds(bounds, k)
+        seeds = _partition_seeds(
+            bounds,
+            k,
+            lloyd_iters=_SEED_LLOYD_ITERS,
+            dense_grid=dense_grid,
+        )
         labels = _voronoi_assign(dense_grid, seeds)
 
         # Each drone gets the cell whose seed it's closest to.

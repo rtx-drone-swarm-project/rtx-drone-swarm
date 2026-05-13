@@ -7,7 +7,7 @@ from app import app
 from app.models import Mission, MissionCreate, Drone, Bounds
 from app.main import mission_db, simulation_loop, manager, _sync_mission_drones_with_sitl, sitl_bridge
 from app.algorithms.base import DETECTION_RADIUS
-from app.algorithms.boustrophedon import _row_endpoints_lawnmower, _build_dense_grid, _voronoi_assign, _balanced_partition_seeds, _match_drones_to_seeds, _row_endpoints_lawnmower, VoronoiBoustrophedon, _REACH_RADIUS
+from app.algorithms.boustrophedon import _row_endpoints_lawnmower, _build_dense_grid, _voronoi_assign, _balanced_partition_seeds, _match_drones_to_seeds, _row_endpoints_lawnmower, VoronoiBoustrophedon, _REACH_RADIUS, _partition_shape, _partition_seeds
 from app.voronoi import lloyd_step
 from app.algorithms.voronoi import VoronoiCoverage
 from app.algorithms.base import build_search_grid
@@ -1139,6 +1139,64 @@ def test_sweep_partition_balanced_across_all_drone_counts():
         ratio = max(sizes) / min(sizes)
         # Odd k on a square can legitimately go up to ~2x due to geometry.
         assert ratio <= 2.5, f"k={k}: cells too lopsided ({sizes}, ratio={ratio:.2f}x)"
+
+
+def test_partition_shape_prefers_factor_aware_layout_for_k15():
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+    rows, cols = _partition_shape(bounds, 15)
+    assert rows * cols == 15
+    assert sorted([rows, cols]) == [3, 5], f"expected 3x5 factor layout, got {rows}x{cols}"
+
+
+def test_partition_shape_and_seeds_scale_across_broad_counts():
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+    for k in range(1, 41):
+        rows, cols = _partition_shape(bounds, k)
+        assert rows >= 1 and cols >= 1
+        assert rows * cols >= k
+
+        seeds = _balanced_partition_seeds(bounds, k)
+        assert len(seeds) == k
+        assert np.all(seeds[:, 0] >= bounds["min_lat"])
+        assert np.all(seeds[:, 0] <= bounds["max_lat"])
+        assert np.all(seeds[:, 1] >= bounds["min_lon"])
+        assert np.all(seeds[:, 1] <= bounds["max_lon"])
+
+
+def test_sweep_partition_balanced_for_representative_counts_and_aspects():
+    representative_counts = [2, 3, 4, 5, 7, 10, 13, 15, 16, 20, 25, 32]
+    bounds_cases = [
+        {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04},  # square
+        {"min_lat": 0.0, "max_lat": 0.03, "min_lon": 0.0, "max_lon": 0.08},  # wide
+        {"min_lat": 0.0, "max_lat": 0.08, "min_lon": 0.0, "max_lon": 0.03},  # tall
+    ]
+
+    for bounds in bounds_cases:
+        dense = _build_dense_grid(bounds)
+        for k in representative_counts:
+            seeds = _balanced_partition_seeds(bounds, k)
+            labels = _voronoi_assign(dense, seeds)
+            sizes = [int((labels == i).sum()) for i in range(k)]
+            assert min(sizes) > 0
+            ratio = max(sizes) / min(sizes)
+            assert ratio <= 2.5, (
+                f"k={k} bounds={bounds}: cells too lopsided ({sizes}, ratio={ratio:.2f}x)"
+            )
+
+
+def test_generate_coverage_points_tracks_partition_policy():
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+
+    for k in [1, 2, 3, 4, 5, 7, 10, 13, 15, 16, 20, 25, 32]:
+        points = missions_routes._generate_coverage_points(bounds, k)
+        assert len(points) == k
+        assert len(set(points)) == k
+        for lat, lon in points:
+            assert bounds["min_lat"] <= lat <= bounds["max_lat"]
+            assert bounds["min_lon"] <= lon <= bounds["max_lon"]
+        expected = _partition_seeds(bounds, k, lloyd_iters=8)
+        actual = np.array(points)
+        assert np.allclose(actual, expected), f"startup points diverged from relaxed partition seeds for k={k}"
 
 
 def test_sweep_partition_balanced_when_drones_clustered_at_init():
