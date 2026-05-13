@@ -7,7 +7,7 @@ from app import app
 from app.models import Mission, MissionCreate, Drone, Bounds
 from app.main import mission_db, simulation_loop, manager, _sync_mission_drones_with_sitl, sitl_bridge
 from app.algorithms.base import DETECTION_RADIUS
-from app.algorithms.boustrophedon import _row_endpoints_lawnmower, _build_dense_grid, _voronoi_assign, _balanced_partition_seeds, _match_drones_to_seeds, _row_endpoints_lawnmower, VoronoiBoustrophedon, _REACH_RADIUS
+from app.algorithms.boustrophedon import _row_endpoints_lawnmower, _build_dense_grid, _voronoi_assign, _balanced_partition_seeds, _match_drones_to_seeds, _row_endpoints_lawnmower, VoronoiBoustrophedon, _REACH_RADIUS, _partition_shape, _partition_seeds
 from app.voronoi import lloyd_step
 from app.algorithms.voronoi import VoronoiCoverage
 from app.algorithms.base import build_search_grid
@@ -1141,6 +1141,64 @@ def test_sweep_partition_balanced_across_all_drone_counts():
         assert ratio <= 2.5, f"k={k}: cells too lopsided ({sizes}, ratio={ratio:.2f}x)"
 
 
+def test_partition_shape_prefers_factor_aware_layout_for_k15():
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+    rows, cols = _partition_shape(bounds, 15)
+    assert rows * cols == 15
+    assert sorted([rows, cols]) == [3, 5], f"expected 3x5 factor layout, got {rows}x{cols}"
+
+
+def test_partition_shape_and_seeds_scale_across_broad_counts():
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+    for k in range(1, 41):
+        rows, cols = _partition_shape(bounds, k)
+        assert rows >= 1 and cols >= 1
+        assert rows * cols >= k
+
+        seeds = _balanced_partition_seeds(bounds, k)
+        assert len(seeds) == k
+        assert np.all(seeds[:, 0] >= bounds["min_lat"])
+        assert np.all(seeds[:, 0] <= bounds["max_lat"])
+        assert np.all(seeds[:, 1] >= bounds["min_lon"])
+        assert np.all(seeds[:, 1] <= bounds["max_lon"])
+
+
+def test_sweep_partition_balanced_for_representative_counts_and_aspects():
+    representative_counts = [2, 3, 4, 5, 7, 10, 13, 15, 16, 20, 25, 32]
+    bounds_cases = [
+        {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04},  # square
+        {"min_lat": 0.0, "max_lat": 0.03, "min_lon": 0.0, "max_lon": 0.08},  # wide
+        {"min_lat": 0.0, "max_lat": 0.08, "min_lon": 0.0, "max_lon": 0.03},  # tall
+    ]
+
+    for bounds in bounds_cases:
+        dense = _build_dense_grid(bounds)
+        for k in representative_counts:
+            seeds = _balanced_partition_seeds(bounds, k)
+            labels = _voronoi_assign(dense, seeds)
+            sizes = [int((labels == i).sum()) for i in range(k)]
+            assert min(sizes) > 0
+            ratio = max(sizes) / min(sizes)
+            assert ratio <= 2.5, (
+                f"k={k} bounds={bounds}: cells too lopsided ({sizes}, ratio={ratio:.2f}x)"
+            )
+
+
+def test_generate_coverage_points_tracks_partition_policy():
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+
+    for k in [1, 2, 3, 4, 5, 7, 10, 13, 15, 16, 20, 25, 32]:
+        points = missions_routes._generate_coverage_points(bounds, k)
+        assert len(points) == k
+        assert len(set(points)) == k
+        for lat, lon in points:
+            assert bounds["min_lat"] <= lat <= bounds["max_lat"]
+            assert bounds["min_lon"] <= lon <= bounds["max_lon"]
+        expected = _partition_seeds(bounds, k, lloyd_iters=8)
+        actual = np.array(points)
+        assert np.allclose(actual, expected), f"startup points diverged from relaxed partition seeds for k={k}"
+
+
 def test_sweep_partition_balanced_when_drones_clustered_at_init():
     """Even if all drones spawn clustered, partitions must be roughly equal area."""
     # 4 drones all clustered near a single corner — the worst case
@@ -1711,6 +1769,7 @@ def _benchmark_trial_row(run_id: str, algorithm: str = "sweep") -> dict:
         "algorithm": algorithm,
         "iteration": 1,
         "scenario_seed": 99,
+        "scenario_profile": "uniform_random",
         "bounds_json": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
         "drone_count": 1,
         "target_count": 1,
@@ -1762,11 +1821,13 @@ def test_benchmark_run_routes_read_sqlite_rows(tmp_path, monkeypatch):
     assert payload["run_id"] == "bench-route-test"
     assert payload["completed_trials"] == 1
     assert payload["summary"]["sweep"]["coverage_pct"]["mean"] == 80.0
+    assert payload["trials"][0]["scenario_profile"] == "uniform_random"
 
     export_response = client.get("/benchmark/export?run_id=bench-route-test")
     assert export_response.status_code == 200
     assert "text/csv" in export_response.headers["content-type"]
     assert "bench-route-test" in export_response.text
+    assert "scenario_profile" in export_response.text
 
 
 def test_benchmark_get_run_uses_stored_summary_for_finished_runs(tmp_path, monkeypatch):
@@ -1886,6 +1947,128 @@ def test_benchmark_db_reinitializes_if_file_is_deleted(tmp_path, monkeypatch):
     assert run["status"] == "running"
 
 
+def test_benchmark_db_adds_scenario_profile_to_existing_trial_table(tmp_path, monkeypatch):
+    import sqlite3
+    import app.benchmark_db as benchmark_db
+
+    db_path = tmp_path / "benchmarks.db"
+    monkeypatch.setattr(benchmark_db, "DB_PATH", db_path)
+    monkeypatch.setattr(benchmark_db, "_INITIALIZED_DB_PATH", None)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE benchmark_runs (
+                run_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                completed_at TEXT,
+                total_trials INTEGER NOT NULL,
+                completed_trials INTEGER NOT NULL DEFAULT 0,
+                request_json TEXT NOT NULL,
+                summary_json TEXT,
+                error TEXT
+            );
+            CREATE TABLE benchmark_trials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                algorithm TEXT NOT NULL,
+                iteration INTEGER NOT NULL,
+                scenario_seed INTEGER NOT NULL,
+                bounds_json TEXT NOT NULL,
+                drone_count INTEGER NOT NULL,
+                target_count INTEGER NOT NULL,
+                timeout_seconds INTEGER NOT NULL,
+                elapsed_seconds INTEGER NOT NULL,
+                first_find_seconds REAL,
+                avg_find_seconds REAL,
+                last_find_seconds REAL,
+                completion_elapsed_seconds REAL,
+                coverage_pct REAL NOT NULL,
+                miss_pct REAL NOT NULL,
+                redundant_coverage_pct REAL NOT NULL,
+                coverage_per_drone_second REAL NOT NULL,
+                hiker_find_rate REAL NOT NULL,
+                total_distance_traveled_m REAL NOT NULL,
+                avg_distance_per_drone_m REAL NOT NULL,
+                max_distance_single_drone_m REAL NOT NULL,
+                time_to_50_coverage REAL,
+                time_to_80_coverage REAL,
+                time_to_95_coverage REAL,
+                targets_found INTEGER NOT NULL,
+                targets_total INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+
+    benchmark_db.init_db()
+
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(benchmark_trials)").fetchall()}
+    assert "scenario_profile" in columns
+
+
+def test_benchmark_scenario_profiles_are_deterministic_and_mark_movement():
+    from app.benchmark import _build_scenario
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.02, "min_lon": 0.0, "max_lon": 0.02}
+    first = _build_scenario(bounds, 3, 4, 321, "wandering_hikers")
+    second = _build_scenario(bounds, 3, 4, 321, "wandering_hikers")
+    stationary = _build_scenario(bounds, 3, 4, 321, "clustered_targets")
+
+    assert first == second
+    assert first["targets_move"] is True
+    assert all(target["movement"] == "moving" for target in first["targets"])
+    assert all("vx" in target and "vy" in target for target in first["targets"])
+    assert stationary["targets_move"] is False
+    assert all(target["movement"] == "stationary" for target in stationary["targets"])
+
+
+def test_benchmark_scenario_profile_metadata_must_have_generation_branch(monkeypatch):
+    import app.benchmark as benchmark
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.02, "min_lon": 0.0, "max_lon": 0.02}
+    monkeypatch.setitem(
+        benchmark.SCENARIO_PROFILES,
+        "metadata_only_profile",
+        {
+            "label": "Metadata Only",
+            "description": "Regression guard for scenario metadata/generation drift.",
+            "targets_move": False,
+        },
+    )
+
+    try:
+        benchmark._build_scenario(bounds, 1, 1, 321, "metadata_only_profile")
+    except ValueError as exc:
+        assert "Unhandled scenario_profile: metadata_only_profile" in str(exc)
+    else:
+        raise AssertionError("Expected unhandled scenario profile to raise ValueError")
+
+
+def test_moving_benchmark_scenario_targets_move_on_tick():
+    from app.benchmark import AttrDict, _build_scenario
+    from app.simulation import _update_targets_for_tick
+
+    bounds = {"min_lat": 0.0, "max_lat": 0.02, "min_lon": 0.0, "max_lon": 0.02}
+    scenario = _build_scenario(bounds, 1, 1, 654, "wandering_hikers")
+    target = scenario["targets"][0]
+    before = (target["lat"], target["lon"])
+    mission = AttrDict({
+        "targets": scenario["targets"],
+        "drones": [{"id": "d1", "lat": 0.02, "lon": 0.02}],
+        "bounds": bounds,
+        "_static_targets": False,
+    })
+
+    _update_targets_for_tick(mission)
+
+    after = (target["lat"], target["lon"])
+    assert after != before
+
+
 def test_benchmark_job_persists_paired_algorithm_trials(tmp_path, monkeypatch):
     import app.benchmark_db as benchmark_db
     from app.benchmark import run_benchmark_job, total_trials
@@ -1900,6 +2083,7 @@ def test_benchmark_job_persists_paired_algorithm_trials(tmp_path, monkeypatch):
         target_count=1,
         timeout_seconds=5,
         seed=123,
+        scenario_profile="edge_targets",
     )
     benchmark_db.create_run("bench-job-test", request.model_dump(), total_trials(request))
 
@@ -1912,6 +2096,17 @@ def test_benchmark_job_persists_paired_algorithm_trials(tmp_path, monkeypatch):
     assert sorted(run["summary"].keys()) == ["sweep", "voronoi"]
     scenario_seeds = {trial["scenario_seed"] for trial in run["trials"]}
     assert scenario_seeds == {123}
+    scenario_profiles = {trial["scenario_profile"] for trial in run["trials"]}
+    assert scenario_profiles == {"edge_targets"}
+
+
+def test_benchmark_scenarios_route_lists_profiles():
+    response = client.get("/benchmark/scenarios")
+
+    assert response.status_code == 200
+    profiles = {profile["key"]: profile for profile in response.json()["scenarios"]}
+    assert profiles["uniform_random"]["targets_move"] is False
+    assert profiles["wandering_hikers"]["targets_move"] is True
 
 
 def test_benchmark_rejects_unknown_algorithm():
@@ -1961,3 +2156,21 @@ def test_benchmark_rejects_negative_seed():
     )
 
     assert response.status_code == 422
+
+
+def test_benchmark_rejects_unknown_scenario_profile():
+    response = client.post(
+        "/benchmark",
+        json={
+            "algorithms": ["sweep"],
+            "iterations": 1,
+            "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+            "drone_count": 1,
+            "target_count": 1,
+            "timeout_seconds": 5,
+            "scenario_profile": "missing_profile",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Unknown scenario_profile" in response.json()["detail"]

@@ -33,11 +33,13 @@ from app.algorithms.base import DETECTION_RADIUS
 
 logger = logging.getLogger(__name__)
 # Small random perturbation keeps simulated movement from looking perfectly linear.
-JITTER_DEG = 0.0001
-# Degree-space speed used for simple simulated movement.
-SPEED = 0.0005
+JITTER_DEG = 0.00002
+# Degree-space speed used for simple simulated drone movement (~11 m/tick at mid-lat).
+SPEED = 0.0001
+# Degree-space speed for wandering hikers (~1.7 m/tick ≈ brisk walk at mid-lat).
+HIKER_SPEED = 0.000015
 # Distance threshold for considering a drone close enough to stop moving toward a point.
-TARGET_STOP_RADIUS = 0.00055
+TARGET_STOP_RADIUS = 0.00015
 
 
 async def _emit_target_found(mission: Mission, target: dict, drone_id: Optional[str] = None):
@@ -338,8 +340,8 @@ def _update_targets_for_tick(mission: Mission) -> None:
         if target_can_move and not getattr(mission, "_static_targets", False):
             if "vx" not in target:
                 angle = rng.uniform(0, 2 * math.pi)
-                target["vx"] = SPEED / 2 * math.cos(angle)
-                target["vy"] = SPEED / 2 * math.sin(angle)
+                target["vx"] = HIKER_SPEED * math.cos(angle)
+                target["vy"] = HIKER_SPEED * math.sin(angle)
             target["lat"] += target["vx"]
             target["lon"] += target["vy"]
             _bounce_entity(target, bounds, target["vx"], target["vy"])

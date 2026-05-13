@@ -31,7 +31,57 @@ ALGORITHM_SEED_OFFSETS = {
     "voronoi_aco": 151,
     "apf": 202,
     "sweep": 303,
+    "pso": 606,
 }
+
+SCENARIO_PROFILES: dict[str, dict[str, Any]] = {
+    "uniform_random": {
+        "label": "Uniform Random",
+        "description": "Stationary baseline with independent random drone and hiker placement.",
+        "targets_move": False,
+    },
+    "clustered_drones": {
+        "label": "Clustered Drones",
+        "description": "Stationary hikers with drones staged near one launch area.",
+        "targets_move": False,
+    },
+    "clustered_targets": {
+        "label": "Clustered Hikers",
+        "description": "Stationary hikers concentrated in one area.",
+        "targets_move": False,
+    },
+    "edge_targets": {
+        "label": "Edge Hikers",
+        "description": "Stationary hikers biased near boundaries and corners.",
+        "targets_move": False,
+    },
+    "split_clusters": {
+        "label": "Split Clusters",
+        "description": "Stationary hikers divided between two separated clusters.",
+        "targets_move": False,
+    },
+    "corridor_route": {
+        "label": "Moving Corridor Route",
+        "description": "Moving hikers distributed along a diagonal trail with drones staged near one end.",
+        "targets_move": True,
+    },
+    "wandering_hikers": {
+        "label": "Wandering Hikers",
+        "description": "Moving hikers with bounded deterministic random drift.",
+        "targets_move": True,
+    },
+    "moving_edge_escape": {
+        "label": "Moving Edge Escape",
+        "description": "Moving hikers start near boundaries and drift along edges.",
+        "targets_move": True,
+    },
+    "diverging_group": {
+        "label": "Diverging Group",
+        "description": "Moving hikers start clustered, then move in different deterministic directions.",
+        "targets_move": True,
+    },
+}
+
 
 class AttrDict(dict):
     """Dict with attribute access for simulation/algorithm compatibility."""
@@ -54,6 +104,19 @@ def total_trials(request: BenchmarkRequest) -> int:
     return len(request.algorithms) * request.iterations
 
 
+def list_scenario_profiles() -> list[dict[str, Any]]:
+    """Return UI-facing scenario profile metadata."""
+    return [
+        {
+            "key": key,
+            "label": profile["label"],
+            "description": profile["description"],
+            "targets_move": profile["targets_move"],
+        }
+        for key, profile in SCENARIO_PROFILES.items()
+    ]
+
+
 async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str, Any]:
     """Run all requested algorithms on shared per-iteration scenarios."""
     trials: list[dict[str, Any]] = []
@@ -69,6 +132,7 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
                 request.drone_count,
                 request.target_count,
                 scenario_seed,
+                request.scenario_profile,
             )
             for algorithm in request.algorithms:
                 trial = await run_headless_trial(
@@ -79,6 +143,8 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
                     bounds=request.bounds.model_dump(),
                     drone_starts=scenario["drones"],
                     target_starts=scenario["targets"],
+                    scenario_profile=request.scenario_profile,
+                    static_targets=not bool(scenario["targets_move"]),
                     timeout_seconds=request.timeout_seconds,
                 )
                 await asyncio.to_thread(insert_trial, trial)
@@ -145,6 +211,8 @@ async def run_headless_trial(
     bounds: dict[str, float],
     drone_starts: list[dict[str, Any]],
     target_starts: list[dict[str, Any]],
+    scenario_profile: str = "uniform_random",
+    static_targets: bool = True,
     timeout_seconds: int,
 ) -> dict[str, Any]:
     """Run one algorithm/scenario pair without SITL commands or WS tick broadcasts."""
@@ -170,7 +238,7 @@ async def run_headless_trial(
         "sweep_phase": {},
         "sweep_reached_radius": None,
         "_suppress_broadcasts": True,
-        "_static_targets": True,
+        "_static_targets": static_targets,
         "_move_assigned_sim_drones": True,
         "_rng": random.Random(algorithm_seed),
         "_np_rng": np.random.default_rng(algorithm_seed),
@@ -231,6 +299,7 @@ async def run_headless_trial(
         "algorithm": algorithm,
         "iteration": iteration,
         "scenario_seed": scenario_seed,
+        "scenario_profile": scenario_profile,
         "bounds_json": bounds,
         "drone_count": drone_count,
         "target_count": len(mission.get("targets", [])),
@@ -262,29 +331,260 @@ def _build_scenario(
     drone_count: int,
     target_count: int,
     scenario_seed: int,
-) -> dict[str, list[dict[str, Any]]]:
+    scenario_profile: str = "uniform_random",
+) -> dict[str, Any]:
+    if scenario_seed is None:
+        raise ValueError("scenario_seed is required")
+    if scenario_seed < 0:
+        raise ValueError("scenario_seed must be non-negative")
+    if drone_count < 1 or target_count < 1:
+        raise ValueError("drone_count and target_count must be positive")
+    if not _is_valid_bounds(bounds):
+        raise ValueError("bounds must have positive latitude and longitude ranges")
+    if scenario_profile not in SCENARIO_PROFILES:
+        raise ValueError(f"Unknown scenario_profile: {scenario_profile}")
+
     rng = random.Random(scenario_seed)
+    targets_move = bool(SCENARIO_PROFILES[scenario_profile]["targets_move"])
+    if scenario_profile == "uniform_random":
+        drones = _sample_uniform_points(rng, bounds, drone_count)
+        targets = _sample_uniform_points(rng, bounds, target_count)
+    elif scenario_profile == "clustered_drones":
+        drones = _sample_cluster_points(rng, bounds, drone_count, _near_corner(bounds, 0))
+        targets = _sample_uniform_points(rng, bounds, target_count)
+    elif scenario_profile == "clustered_targets":
+        drones = _sample_uniform_points(rng, bounds, drone_count)
+        targets = _sample_cluster_points(rng, bounds, target_count, _random_center(rng, bounds))
+    elif scenario_profile == "edge_targets":
+        drones = _sample_uniform_points(rng, bounds, drone_count)
+        targets = _sample_edge_points(rng, bounds, target_count)
+    elif scenario_profile == "split_clusters":
+        drones = _sample_uniform_points(rng, bounds, drone_count)
+        targets = _sample_split_cluster_points(rng, bounds, target_count)
+    elif scenario_profile == "corridor_route":
+        drones = _sample_cluster_points(rng, bounds, drone_count, _near_corner(bounds, 0))
+        targets = _sample_corridor_points(rng, bounds, target_count)
+    elif scenario_profile == "wandering_hikers":
+        drones = _sample_uniform_points(rng, bounds, drone_count)
+        targets = _sample_uniform_points(rng, bounds, target_count)
+    elif scenario_profile == "moving_edge_escape":
+        drones = _sample_uniform_points(rng, bounds, drone_count)
+        targets = _sample_edge_points(rng, bounds, target_count)
+    elif scenario_profile == "diverging_group":
+        drones = _sample_uniform_points(rng, bounds, drone_count)
+        targets = _sample_cluster_points(rng, bounds, target_count, _random_center(rng, bounds))
+    else:
+        raise ValueError(f"Unhandled scenario_profile: {scenario_profile}")
     return {
         "drones": [
             {
                 "id": f"d{i + 1}",
-                "lat": rng.uniform(bounds["min_lat"], bounds["max_lat"]),
-                "lon": rng.uniform(bounds["min_lon"], bounds["max_lon"]),
+                "lat": point["lat"],
+                "lon": point["lon"],
                 "status": "idle",
             }
-            for i in range(drone_count)
+            for i, point in enumerate(drones)
         ],
         "targets": [
-            {
-                "id": f"t{i + 1}",
-                "lat": rng.uniform(bounds["min_lat"], bounds["max_lat"]),
-                "lon": rng.uniform(bounds["min_lon"], bounds["max_lon"]),
-                "status": "wandering",
-                "assigned_drone_id": None,
-            }
-            for i in range(target_count)
+            _make_target(i, point, rng, bounds, scenario_profile, targets_move)
+            for i, point in enumerate(targets)
         ],
+        "targets_move": targets_move,
     }
+
+
+def _is_valid_bounds(bounds: dict[str, float]) -> bool:
+    return bounds["min_lat"] < bounds["max_lat"] and bounds["min_lon"] < bounds["max_lon"]
+
+
+def _lat_span(bounds: dict[str, float]) -> float:
+    return bounds["max_lat"] - bounds["min_lat"]
+
+
+def _lon_span(bounds: dict[str, float]) -> float:
+    return bounds["max_lon"] - bounds["min_lon"]
+
+
+def _clamp(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
+
+
+def _point(lat: float, lon: float, bounds: dict[str, float]) -> dict[str, float]:
+    return {
+        "lat": _clamp(lat, bounds["min_lat"], bounds["max_lat"]),
+        "lon": _clamp(lon, bounds["min_lon"], bounds["max_lon"]),
+    }
+
+
+def _sample_uniform_points(rng: random.Random, bounds: dict[str, float], count: int) -> list[dict[str, float]]:
+    return [
+        {
+            "lat": rng.uniform(bounds["min_lat"], bounds["max_lat"]),
+            "lon": rng.uniform(bounds["min_lon"], bounds["max_lon"]),
+        }
+        for _ in range(count)
+    ]
+
+
+def _random_center(rng: random.Random, bounds: dict[str, float]) -> dict[str, float]:
+    return {
+        "lat": rng.uniform(
+            bounds["min_lat"] + _lat_span(bounds) * 0.25,
+            bounds["max_lat"] - _lat_span(bounds) * 0.25,
+        ),
+        "lon": rng.uniform(
+            bounds["min_lon"] + _lon_span(bounds) * 0.25,
+            bounds["max_lon"] - _lon_span(bounds) * 0.25,
+        ),
+    }
+
+
+def _near_corner(bounds: dict[str, float], corner_index: int) -> dict[str, float]:
+    corners = [
+        (bounds["min_lat"], bounds["min_lon"]),
+        (bounds["min_lat"], bounds["max_lon"]),
+        (bounds["max_lat"], bounds["min_lon"]),
+        (bounds["max_lat"], bounds["max_lon"]),
+    ]
+    lat, lon = corners[corner_index % len(corners)]
+    inset_lat = _lat_span(bounds) * 0.08
+    inset_lon = _lon_span(bounds) * 0.08
+    return _point(
+        lat + inset_lat if lat == bounds["min_lat"] else lat - inset_lat,
+        lon + inset_lon if lon == bounds["min_lon"] else lon - inset_lon,
+        bounds,
+    )
+
+
+def _sample_cluster_points(
+    rng: random.Random,
+    bounds: dict[str, float],
+    count: int,
+    center: dict[str, float],
+) -> list[dict[str, float]]:
+    radius_lat = _lat_span(bounds) * 0.08
+    radius_lon = _lon_span(bounds) * 0.08
+    return [
+        _point(
+            center["lat"] + rng.uniform(-radius_lat, radius_lat),
+            center["lon"] + rng.uniform(-radius_lon, radius_lon),
+            bounds,
+        )
+        for _ in range(count)
+    ]
+
+
+def _sample_split_cluster_points(rng: random.Random, bounds: dict[str, float], count: int) -> list[dict[str, float]]:
+    centers = [_near_corner(bounds, 1), _near_corner(bounds, 2)]
+    points: list[dict[str, float]] = []
+    for i in range(count):
+        points.extend(_sample_cluster_points(rng, bounds, 1, centers[i % len(centers)]))
+    return points
+
+
+def _sample_edge_points(rng: random.Random, bounds: dict[str, float], count: int) -> list[dict[str, float]]:
+    margin_lat = _lat_span(bounds) * 0.05
+    margin_lon = _lon_span(bounds) * 0.05
+    points: list[dict[str, float]] = []
+    for i in range(count):
+        edge = i % 4
+        if edge == 0:
+            points.append(
+                _point(
+                    bounds["min_lat"] + rng.uniform(0, margin_lat),
+                    rng.uniform(bounds["min_lon"], bounds["max_lon"]),
+                    bounds,
+                )
+            )
+        elif edge == 1:
+            points.append(
+                _point(
+                    bounds["max_lat"] - rng.uniform(0, margin_lat),
+                    rng.uniform(bounds["min_lon"], bounds["max_lon"]),
+                    bounds,
+                )
+            )
+        elif edge == 2:
+            points.append(
+                _point(
+                    rng.uniform(bounds["min_lat"], bounds["max_lat"]),
+                    bounds["min_lon"] + rng.uniform(0, margin_lon),
+                    bounds,
+                )
+            )
+        else:
+            points.append(
+                _point(
+                    rng.uniform(bounds["min_lat"], bounds["max_lat"]),
+                    bounds["max_lon"] - rng.uniform(0, margin_lon),
+                    bounds,
+                )
+            )
+    return points
+
+
+def _sample_corridor_points(rng: random.Random, bounds: dict[str, float], count: int) -> list[dict[str, float]]:
+    points: list[dict[str, float]] = []
+    for i in range(count):
+        progress = (i + 1) / (count + 1)
+        jitter_lat = rng.uniform(-_lat_span(bounds) * 0.04, _lat_span(bounds) * 0.04)
+        jitter_lon = rng.uniform(-_lon_span(bounds) * 0.04, _lon_span(bounds) * 0.04)
+        points.append(
+            _point(
+                bounds["min_lat"] + _lat_span(bounds) * progress + jitter_lat,
+                bounds["min_lon"] + _lon_span(bounds) * progress + jitter_lon,
+                bounds,
+            )
+        )
+    return points
+
+
+def _make_target(
+    index: int,
+    point: dict[str, float],
+    rng: random.Random,
+    bounds: dict[str, float],
+    scenario_profile: str,
+    targets_move: bool,
+) -> dict[str, Any]:
+    target: dict[str, Any] = {
+        "id": f"t{index + 1}",
+        "lat": point["lat"],
+        "lon": point["lon"],
+        "status": "wandering",
+        "assigned_drone_id": None,
+        "movement": "moving" if targets_move else "stationary",
+    }
+    if targets_move:
+        vx, vy = _target_velocity(index, point, rng, bounds, scenario_profile)
+        target["vx"] = vx
+        target["vy"] = vy
+    return target
+
+
+def _target_velocity(
+    index: int,
+    point: dict[str, float],
+    rng: random.Random,
+    bounds: dict[str, float],
+    scenario_profile: str,
+) -> tuple[float, float]:
+    speed = 0.00025
+    if scenario_profile == "corridor_route":
+        return speed * 0.85, speed * 0.85
+    if scenario_profile == "moving_edge_escape":
+        center_lat = bounds["min_lat"] + _lat_span(bounds) / 2
+        center_lon = bounds["min_lon"] + _lon_span(bounds) / 2
+        vx = speed if point["lat"] < center_lat else -speed
+        vy = speed if point["lon"] < center_lon else -speed
+        if abs(point["lat"] - bounds["min_lat"]) < abs(point["lat"] - bounds["max_lat"]):
+            return abs(vx) * 0.4, vy
+        return -abs(vx) * 0.4, vy
+    if scenario_profile == "diverging_group":
+        angle = (2 * math.pi * index) / 5
+        return speed * math.cos(angle), speed * math.sin(angle)
+    angle = rng.uniform(0, 2 * math.pi)
+    return speed * math.cos(angle), speed * math.sin(angle)
 
 
 def _track_distance(

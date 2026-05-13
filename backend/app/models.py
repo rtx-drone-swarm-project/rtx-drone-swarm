@@ -140,6 +140,7 @@ class BenchmarkRequest(BaseModel):
     drone_count: int = Field(default=5, ge=1, le=50)
     target_count: int = Field(default=3, ge=1, le=20)
     timeout_seconds: int = Field(default=120, ge=1, le=3600)
+    scenario_profile: str = "uniform_random"
     seed: Optional[int] = Field(default=None, ge=0)
 
 

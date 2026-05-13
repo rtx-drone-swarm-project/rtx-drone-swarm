@@ -7,7 +7,8 @@ const clientMocks = vi.hoisted(() => ({
   startBenchmark: vi.fn(),
   stopBenchmark: vi.fn(),
   getBenchmarkRun: vi.fn(),
-  listBenchmarkRuns: vi.fn()
+  listBenchmarkRuns: vi.fn(),
+  listBenchmarkScenarios: vi.fn()
 }));
 
 vi.mock("../../api/missionClient", () => ({
@@ -26,6 +27,21 @@ const algorithmOptions = [
   { key: "vaco", label: "VACO Hybrid Coverage (Kaydee)" }
 ];
 
+const scenarioProfiles = [
+  {
+    key: "uniform_random",
+    label: "Uniform Random",
+    description: "Stationary baseline.",
+    targets_move: false
+  },
+  {
+    key: "wandering_hikers",
+    label: "Wandering Hikers",
+    description: "Moving hikers with deterministic drift.",
+    targets_move: true
+  }
+];
+
 function renderOpenPanel(props: Partial<ComponentProps<typeof BenchmarkPanel>> = {}) {
   const result = render(
     <BenchmarkPanel
@@ -37,7 +53,7 @@ function renderOpenPanel(props: Partial<ComponentProps<typeof BenchmarkPanel>> =
       {...props}
     />
   );
-  fireEvent.click(screen.getByRole("button", { name: /Benchmark/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Metrics/ }));
   return result;
 }
 
@@ -47,7 +63,9 @@ describe("BenchmarkPanel", () => {
     clientMocks.stopBenchmark.mockReset();
     clientMocks.getBenchmarkRun.mockReset();
     clientMocks.listBenchmarkRuns.mockReset();
+    clientMocks.listBenchmarkScenarios.mockReset();
     clientMocks.listBenchmarkRuns.mockResolvedValue({ runs: [] });
+    clientMocks.listBenchmarkScenarios.mockResolvedValue({ scenarios: scenarioProfiles });
     clientMocks.startBenchmark.mockResolvedValue({
       run_id: "bench-1",
       status: "running",
@@ -68,7 +86,7 @@ describe("BenchmarkPanel", () => {
   it("enables start only when a search area and algorithms are selected, then enables stop for a running run", async () => {
     const { rerender } = renderOpenPanel({ selectedBounds: null });
 
-    expect((screen.getByRole("button", { name: "Run Benchmark" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Run Metrics" }) as HTMLButtonElement).disabled).toBe(true);
 
     rerender(
       <BenchmarkPanel
@@ -81,26 +99,30 @@ describe("BenchmarkPanel", () => {
     );
 
     await waitFor(() => {
-      expect((screen.getByRole("button", { name: "Run Benchmark" }) as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByRole("button", { name: "Run Metrics" }) as HTMLButtonElement).disabled).toBe(false);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Run Benchmark" }));
+    const scenario = await screen.findByLabelText("Scenario");
+    fireEvent.change(scenario, { target: { value: "wandering_hikers" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Run Metrics" }));
 
     await waitFor(() => {
       expect(clientMocks.startBenchmark).toHaveBeenCalledWith(
         expect.objectContaining({
           algorithms: ["voronoi", "vaco"],
           bounds,
-          drone_count: 2
+          drone_count: 2,
+          scenario_profile: "wandering_hikers"
         })
       );
     });
 
     await waitFor(() => {
-      expect((screen.getByRole("button", { name: "Stop Benchmark" }) as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByRole("button", { name: "Stop Metrics" }) as HTMLButtonElement).disabled).toBe(false);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop Benchmark" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop Metrics" }));
 
     await waitFor(() => {
       expect(clientMocks.stopBenchmark).toHaveBeenCalledWith("bench-1");
@@ -113,10 +135,10 @@ describe("BenchmarkPanel", () => {
     });
 
     await waitFor(() => {
-      expect((screen.getByRole("button", { name: "Run Benchmark" }) as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByRole("button", { name: "Run Metrics" }) as HTMLButtonElement).disabled).toBe(false);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Run Benchmark" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run Metrics" }));
 
     await waitFor(() => {
       expect(screen.getByText("2/4")).toBeTruthy();
@@ -129,8 +151,22 @@ describe("BenchmarkPanel", () => {
   it("loads a selected run from run history", async () => {
     clientMocks.listBenchmarkRuns.mockResolvedValue({
       runs: [
-        { run_id: "bench-old", status: "complete", total_trials: 2, completed_trials: 2, summary: {} },
-        { run_id: "bench-new", status: "complete", total_trials: 2, completed_trials: 2, summary: {} }
+        {
+          run_id: "bench-old",
+          status: "complete",
+          total_trials: 2,
+          completed_trials: 2,
+          request: { scenario_profile: "uniform_random" },
+          summary: {}
+        },
+        {
+          run_id: "bench-new",
+          status: "complete",
+          total_trials: 2,
+          completed_trials: 2,
+          request: { scenario_profile: "wandering_hikers" },
+          summary: {}
+        }
       ]
     });
     clientMocks.getBenchmarkRun.mockResolvedValue({
@@ -138,6 +174,7 @@ describe("BenchmarkPanel", () => {
       status: "complete",
       total_trials: 2,
       completed_trials: 2,
+      request: { scenario_profile: "wandering_hikers" },
       summary: {
         vaco: {
           count: 1,
@@ -148,7 +185,7 @@ describe("BenchmarkPanel", () => {
 
     renderOpenPanel();
 
-    const history = await screen.findByLabelText("Run History");
+    const history = await screen.findByLabelText("Metrics History");
     fireEvent.change(history, { target: { value: "bench-new" } });
 
     await waitFor(() => {

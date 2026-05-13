@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Response
 
 from app.algorithms import list_algorithm_keys
-from app.benchmark import make_run_id, run_benchmark_job, total_trials
+from app.benchmark import SCENARIO_PROFILES, list_scenario_profiles, make_run_id, run_benchmark_job, total_trials
 from app.benchmark_db import create_run, export_trials_csv, get_run, list_runs
 from app.models import BenchmarkRequest
 
@@ -23,6 +23,8 @@ async def start_benchmark(request: BenchmarkRequest):
     unknown = sorted(set(request.algorithms) - set(list_algorithm_keys()))
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unknown algorithm(s): {', '.join(unknown)}")
+    if request.scenario_profile not in SCENARIO_PROFILES:
+        raise HTTPException(status_code=400, detail=f"Unknown scenario_profile: {request.scenario_profile}")
 
     run_id = make_run_id()
     run = await asyncio.to_thread(create_run, run_id, request.model_dump(), total_trials(request))
@@ -46,6 +48,12 @@ async def start_benchmark(request: BenchmarkRequest):
 def get_benchmark_runs():
     """List recent benchmark runs with progress and stored summaries."""
     return {"runs": list_runs()}
+
+
+@router.get("/scenarios")
+def get_benchmark_scenarios():
+    """List scenario profiles available for metrics runs."""
+    return {"scenarios": list_scenario_profiles()}
 
 
 @router.post("/{run_id}/stop")

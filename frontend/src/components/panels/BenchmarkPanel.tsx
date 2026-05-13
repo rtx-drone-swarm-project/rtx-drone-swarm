@@ -5,6 +5,7 @@ import type {
   AlgorithmMetadata,
   BenchmarkMetricStats,
   BenchmarkRun,
+  BenchmarkScenarioProfile,
   Bounds
 } from "../../types/mission";
 import type { BenchmarkProgressMessage } from "../../types/ws";
@@ -16,6 +17,15 @@ const METRICS: { key: string; label: string; suffix?: string }[] = [
   { key: "coverage_pct", label: "Coverage", suffix: "%" },
   { key: "redundant_coverage_pct", label: "Overlap", suffix: "%" },
   { key: "coverage_per_drone_second", label: "Cov/Drone/s" }
+];
+
+const DEFAULT_SCENARIO_PROFILES: BenchmarkScenarioProfile[] = [
+  {
+    key: "uniform_random",
+    label: "Uniform Random",
+    description: "Stationary baseline with independent random drone and hiker placement.",
+    targets_move: false
+  }
 ];
 
 type BenchmarkPanelProps = {
@@ -43,6 +53,11 @@ function formatMetric(stats: BenchmarkMetricStats | null, suffix = "") {
   return `${stats.mean.toFixed(stats.mean < 1 ? 3 : 1)}${spread}${suffix}`;
 }
 
+function scenarioLabel(profileKey: string | undefined, profiles: BenchmarkScenarioProfile[]) {
+  if (!profileKey) return "Uniform Random";
+  return profiles.find((profile) => profile.key === profileKey)?.label ?? profileKey;
+}
+
 export default function BenchmarkPanel({
   apiBase,
   selectedBounds,
@@ -55,6 +70,8 @@ export default function BenchmarkPanel({
   const [iterations, setIterations] = useState(50);
   const [targetCount, setTargetCount] = useState(3);
   const [timeoutSeconds, setTimeoutSeconds] = useState(120);
+  const [scenarioProfile, setScenarioProfile] = useState("uniform_random");
+  const [scenarioProfiles, setScenarioProfiles] = useState<BenchmarkScenarioProfile[]>(DEFAULT_SCENARIO_PROFILES);
   const [run, setRun] = useState<BenchmarkRun | null>(null);
   const [runs, setRuns] = useState<BenchmarkRun[]>([]);
   const [loading, setLoading] = useState(false);
@@ -70,6 +87,7 @@ export default function BenchmarkPanel({
   const completed = progressMessage?.run_id === activeRunId ? progressMessage.completed ?? run?.completed_trials ?? 0 : run?.completed_trials ?? 0;
   const total = progressMessage?.run_id === activeRunId ? progressMessage.total ?? run?.total_trials ?? 0 : run?.total_trials ?? 0;
   const progressPct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const activeScenarioProfile = run?.request?.scenario_profile ?? scenarioProfile;
 
   const refreshRun = useCallback(
     async (runId: string) => {
@@ -86,11 +104,24 @@ export default function BenchmarkPanel({
     return payload.runs;
   }, [client]);
 
+  const loadScenarioProfiles = useCallback(async () => {
+    const payload = await client.listBenchmarkScenarios();
+    setScenarioProfiles(payload.scenarios.length ? payload.scenarios : DEFAULT_SCENARIO_PROFILES);
+    setScenarioProfile((current) => (
+      payload.scenarios.some((profile) => profile.key === current)
+        ? current
+        : payload.scenarios[0]?.key ?? "uniform_random"
+    ));
+  }, [client]);
+
   useEffect(() => {
     loadRuns().catch(() => {
       setRuns([]);
     });
-  }, [loadRuns]);
+    loadScenarioProfiles().catch(() => {
+      setScenarioProfiles(DEFAULT_SCENARIO_PROFILES);
+    });
+  }, [loadRuns, loadScenarioProfiles]);
 
   useEffect(() => {
     setSelectedAlgorithms((prev) => {
@@ -132,16 +163,17 @@ export default function BenchmarkPanel({
         bounds: selectedBounds,
         drone_count: Math.max(validDroneCount, 1),
         target_count: targetCount,
-        timeout_seconds: timeoutSeconds
+        timeout_seconds: timeoutSeconds,
+        scenario_profile: scenarioProfile
       });
       setRun(nextRun);
       await loadRuns();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Benchmark failed");
+      setError(err instanceof Error ? err.message : "Metrics failed");
     } finally {
       setLoading(false);
     }
-  }, [algorithms, client, iterations, loadRuns, selectedBounds, targetCount, timeoutSeconds, validDroneCount]);
+  }, [algorithms, client, iterations, loadRuns, scenarioProfile, selectedBounds, targetCount, timeoutSeconds, validDroneCount]);
 
   const onStop = useCallback(async () => {
     if (!activeRunId || !isRunning) return;
@@ -152,7 +184,7 @@ export default function BenchmarkPanel({
       await refreshRun(activeRunId);
       await loadRuns();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not stop benchmark");
+      setError(err instanceof Error ? err.message : "Could not stop metrics run");
     } finally {
       setStopping(false);
     }
@@ -168,7 +200,7 @@ export default function BenchmarkPanel({
       try {
         await refreshRun(runId);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Could not load benchmark");
+        setError(err instanceof Error ? err.message : "Could not load metrics run");
       }
     },
     [refreshRun]
@@ -177,9 +209,9 @@ export default function BenchmarkPanel({
   const summary = run?.summary ?? {};
 
   return (
-    <CollapsibleSection title="Benchmark" defaultOpen={false}>
+    <CollapsibleSection title="Metrics" defaultOpen={false}>
       <div className="benchmark-stack">
-        <div className="benchmark-checks" aria-label="Benchmark algorithms">
+        <div className="benchmark-checks" aria-label="Metrics algorithms">
           {algorithmOptions.map((option) => (
             <label key={option.key} className="benchmark-check">
               <input
@@ -196,6 +228,21 @@ export default function BenchmarkPanel({
         </div>
 
         <div className="benchmark-input-grid">
+          <label className="field">
+            Scenario
+            <select
+              className="algorithm-select"
+              value={scenarioProfile}
+              onChange={(event) => setScenarioProfile(event.target.value)}
+              disabled={isRunning}
+            >
+              {scenarioProfiles.map((profile) => (
+                <option key={profile.key} value={profile.key}>
+                  {profile.label}{profile.targets_move ? " (moving)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="field">
             Iterations
             <input
@@ -243,7 +290,7 @@ export default function BenchmarkPanel({
             onClick={onStart}
             disabled={!selectedBounds || !algorithms.length || loading || isRunning}
           >
-            {isRunning ? "Benchmark Running" : "Run Benchmark"}
+            {isRunning ? "Metrics Running" : "Run Metrics"}
           </button>
           <button
             type="button"
@@ -251,11 +298,11 @@ export default function BenchmarkPanel({
             onClick={onStop}
             disabled={!activeRunId || !isRunning || stopping}
           >
-            {stopping ? "Stopping…" : "Stop Benchmark"}
+            {stopping ? "Stopping…" : "Stop Metrics"}
           </button>
         </div>
 
-        {!selectedBounds && <div className="hint-text warning-text">Set a search area before benchmarking.</div>}
+        {!selectedBounds && <div className="hint-text warning-text">Set a search area before running metrics.</div>}
         {error && <div className="error-text">{error}</div>}
 
         {run && (
@@ -263,6 +310,9 @@ export default function BenchmarkPanel({
             <div className="benchmark-progress-row">
               <span>{run.status}</span>
               <strong>{completed}/{total}</strong>
+            </div>
+            <div className="hint-text">
+              Scenario: {scenarioLabel(activeScenarioProfile, scenarioProfiles)}
             </div>
             <div className="progress-bar benchmark-progress">
               <div className="progress-fill" style={{ width: `${progressPct}%` }} />
@@ -272,7 +322,7 @@ export default function BenchmarkPanel({
 
         {runs.length > 0 && (
           <label className="field">
-            Run History
+            Metrics History
             <select
               className="algorithm-select"
               value={run?.run_id ?? ""}
@@ -281,7 +331,7 @@ export default function BenchmarkPanel({
               <option value="">Latest runs</option>
               {runs.map((item) => (
                 <option key={item.run_id} value={item.run_id}>
-                  {item.run_id} ({item.status})
+                  {item.run_id} ({item.status}, {scenarioLabel(item.request?.scenario_profile, scenarioProfiles)})
                 </option>
               ))}
             </select>
@@ -320,7 +370,7 @@ export default function BenchmarkPanel({
             className="benchmark-export"
             href={`${apiBase}/benchmark/export?run_id=${encodeURIComponent(run.run_id)}`}
           >
-            Export CSV
+            Export Metrics CSV
           </a>
         )}
       </div>
