@@ -41,7 +41,6 @@ vi.mock("react-leaflet", () => ({
   })
 }));
 
-vi.mock("./MapBBoxDrawer", () => ({ default: () => null }));
 vi.mock("./MapClickSelector", () => ({ default: () => null }));
 vi.mock("./MapRecenter", () => ({ default: () => null }));
 vi.mock("./icons", () => ({
@@ -49,6 +48,17 @@ vi.mock("./icons", () => ({
   makeDroneIcon: mocks.makeDroneIcon,
   makePlacedHikerIcon: mocks.makePlacedHikerIcon,
   makeTargetCircleIcon: mocks.makeTargetCircleIcon
+}));
+
+const bboxDrawerMock = vi.hoisted(() => ({
+  props: [] as any[]
+}));
+
+vi.mock("./MapBBoxDrawer", () => ({
+  default: (props: Record<string, unknown>) => {
+    bboxDrawerMock.props.push(props);
+    return null;
+  }
 }));
 
 const defaultProps = {
@@ -92,6 +102,7 @@ describe("MapPanel", () => {
     mocks.makeDroneIcon.mockClear();
     mocks.makePlacedHikerIcon.mockClear();
     mocks.makeTargetCircleIcon.mockClear();
+    bboxDrawerMock.props = [];
     mapEventHandlers = {};
   });
 
@@ -353,6 +364,26 @@ describe("MapPanel", () => {
     expect(mocks.makePlacedHikerIcon).toHaveBeenCalledWith("Hiker 1", "stationary", false);
     const markerProps = mocks.marker.mock.calls.map(([props]) => props).find((props) => props.draggable === true);
     expect(markerProps?.position).toEqual([33.51, -117.21]);
+  });
+
+  it("passes drawn bounds straight through to the area-selection callback", () => {
+    const onSelectArea = vi.fn();
+    render(<MapPanel {...defaultProps} onSelectArea={onSelectArea} />);
+
+    const latestProps = bboxDrawerMock.props[bboxDrawerMock.props.length - 1];
+    latestProps.onBoundsDrawn({
+      min_lat: 33.45,
+      max_lat: 33.55,
+      min_lon: -117.25,
+      max_lon: -117.15
+    });
+
+    expect(onSelectArea).toHaveBeenCalledWith({
+      min_lat: 33.45,
+      max_lat: 33.55,
+      min_lon: -117.25,
+      max_lon: -117.15
+    });
   });
 
   it("hides placed hiker markers that already exist as runtime targets", () => {

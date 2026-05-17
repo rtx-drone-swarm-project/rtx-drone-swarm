@@ -1,6 +1,4 @@
-import type { Bounds } from "../types/mission";
-
-export const HALF_SIDE_KM = 2;
+import type { Bounds, SearchAreaCorners } from "../types/mission";
 
 export function kmToLatDelta(km: number): number {
   return km / 110.574;
@@ -11,27 +9,35 @@ export function kmToLonDelta(km: number, latDeg: number): number {
   return km / (111.32 * cosLat);
 }
 
-export function fixedAreaBounds(centerLat: number, centerLon: number): Bounds {
-  const latDelta = kmToLatDelta(HALF_SIDE_KM);
-  const lonDelta = kmToLonDelta(HALF_SIDE_KM, centerLat);
-
+export function draggedCornersToSearchArea(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): SearchAreaCorners {
   return {
-    min_lat: centerLat - latDelta,
-    max_lat: centerLat + latDelta,
-    min_lon: centerLon - lonDelta,
-    max_lon: centerLon + lonDelta
+    topLeftLat: Math.max(lat1, lat2),
+    topLeftLon: Math.min(lon1, lon2),
+    bottomRightLat: Math.min(lat1, lat2),
+    bottomRightLon: Math.max(lon1, lon2)
   };
 }
 
-export function customAreaBounds(centerLat: number, centerLon: number, halfSideKm: number): Bounds {
-  const latDelta = kmToLatDelta(halfSideKm);
-  const lonDelta = kmToLonDelta(halfSideKm, centerLat);
-
+export function searchAreaCornersToBounds(corners: SearchAreaCorners): Bounds {
   return {
-    min_lat: centerLat - latDelta,
-    max_lat: centerLat + latDelta,
-    min_lon: centerLon - lonDelta,
-    max_lon: centerLon + lonDelta
+    min_lat: Math.min(corners.topLeftLat, corners.bottomRightLat),
+    max_lat: Math.max(corners.topLeftLat, corners.bottomRightLat),
+    min_lon: Math.min(corners.topLeftLon, corners.bottomRightLon),
+    max_lon: Math.max(corners.topLeftLon, corners.bottomRightLon)
+  };
+}
+
+export function boundsToSearchAreaCorners(bounds: Bounds): SearchAreaCorners {
+  return {
+    topLeftLat: bounds.max_lat,
+    topLeftLon: bounds.min_lon,
+    bottomRightLat: bounds.min_lat,
+    bottomRightLon: bounds.max_lon
   };
 }
 

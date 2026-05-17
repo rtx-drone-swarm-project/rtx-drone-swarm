@@ -27,6 +27,7 @@ import type {
   MissionState,
   PlacedHiker,
   SelectedDrone,
+  SearchAreaCorners,
   Target,
   TelemetryDrone,
   ValidDrone
@@ -40,7 +41,7 @@ import type {
   TargetFoundMessage,
   TelemetryMessage
 } from "./types/ws";
-import { customAreaBounds } from "./utils/geo";
+import { boundsToSearchAreaCorners, searchAreaCornersToBounds } from "./utils/geo";
 import { parseCoordinate } from "./utils/validate";
 
 const DEFAULT_CENTER: [number, number] = [33.5, -117.2];
@@ -57,6 +58,52 @@ function clampPointToBounds(lat: number, lon: number, bounds: Bounds): [number, 
   ];
 }
 
+function formatCornerValue(value: number): string {
+  return value.toFixed(6);
+}
+
+function getBoundsCenter(bounds: Bounds): [number, number] {
+  return [
+    (bounds.min_lat + bounds.max_lat) / 2,
+    (bounds.min_lon + bounds.max_lon) / 2
+  ];
+}
+
+function parseSearchAreaCorners(corners: {
+  topLeftLat: string;
+  topLeftLon: string;
+  bottomRightLat: string;
+  bottomRightLon: string;
+}): SearchAreaCorners | null {
+  const topLeftLat = parseCoordinate(corners.topLeftLat, -90, 90);
+  const topLeftLon = parseCoordinate(corners.topLeftLon, -180, 180);
+  const bottomRightLat = parseCoordinate(corners.bottomRightLat, -90, 90);
+  const bottomRightLon = parseCoordinate(corners.bottomRightLon, -180, 180);
+
+  if (topLeftLat == null || topLeftLon == null || bottomRightLat == null || bottomRightLon == null) {
+    return null;
+  }
+
+  return {
+    topLeftLat,
+    topLeftLon,
+    bottomRightLat,
+    bottomRightLon
+  };
+}
+
+function isValidSearchAreaDraft(corners: {
+  topLeftLat: string;
+  topLeftLon: string;
+  bottomRightLat: string;
+  bottomRightLon: string;
+}): boolean {
+  const parsedCorners = parseSearchAreaCorners(corners);
+  if (!parsedCorners) return false;
+  const bounds = searchAreaCornersToBounds(parsedCorners);
+  return bounds.min_lat !== bounds.max_lat && bounds.min_lon !== bounds.max_lon;
+}
+
 export default function App() {
   const apiPort = getApiPort();
   const apiBase = useMemo(() => getApiBase(apiPort), [apiPort]);
@@ -70,9 +117,11 @@ export default function App() {
   const [targets, setTargets] = useState<Target[]>([]);
   const [foundHikers, setFoundHikers] = useState<FoundHiker[]>([]);
   const [missionLocked, setMissionLocked] = useState(false);
-  const [lat, setLat] = useState(DEFAULT_CENTER[0].toFixed(6));
-  const [lon, setLon] = useState(DEFAULT_CENTER[1].toFixed(6));
-  const [isValidCoord, setIsValidCoord] = useState(true);
+  const [topLeftLat, setTopLeftLat] = useState("");
+  const [topLeftLon, setTopLeftLon] = useState("");
+  const [bottomRightLat, setBottomRightLat] = useState("");
+  const [bottomRightLon, setBottomRightLon] = useState("");
+  const [isValidBounds, setIsValidBounds] = useState(true);
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(DEFAULT_CENTER);
   const [mapAutocentered, setMapAutocentered] = useState(false);
   const [selectedBounds, setSelectedBounds] = useState<Bounds | null>(null);
@@ -422,60 +471,99 @@ export default function App() {
     });
   }, [assignHikerLabels, targets]);
 
-  const applyNavigation = useCallback((nextLat: string, nextLon: string) => {
-    const latValue = parseCoordinate(nextLat, -90, 90);
-    const lonValue = parseCoordinate(nextLon, -180, 180);
-    if (latValue == null || lonValue == null) {
-      setIsValidCoord(false);
-      return;
-    }
-    setIsValidCoord(true);
-    setMapCenter([latValue, lonValue]);
+  const updateSearchAreaFields = useCallback((bounds: Bounds) => {
+    const corners = boundsToSearchAreaCorners(bounds);
+    setTopLeftLat(formatCornerValue(corners.topLeftLat));
+    setTopLeftLon(formatCornerValue(corners.topLeftLon));
+    setBottomRightLat(formatCornerValue(corners.bottomRightLat));
+    setBottomRightLon(formatCornerValue(corners.bottomRightLon));
   }, []);
 
-  const onLatitudeChange = useCallback(
-    (nextLat: string) => {
-      setLat(nextLat);
-      applyNavigation(nextLat, lon);
-    },
-    [applyNavigation, lon]
-  );
+  const onTopLeftLatChange = useCallback((value: string) => {
+    setTopLeftLat(value);
+    setIsValidBounds(
+      isValidSearchAreaDraft({
+        topLeftLat: value,
+        topLeftLon,
+        bottomRightLat,
+        bottomRightLon
+      })
+    );
+  }, [bottomRightLat, bottomRightLon, topLeftLon]);
 
-  const onLongitudeChange = useCallback(
-    (nextLon: string) => {
-      setLon(nextLon);
-      applyNavigation(lat, nextLon);
-    },
-    [applyNavigation, lat]
-  );
+  const onTopLeftLonChange = useCallback((value: string) => {
+    setTopLeftLon(value);
+    setIsValidBounds(
+      isValidSearchAreaDraft({
+        topLeftLat,
+        topLeftLon: value,
+        bottomRightLat,
+        bottomRightLon
+      })
+    );
+  }, [bottomRightLat, bottomRightLon, topLeftLat]);
+
+  const onBottomRightLatChange = useCallback((value: string) => {
+    setBottomRightLat(value);
+    setIsValidBounds(
+      isValidSearchAreaDraft({
+        topLeftLat,
+        topLeftLon,
+        bottomRightLat: value,
+        bottomRightLon
+      })
+    );
+  }, [bottomRightLon, topLeftLat, topLeftLon]);
+
+  const onBottomRightLonChange = useCallback((value: string) => {
+    setBottomRightLon(value);
+    setIsValidBounds(
+      isValidSearchAreaDraft({
+        topLeftLat,
+        topLeftLon,
+        bottomRightLat,
+        bottomRightLon: value
+      })
+    );
+  }, [bottomRightLat, topLeftLat, topLeftLon]);
 
   const onSelectArea = useCallback(
-    (selectedLat: number, selectedLon: number, bounds: Bounds) => {
+    (bounds: Bounds) => {
       setSelectedBounds(bounds);
-      setLat(selectedLat.toFixed(6));
-      setLon(selectedLon.toFixed(6));
-      setMapCenter([selectedLat, selectedLon]);
-      setIsValidCoord(true);
+      updateSearchAreaFields(bounds);
+      setMapCenter(getBoundsCenter(bounds));
+      setIsValidBounds(true);
       setPlacedHikers((prev) => prev.filter((hiker) => isPointInsideBounds(hiker.lat, hiker.lon, bounds)));
       setIsPlacingHiker(false);
     },
-    []
+    [updateSearchAreaFields]
   );
 
-  const onSetSearchArea = useCallback((sideKm: number) => {
-    const latValue = parseCoordinate(lat, -90, 90);
-    const lonValue = parseCoordinate(lon, -180, 180);
-    if (latValue == null || lonValue == null) {
-      setIsValidCoord(false);
+  const onSetSearchArea = useCallback(() => {
+    const parsedCorners = parseSearchAreaCorners({
+      topLeftLat,
+      topLeftLon,
+      bottomRightLat,
+      bottomRightLon
+    });
+    if (!parsedCorners) {
+      setIsValidBounds(false);
       return;
     }
-    setIsValidCoord(true);
-    const bounds = customAreaBounds(latValue, lonValue, sideKm / 2);
+
+    const bounds = searchAreaCornersToBounds(parsedCorners);
+    if (bounds.min_lat === bounds.max_lat || bounds.min_lon === bounds.max_lon) {
+      setIsValidBounds(false);
+      return;
+    }
+
+    updateSearchAreaFields(bounds);
+    setIsValidBounds(true);
     setSelectedBounds(bounds);
-    setMapCenter([latValue, lonValue]);
+    setMapCenter(getBoundsCenter(bounds));
     setPlacedHikers((prev) => prev.filter((hiker) => isPointInsideBounds(hiker.lat, hiker.lon, bounds)));
     setIsPlacingHiker(false);
-  }, [lat, lon]);
+  }, [bottomRightLat, bottomRightLon, topLeftLat, topLeftLon, updateSearchAreaFields]);
 
   const onAlgorithmChange = useCallback((algorithm: AlgorithmOption) => {
     setSelectedAlgorithm(algorithm);
@@ -606,12 +694,16 @@ export default function App() {
 
         <aside className="right-rail">
           <NavigationPanel
-            lat={lat}
-            lon={lon}
-            isValidCoord={isValidCoord}
+            topLeftLat={topLeftLat}
+            topLeftLon={topLeftLon}
+            bottomRightLat={bottomRightLat}
+            bottomRightLon={bottomRightLon}
+            isValidBounds={isValidBounds}
             missionActive={missionActive}
-            onLatitudeChange={onLatitudeChange}
-            onLongitudeChange={onLongitudeChange}
+            onTopLeftLatChange={onTopLeftLatChange}
+            onTopLeftLonChange={onTopLeftLonChange}
+            onBottomRightLatChange={onBottomRightLatChange}
+            onBottomRightLonChange={onBottomRightLonChange}
             onSetSearchArea={onSetSearchArea}
           />
           <ActionsPanel

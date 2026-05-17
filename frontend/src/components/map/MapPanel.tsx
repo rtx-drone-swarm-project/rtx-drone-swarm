@@ -117,7 +117,7 @@ type MapPanelProps = {
   onSelectHiker: (hikerId: string) => void;
   onPlaceHiker: (lat: number, lon: number) => void;
   onMoveHiker: (hikerId: string, lat: number, lon: number) => void;
-  onSelectArea: (lat: number, lon: number, bounds: Bounds) => void;
+  onSelectArea: (bounds: Bounds) => void;
   droneTrails?: Record<string, [number, number][]>;
   pmvHeatmap?: PmvHeatmapMessage | null;
   selectedAlgorithm?: AlgorithmOption;
@@ -222,11 +222,7 @@ export default function MapPanel({
         <MapClickSelector enabled={hikerPlacementMode && hikerPlacementEditable} onSelect={onPlaceHiker} />
         <MapBBoxDrawer
           enabled={!missionActive && !hikerPlacementMode}
-          onBoundsDrawn={(drawnBounds) => {
-            const centerLat = (drawnBounds.min_lat + drawnBounds.max_lat) / 2;
-            const centerLon = (drawnBounds.min_lon + drawnBounds.max_lon) / 2;
-            onSelectArea(centerLat, centerLon, drawnBounds);
-          }}
+          onBoundsDrawn={onSelectArea}
         />
 
         {rectBounds && (
