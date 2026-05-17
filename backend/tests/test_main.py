@@ -140,6 +140,42 @@ def test_create_mission():
     assert data["hikers"] == [{**mission_data["hikers"][0], "movement": "moving"}]
 
 
+def test_create_mission_rejects_invalid_rectangular_bounds():
+    mission_data = {
+        "name": "Invalid Bounds Mission",
+        "bounds": {
+            "min_lat": 35.0,
+            "max_lat": 34.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.5, "lon": -117.5}
+        ],
+    }
+
+    response = client.post("/missions", json=mission_data)
+    assert response.status_code == 422
+
+
+def test_create_mission_rejects_out_of_range_bounds():
+    mission_data = {
+        "name": "Out Of Range Bounds Mission",
+        "bounds": {
+            "min_lat": -91.0,
+            "max_lat": 34.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.5, "lon": -117.5}
+        ],
+    }
+
+    response = client.post("/missions", json=mission_data)
+    assert response.status_code == 422
+
+
 def test_get_mission_returns_stored_bounds():
     mission_data = {
         "name": "Mission Lookup Test",

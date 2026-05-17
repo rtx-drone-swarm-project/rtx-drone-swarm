@@ -4,25 +4,30 @@ import NavigationPanel from "./NavigationPanel";
 
 function renderPanel(overrides: Partial<React.ComponentProps<typeof NavigationPanel>> = {}) {
   const defaults = {
-    lat: "33.500000",
-    lon: "-117.200000",
-    isValidCoord: true,
+    topLeftLat: "33.550000",
+    topLeftLon: "-117.250000",
+    bottomRightLat: "33.450000",
+    bottomRightLon: "-117.150000",
+    isValidBounds: true,
     missionActive: false,
-    onLatitudeChange: vi.fn(),
-    onLongitudeChange: vi.fn(),
+    onTopLeftLatChange: vi.fn(),
+    onTopLeftLonChange: vi.fn(),
+    onBottomRightLatChange: vi.fn(),
+    onBottomRightLonChange: vi.fn(),
     onSetSearchArea: vi.fn()
   };
   return render(<NavigationPanel {...defaults} {...overrides} />);
 }
 
 describe("NavigationPanel", () => {
-  it("renders lat, lon, size inputs and Set Search Area button", () => {
+  it("renders four corner inputs and Set Search Area button", () => {
     renderPanel();
 
     expect(screen.getByText("Navigation")).toBeTruthy();
-    expect(screen.getByPlaceholderText("e.g. 33.5000")).toBeTruthy();
-    expect(screen.getByPlaceholderText("e.g. -117.2000")).toBeTruthy();
-    expect(screen.getByText("Search Area Size (km)")).toBeTruthy();
+    expect(screen.getByLabelText("Top-left latitude")).toBeTruthy();
+    expect(screen.getByLabelText("Top-left longitude")).toBeTruthy();
+    expect(screen.getByLabelText("Bottom-right latitude")).toBeTruthy();
+    expect(screen.getByLabelText("Bottom-right longitude")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Set Search Area" })).toBeTruthy();
   });
 
@@ -38,13 +43,12 @@ describe("NavigationPanel", () => {
     expect(screen.queryByText(/No drone positions/i)).toBeNull();
   });
 
-  it("calls onSetSearchArea with the current sideKm when button is clicked", () => {
+  it("calls onSetSearchArea when button is clicked", () => {
     const onSetSearchArea = vi.fn();
     renderPanel({ onSetSearchArea });
 
     fireEvent.click(screen.getByRole("button", { name: "Set Search Area" }));
     expect(onSetSearchArea).toHaveBeenCalledTimes(1);
-    expect(onSetSearchArea).toHaveBeenCalledWith(4);
   });
 
   it("disables Set Search Area when missionActive is true", () => {
@@ -53,26 +57,26 @@ describe("NavigationPanel", () => {
     expect(btn.disabled).toBe(true);
   });
 
-  it("disables Set Search Area when coords are invalid", () => {
-    renderPanel({ isValidCoord: false });
+  it("disables Set Search Area when bounds are invalid", () => {
+    renderPanel({ isValidBounds: false });
     const btn = screen.getByRole("button", { name: "Set Search Area" }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
-    expect(screen.getByText(/Lat: -90..90/i)).toBeTruthy();
+    expect(screen.getByText(/rectangle must have non-zero width and height/i)).toBeTruthy();
   });
 
-  it("calls onLatitudeChange when lat input changes", () => {
-    const onLatitudeChange = vi.fn();
-    renderPanel({ onLatitudeChange });
+  it("calls onTopLeftLatChange when the top-left latitude input changes", () => {
+    const onTopLeftLatChange = vi.fn();
+    renderPanel({ onTopLeftLatChange });
 
-    fireEvent.change(screen.getByPlaceholderText("e.g. 33.5000"), { target: { value: "34.0" } });
-    expect(onLatitudeChange).toHaveBeenCalledWith("34.0");
+    fireEvent.change(screen.getByLabelText("Top-left latitude"), { target: { value: "34.0" } });
+    expect(onTopLeftLatChange).toHaveBeenCalledWith("34.0");
   });
 
-  it("calls onLongitudeChange when lon input changes", () => {
-    const onLongitudeChange = vi.fn();
-    renderPanel({ onLongitudeChange });
+  it("calls onBottomRightLonChange when the bottom-right longitude input changes", () => {
+    const onBottomRightLonChange = vi.fn();
+    renderPanel({ onBottomRightLonChange });
 
-    fireEvent.change(screen.getByPlaceholderText("e.g. -117.2000"), { target: { value: "-118.0" } });
-    expect(onLongitudeChange).toHaveBeenCalledWith("-118.0");
+    fireEvent.change(screen.getByLabelText("Bottom-right longitude"), { target: { value: "-118.0" } });
+    expect(onBottomRightLonChange).toHaveBeenCalledWith("-118.0");
   });
 });

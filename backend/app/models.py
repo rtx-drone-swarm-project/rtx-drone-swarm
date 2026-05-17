@@ -2,7 +2,7 @@
 
 from typing import Optional, List, Literal, Dict, Tuple, Set
 from dataclasses import dataclass
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import numpy as np
 
 class Bounds(BaseModel):
@@ -12,6 +12,18 @@ class Bounds(BaseModel):
     max_lat: float
     min_lon: float
     max_lon: float
+
+    @model_validator(mode="after")
+    def validate_rectangular_bounds(self):
+        if not -90 <= self.min_lat <= 90 or not -90 <= self.max_lat <= 90:
+            raise ValueError("Latitude must be between -90 and 90")
+        if not -180 <= self.min_lon <= 180 or not -180 <= self.max_lon <= 180:
+            raise ValueError("Longitude must be between -180 and 180")
+        if self.min_lat >= self.max_lat:
+            raise ValueError("min_lat must be less than max_lat")
+        if self.min_lon >= self.max_lon:
+            raise ValueError("min_lon must be less than max_lon")
+        return self
 
 class Drone(BaseModel):
     """Mission-facing drone state used in REST payloads and WebSocket updates."""
@@ -70,9 +82,11 @@ class Mission:
     drones: List[Dict]
     hikers: List[Dict]
     targets: List[Dict]
-    grid: np.ndarray or None
+    grid: np.ndarray | None
+    probability_grid: np.ndarray | None
+    probability_grid_config: Dict[str, object]
 
-    _dense_coverage_grid: np.ndarray or None
+    _dense_coverage_grid: np.ndarray | None
     _dense_grid_size: int
     _dense_covered_count: int
     _found_target_ids: Set[str]
@@ -97,6 +111,11 @@ class Mission:
         self.hikers = [m.model_dump() for m in mission_data.hikers] if mission_data.hikers else []
         self.targets = []
         self.grid = None
+        self.probability_grid = None
+        self.probability_grid_config = {
+            "smoothing_passes": 1,
+            "regions": [],
+        }
 
         self._dense_coverage_grid = None
         self._dense_grid_size = 0
@@ -124,10 +143,14 @@ class Mission:
             "hikers": self.hikers,
             "targets": self.targets,
             "grid": self.grid,
+            "probability_grid": self.probability_grid,
+            "probability_grid_config": self.probability_grid_config,
         }
 
         if self.grid is not None and type(self.grid) is np.ndarray:
             data["grid"] = self.grid.tolist()
+        if self.probability_grid is not None and type(self.probability_grid) is np.ndarray:
+            data["probability_grid"] = self.probability_grid.tolist()
 
         return data
 

@@ -123,6 +123,13 @@ export type Bounds = {
   max_lon: number;
 };
 
+export type SearchAreaCorners = {
+  topLeftLat: number;
+  topLeftLon: number;
+  bottomRightLat: number;
+  bottomRightLon: number;
+};
+
 export type TelemetryDrone = {
   id: EntityId;
   sysid?: number | null;

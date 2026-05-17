@@ -1,73 +1,84 @@
-import { useState } from "react";
 import CollapsibleSection from "../common/CollapsibleSection";
 
 type NavigationPanelProps = {
-  lat: string;
-  lon: string;
-  isValidCoord: boolean;
+  topLeftLat: string;
+  topLeftLon: string;
+  bottomRightLat: string;
+  bottomRightLon: string;
+  isValidBounds: boolean;
   missionActive: boolean;
-  onLatitudeChange: (value: string) => void;
-  onLongitudeChange: (value: string) => void;
-  onSetSearchArea: (sideKm: number) => void;
+  onTopLeftLatChange: (value: string) => void;
+  onTopLeftLonChange: (value: string) => void;
+  onBottomRightLatChange: (value: string) => void;
+  onBottomRightLonChange: (value: string) => void;
+  onSetSearchArea: () => void;
 };
 
 export default function NavigationPanel({
-  lat,
-  lon,
-  isValidCoord,
+  topLeftLat,
+  topLeftLon,
+  bottomRightLat,
+  bottomRightLon,
+  isValidBounds,
   missionActive,
-  onLatitudeChange,
-  onLongitudeChange,
+  onTopLeftLatChange,
+  onTopLeftLonChange,
+  onBottomRightLatChange,
+  onBottomRightLonChange,
   onSetSearchArea
 }: NavigationPanelProps) {
-  const [sideKm, setSideKm] = useState(4);
-
-  const handleSideKmChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = Math.max(1, Math.min(100, Number(e.target.value)));
-    setSideKm(Number.isFinite(val) ? val : 4);
-  };
-
   return (
     <CollapsibleSection title="Navigation">
       <label className="field">
-        Latitude
+        Top-left latitude
         <input
           type="text"
-          value={lat}
+          value={topLeftLat}
           placeholder="e.g. 33.5000"
-          onChange={(e) => onLatitudeChange(e.target.value)}
-          className={isValidCoord ? "" : "invalid"}
+          onChange={(e) => onTopLeftLatChange(e.target.value)}
+          className={isValidBounds ? "" : "invalid"}
         />
       </label>
       <label className="field">
-        Longitude
+        Top-left longitude
         <input
           type="text"
-          value={lon}
+          value={topLeftLon}
           placeholder="e.g. -117.2000"
-          onChange={(e) => onLongitudeChange(e.target.value)}
-          className={isValidCoord ? "" : "invalid"}
+          onChange={(e) => onTopLeftLonChange(e.target.value)}
+          className={isValidBounds ? "" : "invalid"}
         />
       </label>
-      {!isValidCoord && <div className="error-text">Lat: -90..90, Lng: -180..180</div>}
-
       <label className="field">
-        Search Area Size (km)
+        Bottom-right latitude
         <input
-          type="number"
-          value={sideKm}
-          min={1}
-          max={100}
-          step={1}
-          onChange={handleSideKmChange}
-          disabled={missionActive}
+          type="text"
+          value={bottomRightLat}
+          placeholder="e.g. 33.4500"
+          onChange={(e) => onBottomRightLatChange(e.target.value)}
+          className={isValidBounds ? "" : "invalid"}
         />
       </label>
+      <label className="field">
+        Bottom-right longitude
+        <input
+          type="text"
+          value={bottomRightLon}
+          placeholder="e.g. -117.1500"
+          onChange={(e) => onBottomRightLonChange(e.target.value)}
+          className={isValidBounds ? "" : "invalid"}
+        />
+      </label>
+      {!isValidBounds && (
+        <div className="error-text">
+          Enter valid corners: lat -90..90, lon -180..180, and the rectangle must have non-zero width and height.
+        </div>
+      )}
 
       <button
         className="action-btn start"
-        onClick={() => onSetSearchArea(sideKm)}
-        disabled={!isValidCoord || missionActive}
+        onClick={onSetSearchArea}
+        disabled={!isValidBounds || missionActive}
       >
         Set Search Area
       </button>

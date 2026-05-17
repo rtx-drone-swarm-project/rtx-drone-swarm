@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("./components/map/MapPanel", () => ({
   default: (props: {
-    onSelectArea: (lat: number, lon: number, bounds: any) => void;
+    onSelectArea: (bounds: any) => void;
     onPlaceHiker?: (lat: number, lon: number) => void;
   }) => {
     mocks.mapPanelProps.push(props);
@@ -17,7 +17,7 @@ vi.mock("./components/map/MapPanel", () => ({
         <button
           type="button"
           onClick={() =>
-            props.onSelectArea(33.5, -117.2, {
+            props.onSelectArea({
               min_lat: 33.45,
               max_lat: 33.55,
               min_lon: -117.25,
@@ -143,6 +143,12 @@ describe("App integration", () => {
     expect(body.drones[0]).not.toHaveProperty("mode");
     expect(body.drones[0]).not.toHaveProperty("telemetry_source");
     expect(body.drones[0]).not.toHaveProperty("armed");
+    expect(body.bounds).toEqual({
+      min_lat: 33.45,
+      max_lat: 33.55,
+      min_lon: -117.25,
+      max_lon: -117.15
+    });
 
     socket.sendMessage({
       type: "mission_status",
