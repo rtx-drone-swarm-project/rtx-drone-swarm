@@ -7,12 +7,23 @@ from app import app
 from app.models import Mission, MissionCreate, Drone, Bounds
 from app.main import mission_db, simulation_loop, manager, _sync_mission_drones_with_sitl, sitl_bridge
 from app.algorithms.base import DETECTION_RADIUS
-from app.algorithms.boustrophedon import _row_endpoints_lawnmower, _build_dense_grid, _voronoi_assign, _balanced_partition_seeds, _match_drones_to_seeds, _row_endpoints_lawnmower, VoronoiBoustrophedon, _REACH_RADIUS
+from app.algorithms.boustrophedon import (
+    _row_endpoints_lawnmower,
+    _build_dense_grid,
+    _voronoi_assign,
+    _balanced_partition_seeds,
+    _match_drones_to_seeds,
+    VoronoiBoustrophedon,
+    _REACH_RADIUS,
+    _partition_shape,
+    _partition_seeds,
+)
 from app.voronoi import lloyd_step
 from app.algorithms.voronoi import VoronoiCoverage
 from app.algorithms.base import build_search_grid
 from app.settings import _positive_float_env
 import app.main as main_module
+import app.missions as missions_app
 import app.routes.missions as missions_routes
 import app.simulation as simulation_module
 import app.dispatch as dispatch_module
@@ -1141,6 +1152,64 @@ def test_sweep_partition_balanced_across_all_drone_counts():
         assert ratio <= 2.5, f"k={k}: cells too lopsided ({sizes}, ratio={ratio:.2f}x)"
 
 
+def test_partition_shape_prefers_factor_aware_layout_for_k15():
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+    rows, cols = _partition_shape(bounds, 15)
+    assert rows * cols == 15
+    assert sorted([rows, cols]) == [3, 5], f"expected 3x5 factor layout, got {rows}x{cols}"
+
+
+def test_partition_shape_and_seeds_scale_across_broad_counts():
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+    for k in range(1, 41):
+        rows, cols = _partition_shape(bounds, k)
+        assert rows >= 1 and cols >= 1
+        assert rows * cols >= k
+
+        seeds = _balanced_partition_seeds(bounds, k)
+        assert len(seeds) == k
+        assert np.all(seeds[:, 0] >= bounds["min_lat"])
+        assert np.all(seeds[:, 0] <= bounds["max_lat"])
+        assert np.all(seeds[:, 1] >= bounds["min_lon"])
+        assert np.all(seeds[:, 1] <= bounds["max_lon"])
+
+
+def test_sweep_partition_balanced_for_representative_counts_and_aspects():
+    representative_counts = [2, 3, 4, 5, 7, 10, 13, 15, 16, 20, 25, 32]
+    bounds_cases = [
+        {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04},  # square
+        {"min_lat": 0.0, "max_lat": 0.03, "min_lon": 0.0, "max_lon": 0.08},  # wide
+        {"min_lat": 0.0, "max_lat": 0.08, "min_lon": 0.0, "max_lon": 0.03},  # tall
+    ]
+
+    for bounds in bounds_cases:
+        dense = _build_dense_grid(bounds)
+        for k in representative_counts:
+            seeds = _balanced_partition_seeds(bounds, k)
+            labels = _voronoi_assign(dense, seeds)
+            sizes = [int((labels == i).sum()) for i in range(k)]
+            assert min(sizes) > 0
+            ratio = max(sizes) / min(sizes)
+            assert ratio <= 2.5, (
+                f"k={k} bounds={bounds}: cells too lopsided ({sizes}, ratio={ratio:.2f}x)"
+            )
+
+
+def test_generate_coverage_points_tracks_partition_policy():
+    bounds = {"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04}
+
+    for k in [1, 2, 3, 4, 5, 7, 10, 13, 15, 16, 20, 25, 32]:
+        points = missions_app._generate_coverage_points(bounds, k)
+        assert len(points) == k
+        assert len(set(points)) == k
+        for lat, lon in points:
+            assert bounds["min_lat"] <= lat <= bounds["max_lat"]
+            assert bounds["min_lon"] <= lon <= bounds["max_lon"]
+        expected = _partition_seeds(bounds, k, lloyd_iters=8)
+        actual = np.array(points)
+        assert np.allclose(actual, expected), f"startup points diverged from relaxed partition seeds for k={k}"
+
+
 def test_sweep_partition_balanced_when_drones_clustered_at_init():
     """Even if all drones spawn clustered, partitions must be roughly equal area."""
     # 4 drones all clustered near a single corner — the worst case
@@ -1323,6 +1392,25 @@ def test_get_algorithm_returns_distinct_voronoi_aco_instances():
     assert a is not b
 
 
+def test_vaco_ignores_drones_without_longitude():
+    from types import SimpleNamespace
+    from app.algorithms.vaco import VoronoiACOHybridCoverage
+
+    mission = SimpleNamespace(
+        bounds={"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04},
+        elapsed_seconds=0.0,
+    )
+    algo = VoronoiACOHybridCoverage()
+    algo.initialize(mission)
+
+    free_drones = [
+        {"id": "d-missing-lon", "lat": 0.01, "lon": None},
+        {"id": "d-ok", "lat": 0.02, "lon": 0.02},
+    ]
+    waypoints = algo.get_target_waypoints(mission, free_drones)
+    assert set(waypoints.keys()) == {"d-ok"}
+
+
 def test_algorithms_endpoint_lists_discovered_registry_metadata():
     response = client.get("/algorithms")
     assert response.status_code == 200
@@ -1332,7 +1420,7 @@ def test_algorithms_endpoint_lists_discovered_registry_metadata():
     assert {"voronoi", "voronoi_aco", "vaco", "apf", "sweep"}.issubset(by_key.keys())
     assert by_key["voronoi"]["label"] == "Voronoi (Lloyd's)"
     assert by_key["voronoi_aco"]["label"] == "Voronoi (ACO)"
-    assert by_key["vaco"]["label"] == "VACO Hybrid Coverage (Kaydee)"
+    assert by_key["vaco"]["label"] == "VACO Hybrid (Optimized)"
     assert by_key["vaco"]["class_name"] == "VoronoiACOHybridCoverage"
 
 

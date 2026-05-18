@@ -2,11 +2,8 @@
 
 import asyncio
 import json
-import math
 import os
 from typing import Dict, List, Optional, Tuple
-
-import numpy as np
 
 from app.settings import (
     AUTO_START_SITL_ON_MISSION_START,
@@ -17,7 +14,7 @@ from app.settings import (
     DEFAULT_SITL_PORT_STEP,
     LAUNCH_SITL_SCRIPT,
 )
-from app.algorithms.base import build_search_grid
+from app.algorithms.boustrophedon import _partition_seeds
 from app.models import MissionCreate, Mission
 
 
@@ -191,17 +188,11 @@ def _mission_bounds_center(bounds: dict) -> Tuple[float, float]:
 
 
 def _generate_coverage_points(bounds: dict, drone_count: int) -> List[Tuple[float, float]]:
-    """Generate evenly distributed coverage points inside mission bounds."""
+    """Generate startup points aligned with relaxed algorithm partition seeds."""
     if drone_count <= 0:
         return []
-
-    grid_side = max(2, math.ceil(math.sqrt(drone_count)))
-    grid_points = build_search_grid(bounds, n=grid_side)
-    if len(grid_points) <= drone_count:
-        return [(float(lat), float(lon)) for lat, lon in grid_points]
-
-    selected_indexes = np.linspace(0, len(grid_points) - 1, num=drone_count, dtype=int)
-    return [(float(grid_points[idx][0]), float(grid_points[idx][1])) for idx in selected_indexes]
+    seeds = _partition_seeds(bounds, drone_count, lloyd_iters=8)
+    return [(float(lat), float(lon)) for lat, lon in seeds.tolist()]
 
 
 def _assign_start_area_targets(mission: Mission) -> List[dict]:

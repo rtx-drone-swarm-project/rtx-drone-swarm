@@ -84,7 +84,7 @@ class InMemoryPheromoneGrid:
         cfg      = self.config
 
         with self._lock:
-            best_val:   float          = float('inf')
+            best_val:   float               = float('inf')
             candidates: List[Tuple[int,int]] = []
 
             for dr in range(-radius, radius + 1):
@@ -120,10 +120,19 @@ class InMemoryPheromoneGrid:
     def _evaporate_loop(self):
         while self._running:
             time.sleep(self.config.tick_interval)
-            with self._lock:
-                self.grid *= self.config.evaporation_rate
+            self.tick()
 
-    def deposit_path(self, lat0: float, lon0: float, lat1: float, lon1: float, steps: int = 4):
+    def tick(self):
+        """Apply one deterministic evaporation step."""
+        with self._lock:
+            self.grid *= self.config.evaporation_rate
+
+    def deposit_path(
+        self,
+        lat0: float, lon0: float,
+        lat1: float, lon1: float,
+        steps: int = 4,
+    ):
         """
         Deposit pheromone at `steps` evenly-spaced points between two positions.
         Call this with (prev_lat, prev_lon, curr_lat, curr_lon) each tick.
