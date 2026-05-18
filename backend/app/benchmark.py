@@ -148,7 +148,7 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
                     static_targets=not bool(scenario["targets_move"]),
                     timeout_seconds=request.timeout_seconds,
                 )
-                await asyncio.to_thread(insert_trial, trial)
+                insert_trial(trial)
                 trials.append(trial)
                 completed += 1
                 await manager.broadcast(
@@ -162,7 +162,7 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
                 )
 
         summary = aggregate_trials(trials)
-        await asyncio.to_thread(finish_run, run_id, "complete", summary=summary)
+        finish_run(run_id, "complete", summary=summary)
         await manager.broadcast(
             {
                 "type": "benchmark_progress",
@@ -175,9 +175,7 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
         return summary
     except asyncio.CancelledError:
         summary = aggregate_trials(trials)
-        await asyncio.to_thread(
-            finish_run, run_id, "cancelled", summary=summary, error="Stopped by user"
-        )
+        finish_run(run_id, "cancelled", summary=summary, error="Stopped by user")
         await manager.broadcast(
             {
                 "type": "benchmark_progress",
@@ -189,7 +187,7 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
         )
         return summary
     except Exception as exc:
-        await asyncio.to_thread(finish_run, run_id, "failed", summary=aggregate_trials(trials), error=str(exc))
+        finish_run(run_id, "failed", summary=aggregate_trials(trials), error=str(exc))
         await manager.broadcast(
             {
                 "type": "benchmark_progress",
@@ -262,7 +260,7 @@ async def run_headless_trial(
             if not drone.get("assigned_target_id") and drone.get("role") not in ["finder", "confirmer"]
         ]
 
-        waypoints = await asyncio.to_thread(strategy.get_target_waypoints, mission, free_drones)
+        waypoints = strategy.get_target_waypoints(mission, free_drones)
 
         previous_positions = {
             str(drone["id"]): (float(drone["lat"]), float(drone["lon"]))

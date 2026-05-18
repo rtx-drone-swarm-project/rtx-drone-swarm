@@ -27,7 +27,7 @@ async def start_benchmark(request: BenchmarkRequest):
         raise HTTPException(status_code=400, detail=f"Unknown scenario_profile: {request.scenario_profile}")
 
     run_id = make_run_id()
-    run = await asyncio.to_thread(create_run, run_id, request.model_dump(), total_trials(request))
+    run = create_run(run_id, request.model_dump(), total_trials(request))
     task = asyncio.create_task(run_benchmark_job(run_id, request))
     _benchmark_tasks.add(task)
     _benchmark_run_tasks[run_id] = task
@@ -45,13 +45,13 @@ async def start_benchmark(request: BenchmarkRequest):
 
 
 @router.get("/runs")
-def get_benchmark_runs():
+async def get_benchmark_runs():
     """List recent benchmark runs with progress and stored summaries."""
     return {"runs": list_runs()}
 
 
 @router.get("/scenarios")
-def get_benchmark_scenarios():
+async def get_benchmark_scenarios():
     """List scenario profiles available for metrics runs."""
     return {"scenarios": list_scenario_profiles()}
 
@@ -63,7 +63,7 @@ async def stop_benchmark(run_id: str):
         raise HTTPException(status_code=404, detail="Not found")
     task = _benchmark_run_tasks.get(run_id)
     if task is None:
-        run = await asyncio.to_thread(get_run, run_id)
+        run = get_run(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Benchmark run not found")
         if run["status"] != "running":
@@ -83,7 +83,7 @@ async def stop_benchmark(run_id: str):
 
 
 @router.get("/export")
-def export_benchmarks(run_id: str | None = None, all_runs: bool = False):
+async def export_benchmarks(run_id: str | None = None, all_runs: bool = False):
     """Export benchmark trial rows as CSV for spreadsheet or notebook analysis."""
     if run_id is None and not all_runs:
         raise HTTPException(status_code=400, detail="Pass run_id, or all_runs=true for a full dev-only export")
@@ -97,7 +97,7 @@ def export_benchmarks(run_id: str | None = None, all_runs: bool = False):
 
 
 @router.get("/{run_id}")
-def get_benchmark_run(run_id: str):
+async def get_benchmark_run(run_id: str):
     """Return one benchmark run with raw trials and aggregate metric summaries."""
     run = get_run(run_id)
     if run is None:

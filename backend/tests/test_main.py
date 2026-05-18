@@ -290,6 +290,20 @@ def test_waypoint_bounce_uses_applied_tick_delta_including_jitter():
     assert drone["lat"] == mission.bounds["max_lat"]
     assert drone["vx"] == -(simulation_module.SPEED + simulation_module.JITTER_DEG / 2)
     assert "vy" not in drone
+
+
+def test_random_wander_initializes_missing_velocity_components():
+    mission = create_test_mission(
+        bounds=Bounds(min_lat=0.0, max_lat=0.04, min_lon=0.0, max_lon=0.04),
+        drones=[Drone(id="drone1", lat=0.02, lon=0.02)],
+    )
+    mission.drones[0]["vx"] = simulation_module.SPEED
+
+    asyncio.run(simulation_module._update_drones_for_tick(mission, set(), {}))
+
+    drone = mission.drones[0]
+    assert "vx" in drone
+    assert "vy" in drone
     
 def test_stop_mission():
     mission_data = {

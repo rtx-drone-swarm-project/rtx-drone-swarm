@@ -312,7 +312,7 @@ async def _update_drones_for_tick(mission: Mission, live_drone_ids: set[str], wa
                 _bounce_entity(drone, bounds, 0.0, 0.0)
         elif not has_live_telemetry:
             # If no centroid exists yet, fall back to bounded random wandering.
-            if "vx" not in drone:
+            if "vx" not in drone or "vy" not in drone:
                 angle = rng.uniform(0, 2 * math.pi)
                 drone["vx"] = SPEED * math.cos(angle)
                 drone["vy"] = SPEED * math.sin(angle)

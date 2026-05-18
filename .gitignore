@@ -20,6 +20,7 @@ watch_*
 *.pyc
 backend/data/*.db
 backend/data/*.db-*
+backend/data/metrics_runs/
 
 # Allowlist
 !__init__.py

@@ -31,14 +31,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import math
 import random
 import statistics
 import sys
+from pathlib import Path
 from typing import Any
 
 from app.algorithms import get_algorithm          # noqa: F401 — triggers registry import
-from app.benchmark import ALGORITHM_SEED_OFFSETS, make_run_id, run_headless_trial
+from app.benchmark import SCENARIO_PROFILES, _build_scenario, make_run_id, run_headless_trial
 from app.benchmark_db import (
     aggregate_trials,
     create_run,
@@ -47,163 +49,6 @@ from app.benchmark_db import (
     init_db,
     insert_trial,
 )
-
-# ---------------------------------------------------------------------------
-# Scenario profile builders
-# ---------------------------------------------------------------------------
-
-def _build_scenario_uniform_random(
-    bounds: dict[str, float],
-    drone_count: int,
-    target_count: int,
-    scenario_seed: int,
-) -> dict[str, list[dict[str, Any]]]:
-    rng = random.Random(scenario_seed)
-    return {
-        "drones": [
-            {
-                "id": f"d{i + 1}",
-                "lat": rng.uniform(bounds["min_lat"], bounds["max_lat"]),
-                "lon": rng.uniform(bounds["min_lon"], bounds["max_lon"]),
-                "status": "idle",
-            }
-            for i in range(drone_count)
-        ],
-        "targets": [
-            {
-                "id": f"t{i + 1}",
-                "lat": rng.uniform(bounds["min_lat"], bounds["max_lat"]),
-                "lon": rng.uniform(bounds["min_lon"], bounds["max_lon"]),
-                "status": "wandering",
-                "assigned_drone_id": None,
-                "movement": "stationary",
-            }
-            for i in range(target_count)
-        ],
-    }
-
-
-def _build_scenario_clustered_targets(
-    bounds: dict[str, float],
-    drone_count: int,
-    target_count: int,
-    scenario_seed: int,
-) -> dict[str, list[dict[str, Any]]]:
-    """Targets placed within a random 30% sub-region; drones placed randomly."""
-    rng = random.Random(scenario_seed)
-    lat_range = bounds["max_lat"] - bounds["min_lat"]
-    lon_range = bounds["max_lon"] - bounds["min_lon"]
-    # Cluster anchor — leave 30% margin so the sub-region fits inside bounds
-    cluster_w = 0.3 * lat_range
-    cluster_h = 0.3 * lon_range
-    anchor_lat = rng.uniform(bounds["min_lat"], bounds["max_lat"] - cluster_w)
-    anchor_lon = rng.uniform(bounds["min_lon"], bounds["max_lon"] - cluster_h)
-    return {
-        "drones": [
-            {
-                "id": f"d{i + 1}",
-                "lat": rng.uniform(bounds["min_lat"], bounds["max_lat"]),
-                "lon": rng.uniform(bounds["min_lon"], bounds["max_lon"]),
-                "status": "idle",
-            }
-            for i in range(drone_count)
-        ],
-        "targets": [
-            {
-                "id": f"t{i + 1}",
-                "lat": rng.uniform(anchor_lat, anchor_lat + cluster_w),
-                "lon": rng.uniform(anchor_lon, anchor_lon + cluster_h),
-                "status": "wandering",
-                "assigned_drone_id": None,
-                "movement": "stationary",
-            }
-            for i in range(target_count)
-        ],
-    }
-
-
-def _build_scenario_wandering_hikers(
-    bounds: dict[str, float],
-    drone_count: int,
-    target_count: int,
-    scenario_seed: int,
-) -> dict[str, list[dict[str, Any]]]:
-    """Targets start at random positions and move each tick."""
-    rng = random.Random(scenario_seed)
-    return {
-        "drones": [
-            {
-                "id": f"d{i + 1}",
-                "lat": rng.uniform(bounds["min_lat"], bounds["max_lat"]),
-                "lon": rng.uniform(bounds["min_lon"], bounds["max_lon"]),
-                "status": "idle",
-            }
-            for i in range(drone_count)
-        ],
-        "targets": [
-            {
-                "id": f"t{i + 1}",
-                "lat": rng.uniform(bounds["min_lat"], bounds["max_lat"]),
-                "lon": rng.uniform(bounds["min_lon"], bounds["max_lon"]),
-                "status": "wandering",
-                "assigned_drone_id": None,
-                "movement": "moving",
-            }
-            for i in range(target_count)
-        ],
-    }
-
-
-def _build_scenario_corridor_route(
-    bounds: dict[str, float],
-    drone_count: int,
-    target_count: int,
-    scenario_seed: int,
-) -> dict[str, list[dict[str, Any]]]:
-    """Moving targets placed along a diagonal corridor; drones near one end."""
-    rng = random.Random(scenario_seed)
-    lat_range = bounds["max_lat"] - bounds["min_lat"]
-    lon_range = bounds["max_lon"] - bounds["min_lon"]
-    corridor_width = 0.15  # fraction of each axis
-
-    # Drones staged near the bottom-left corner
-    drones = []
-    for i in range(drone_count):
-        drones.append({
-            "id": f"d{i + 1}",
-            "lat": rng.uniform(bounds["min_lat"], bounds["min_lat"] + 0.25 * lat_range),
-            "lon": rng.uniform(bounds["min_lon"], bounds["min_lon"] + 0.25 * lon_range),
-            "status": "idle",
-        })
-
-    # Targets scattered along the main diagonal ± corridor_width/2
-    targets = []
-    for i in range(target_count):
-        t = rng.random()  # position along the diagonal [0, 1]
-        perp = rng.uniform(-corridor_width / 2, corridor_width / 2)
-        # Diagonal direction: both lat and lon increase together
-        lat = bounds["min_lat"] + (t + perp) * lat_range
-        lon = bounds["min_lon"] + (t + perp) * lon_range
-        lat = max(bounds["min_lat"], min(bounds["max_lat"], lat))
-        lon = max(bounds["min_lon"], min(bounds["max_lon"], lon))
-        targets.append({
-            "id": f"t{i + 1}",
-            "lat": lat,
-            "lon": lon,
-            "status": "wandering",
-            "assigned_drone_id": None,
-            "movement": "moving",
-        })
-
-    return {"drones": drones, "targets": targets}
-
-
-_PROFILE_BUILDERS = {
-    "uniform_random": (_build_scenario_uniform_random, True),
-    "clustered_targets": (_build_scenario_clustered_targets, True),
-    "wandering_hikers": (_build_scenario_wandering_hikers, False),
-    "corridor_route": (_build_scenario_corridor_route, False),
-}
 
 # ---------------------------------------------------------------------------
 # Derived stats helpers
@@ -351,13 +196,12 @@ async def _run(
     timeout_seconds: int,
     seed: int | None,
     output_csv: str | None,
+    output_dir: str | None,
 ) -> None:
-    if scenario_profile not in _PROFILE_BUILDERS:
+    if scenario_profile not in SCENARIO_PROFILES:
         print(f"Unknown scenario profile {scenario_profile!r}. "
-              f"Choose from: {', '.join(_PROFILE_BUILDERS)}", file=sys.stderr)
+              f"Choose from: {', '.join(SCENARIO_PROFILES)}", file=sys.stderr)
         sys.exit(1)
-
-    builder, static_targets = _PROFILE_BUILDERS[scenario_profile]
 
     base_seed = seed if seed is not None else random.SystemRandom().randint(1, 2_147_483_647)
     run_id = make_run_id()
@@ -391,9 +235,8 @@ async def _run(
     try:
         for iteration in range(iterations):
             scenario_seed = base_seed + iteration
-            scenario = builder(bounds, drone_count, target_count, scenario_seed)
+            scenario = _build_scenario(bounds, drone_count, target_count, scenario_seed, scenario_profile)
             for algo in algorithms:
-                algo_seed = scenario_seed + ALGORITHM_SEED_OFFSETS.get(algo, 909)
                 trial = await run_headless_trial(
                     run_id=run_id,
                     algorithm=algo,
@@ -403,7 +246,8 @@ async def _run(
                     drone_starts=scenario["drones"],
                     target_starts=scenario["targets"],
                     timeout_seconds=timeout_seconds,
-                    static_targets=static_targets,
+                    scenario_profile=scenario_profile,
+                    static_targets=not bool(scenario["targets_move"]),
                 )
                 insert_trial(trial)
                 trials.append(trial)
@@ -427,7 +271,13 @@ async def _run(
     _print_summary(run_id, algorithms, trials, scenario_profile, iterations)
 
     # CSV export
-    csv_path = output_csv or f"bench_{run_id}_{scenario_profile}.csv"
+    if output_csv:
+        csv_path = Path(output_csv)
+    elif output_dir:
+        csv_path = Path(output_dir) / f"raw_{scenario_profile}.csv"
+    else:
+        csv_path = Path(f"bench_{run_id}_{scenario_profile}.csv")
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
     csv_data = export_trials_csv(run_id)
     with open(csv_path, "w", newline="") as fh:
         fh.write(csv_data)
@@ -458,7 +308,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--scenario-profile",
         default="uniform_random",
-        choices=list(_PROFILE_BUILDERS),
+        choices=list(SCENARIO_PROFILES),
         help="Scenario profile for target/drone placement (default: uniform_random)",
     )
     p.add_argument("--min-lat", type=float, required=True)
@@ -485,11 +335,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output", default=None,
         help="CSV output file path (default: bench_<run_id>_<profile>.csv)",
     )
+    p.add_argument(
+        "--output-dir", default=None,
+        help="Directory for raw_<scenario_profile>.csv output. Ignored when --output is set.",
+    )
+    p.add_argument(
+        "--log-level",
+        default="ERROR",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Python logging threshold for algorithm internals (default: ERROR).",
+    )
     return p
 
 
 def main() -> None:
     args = _build_parser().parse_args()
+    logging.basicConfig(level=getattr(logging, args.log_level))
+    logging.getLogger().setLevel(getattr(logging, args.log_level))
     algorithms = [a.strip() for a in args.algorithms.split(",") if a.strip()]
     if not algorithms:
         print("No algorithms specified.", file=sys.stderr)
@@ -511,6 +373,7 @@ def main() -> None:
             timeout_seconds=args.timeout,
             seed=args.seed,
             output_csv=args.output,
+            output_dir=args.output_dir,
         )
     )
 
