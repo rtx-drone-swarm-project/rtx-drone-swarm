@@ -47,7 +47,10 @@ class VoronoiACOHybridCoverage(BaseSearchAlgorithm):
         navs = mission._rtx_navigators
         pcfg = mission._rtx_pcfg
         
-        valid_drones = [d for d in free_drones if d.get("lat") is not None]
+        valid_drones = [
+            d for d in free_drones
+            if d.get("lat") is not None and d.get("lon") is not None
+        ]
         if not valid_drones:
             return {}
 

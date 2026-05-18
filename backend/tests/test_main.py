@@ -7,7 +7,17 @@ from app import app
 from app.models import Mission, MissionCreate, Drone, Bounds
 from app.main import mission_db, simulation_loop, manager, _sync_mission_drones_with_sitl, sitl_bridge
 from app.algorithms.base import DETECTION_RADIUS
-from app.algorithms.boustrophedon import _row_endpoints_lawnmower, _build_dense_grid, _voronoi_assign, _balanced_partition_seeds, _match_drones_to_seeds, _row_endpoints_lawnmower, VoronoiBoustrophedon, _REACH_RADIUS, _partition_shape, _partition_seeds
+from app.algorithms.boustrophedon import (
+    _row_endpoints_lawnmower,
+    _build_dense_grid,
+    _voronoi_assign,
+    _balanced_partition_seeds,
+    _match_drones_to_seeds,
+    VoronoiBoustrophedon,
+    _REACH_RADIUS,
+    _partition_shape,
+    _partition_seeds,
+)
 from app.voronoi import lloyd_step
 from app.algorithms.voronoi import VoronoiCoverage
 from app.algorithms.base import build_search_grid
@@ -1380,6 +1390,25 @@ def test_get_algorithm_returns_distinct_voronoi_aco_instances():
     a = get_algorithm("voronoi_aco")
     b = get_algorithm("voronoi_aco")
     assert a is not b
+
+
+def test_vaco_ignores_drones_without_longitude():
+    from types import SimpleNamespace
+    from app.algorithms.vaco import VoronoiACOHybridCoverage
+
+    mission = SimpleNamespace(
+        bounds={"min_lat": 0.0, "max_lat": 0.04, "min_lon": 0.0, "max_lon": 0.04},
+        elapsed_seconds=0.0,
+    )
+    algo = VoronoiACOHybridCoverage()
+    algo.initialize(mission)
+
+    free_drones = [
+        {"id": "d-missing-lon", "lat": 0.01, "lon": None},
+        {"id": "d-ok", "lat": 0.02, "lon": 0.02},
+    ]
+    waypoints = algo.get_target_waypoints(mission, free_drones)
+    assert set(waypoints.keys()) == {"d-ok"}
 
 
 def test_algorithms_endpoint_lists_discovered_registry_metadata():

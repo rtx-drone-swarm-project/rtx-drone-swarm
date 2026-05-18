@@ -229,7 +229,7 @@ def _balanced_lloyd_assignment(centroids: np.ndarray, grid_points: np.ndarray, k
     
     for _ in range(n_iter):
         # Adjusted distances based on current balance weights
-        adj_dists = dists - weights
+        adj_dists = dists + weights
         assignment = np.argmin(adj_dists, axis=1)
         
         # Update weights: if a drone has too many points, increase its weight 
