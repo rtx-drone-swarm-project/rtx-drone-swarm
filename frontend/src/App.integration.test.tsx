@@ -76,6 +76,20 @@ describe("App integration", () => {
       if (url.endsWith("/missions")) {
         return Promise.resolve({ ok: true, json: async () => ({ id: "m1", status: "idle", progress: 0 }) });
       }
+      if (url.endsWith("/missions/m1/confirm-search-area")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m1",
+            status: "idle",
+            grid: [[33.55, -117.25], [33.55, -117.15], [33.45, -117.25], [33.45, -117.15]],
+            grid_shape: [2, 2],
+            probability_grid: [0.25, 0.25, 0.25, 0.25],
+            search_area_confirmed: true,
+            probability_grid_confirmed: false
+          })
+        });
+      }
       if (url.endsWith("/missions/m1/start")) {
         return Promise.resolve({ ok: true, json: async () => ({ id: "m1", status: "running", progress: 0, targets: [] }) });
       }
@@ -215,6 +229,48 @@ describe("App integration", () => {
     await waitFor(() => {
       const latestProps = mocks.mapPanelProps[mocks.mapPanelProps.length - 1];
       expect(latestProps.droneTrails["d1"]).toEqual([[33.5, -117.2], [33.51, -117.21]]);
+    });
+  });
+
+  it("confirms the search area and switches the navigation panel into probability-map mode", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+
+    const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/algorithms")) {
+        return Promise.resolve({ ok: true, json: async () => ({ algorithms: [] }) });
+      }
+      if (url.endsWith("/missions")) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m1", status: "idle" }) });
+      }
+      if (url.endsWith("/missions/m1/confirm-search-area")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m1",
+            status: "idle",
+            grid: [[33.55, -117.25], [33.55, -117.15], [33.45, -117.25], [33.45, -117.15]],
+            grid_shape: [2, 2],
+            probability_grid: [0.25, 0.25, 0.25, 0.25],
+            search_area_confirmed: true,
+            probability_grid_confirmed: false
+          })
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m1/confirm-search-area"))).toBe(true);
+      expect(screen.getByText("Hold Shift and drag on the map to select a region.")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
     });
   });
 

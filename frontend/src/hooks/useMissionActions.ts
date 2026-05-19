@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { createMissionClient } from "../api/missionClient";
-import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionState, PlacedHiker, Target, ValidDrone } from "../types/mission";
+import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionHikerInput, MissionState, PlacedHiker, Target, ValidDrone } from "../types/mission";
 import type { MissionStatus } from "../types/ws";
+import { build } from "vite";
 
 type UseMissionActionsArgs = {
   apiBase: string;
@@ -51,6 +52,39 @@ function toMissionDroneInput(drone: ValidDrone): MissionDroneInput {
   return payload;
 }
 
+function toMissionHikerInput(hiker: PlacedHiker): MissionHikerInput {
+  const payload: MissionHikerInput = {
+    id: hiker.id,
+    lat: hiker.lat,
+    lon: hiker.lon,
+    found: false,
+  };
+
+  if (hiker.movement) payload.movement = hiker.movement;
+
+  return payload;
+}
+
+function buildMissionDrones(
+  validDrones: ValidDrone[],
+  validDroneCount: number,
+  bounds: Bounds
+): MissionDroneInput[] {
+  if (validDroneCount > 0) {
+    return validDrones.map(toMissionDroneInput);
+  }
+
+  return Array.from({ length: 15 }).map((_, i) =>
+    toMissionDroneInput({
+      id: `mock-drone-${i}`,
+      lat: bounds.min_lat + Math.random() * (bounds.max_lat - bounds.min_lat),
+      lon: bounds.min_lon + Math.random() * (bounds.max_lon - bounds.min_lon),
+      alt: 100,
+      heading: Math.random() * 360,
+    })
+  );
+}
+
 export default function useMissionActions({
   apiBase,
   missionLocked,
@@ -75,26 +109,8 @@ export default function useMissionActions({
   const missionClient = useMemo(() => createMissionClient(apiBase), [apiBase]);
 
   const startMission = async () => {
-    if (missionLocked) {
+    if (!mission?.id || missionLocked || !selectedBounds) {
       return;
-    }
-
-    if (!selectedBounds) {
-      return;
-    }
-
-    let missionDrones: MissionDroneInput[] = validDrones.map(toMissionDroneInput);
-
-    if (validDroneCount === 0) {
-      missionDrones = Array.from({ length: 15 }).map((_, i) =>
-        toMissionDroneInput({
-          id: `mock-drone-${i}`,
-          lat: selectedBounds.min_lat + Math.random() * (selectedBounds.max_lat - selectedBounds.min_lat),
-          lon: selectedBounds.min_lon + Math.random() * (selectedBounds.max_lon - selectedBounds.min_lon),
-          alt: 100,
-          heading: Math.random() * 360
-        })
-      );
     }
 
     setMissionStatus("searching");
@@ -106,26 +122,15 @@ export default function useMissionActions({
     setSummaryMissionId(null);
     setHikerLabelById({});
 
+    const missionDrones: MissionDroneInput[] = buildMissionDrones(validDrones, validDroneCount, selectedBounds);
+    const missionHikers: MissionHikerInput[] = placedHikers.map(toMissionHikerInput);
     try {
-      const placedHikerPayload = placedHikers.map((hiker) => ({
-        id: hiker.id,
-        lat: hiker.lat,
-        lon: hiker.lon,
-        found: false,
-        movement: hiker.movement
-      }));
-
-      const created = await missionClient.createMission({
-        name: `SAR-${new Date().toISOString()}`,
-        bounds: selectedBounds,
+      const payload = {
         drones: missionDrones,
+        hikers: missionHikers,
         algorithm: selectedAlgorithm,
-        ...(placedHikerPayload.length ? { hikers: placedHikerPayload } : {})
-      });
-
-      setMission(created);
-
-      const started = await missionClient.startMission(created.id, selectedAlgorithm);
+      }
+      const started = await missionClient.startMission(mission.id, payload);
       setMission(started);
       setMissionStatus("searching");
       setProgress(started.progress ?? 0);

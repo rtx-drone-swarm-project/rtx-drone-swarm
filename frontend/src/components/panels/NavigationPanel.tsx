@@ -1,32 +1,55 @@
 import CollapsibleSection from "../common/CollapsibleSection";
 
 type NavigationPanelProps = {
+  probabilityMapMode: boolean;
   topLeftLat: string;
   topLeftLon: string;
   bottomRightLat: string;
   bottomRightLon: string;
   isValidBounds: boolean;
   missionActive: boolean;
+  searchAreaConfirmed: boolean;
   onTopLeftLatChange: (value: string) => void;
   onTopLeftLonChange: (value: string) => void;
   onBottomRightLatChange: (value: string) => void;
   onBottomRightLonChange: (value: string) => void;
   onSetSearchArea: () => void;
+  onConfirmSearchArea: () => void;
+  onConfirmLabelledRegions: () => void;
 };
 
 export default function NavigationPanel({
+  probabilityMapMode,
   topLeftLat,
   topLeftLon,
   bottomRightLat,
   bottomRightLon,
   isValidBounds,
   missionActive,
+  searchAreaConfirmed,
   onTopLeftLatChange,
   onTopLeftLonChange,
   onBottomRightLatChange,
   onBottomRightLonChange,
-  onSetSearchArea
+  onSetSearchArea,
+  onConfirmSearchArea,
+  onConfirmLabelledRegions
 }: NavigationPanelProps) {
+  if (probabilityMapMode) {
+    return (
+      <CollapsibleSection title="Navigation">
+        <div className="hint-text">Hold Shift and drag on the map to select a region.</div>
+        <button
+          className="action-btn start"
+          onClick={onConfirmLabelledRegions}
+          disabled={missionActive}
+        >
+          Confirm Labelled Regions
+        </button>
+      </CollapsibleSection>
+    );
+  }
+
   return (
     <CollapsibleSection title="Navigation">
       <label className="field">
@@ -81,6 +104,13 @@ export default function NavigationPanel({
         disabled={!isValidBounds || missionActive}
       >
         Set Search Area
+      </button>
+      <button
+        className="action-btn start"
+        onClick={onConfirmSearchArea}
+        disabled={!isValidBounds || !searchAreaConfirmed || missionActive}
+      >
+        Confirm Search Area
       </button>
     </CollapsibleSection>
   );

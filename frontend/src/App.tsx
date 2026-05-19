@@ -103,6 +103,43 @@ function isValidSearchAreaDraft(corners: {
   return bounds.min_lat !== bounds.max_lat && bounds.min_lon !== bounds.max_lon;
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function hasText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function toMissionDroneInput(drone: ValidDrone) {
+  const payload: {
+    id: string | number;
+    lat: number;
+    lon: number;
+    sysid?: number | null;
+    alt?: number;
+    heading?: number;
+    groundspeed?: number;
+    target_lat?: number;
+    target_lon?: number;
+    role?: string | null;
+  } = {
+    id: drone.id,
+    lat: drone.lat,
+    lon: drone.lon
+  };
+
+  if (isFiniteNumber(drone.sysid)) payload.sysid = drone.sysid;
+  if (isFiniteNumber(drone.alt)) payload.alt = drone.alt;
+  if (isFiniteNumber(drone.heading)) payload.heading = drone.heading;
+  if (isFiniteNumber(drone.groundspeed)) payload.groundspeed = drone.groundspeed;
+  if (isFiniteNumber(drone.target_lat)) payload.target_lat = drone.target_lat;
+  if (isFiniteNumber(drone.target_lon)) payload.target_lon = drone.target_lon;
+  if (hasText(drone.role)) payload.role = drone.role;
+
+  return payload;
+}
+
 export default function App() {
   const apiPort = getApiPort();
   const apiBase = useMemo(() => getApiBase(apiPort), [apiPort]);
@@ -402,6 +439,7 @@ export default function App() {
   const missionActive = missionStatus !== "idle" && missionStatus !== "mission_complete";
   const missionComplete = missionStatus === "mission_complete";
   const hikerPlacementEditable = selectedBounds != null && !missionActive && !missionLocked;
+  const probabilityMapMode = mission?.search_area_confirmed === true;
 
   useEffect(() => {
     if (!hikerPlacementEditable) {
@@ -545,9 +583,43 @@ export default function App() {
     setIsValidBounds(true);
     setSelectedBounds(bounds);
     setMapCenter(getBoundsCenter(bounds));
-    setPlacedHikers((prev) => prev.filter((hiker) => isPointInsideBounds(hiker.lat, hiker.lon, bounds)));
-    setIsPlacingHiker(false);
   }, [bottomRightLat, bottomRightLon, topLeftLat, topLeftLon, updateSearchAreaFields]);
+
+  const onConfirmSearchArea = useCallback(async () => {
+    if (!selectedBounds) {
+      setIsValidBounds(false);
+      return;
+    }
+
+    let missionRecord = mission;
+
+    try {
+      if (!missionRecord?.id) {
+        missionRecord = await apiClient.createMission({
+          name: `SAR-${new Date().toISOString()}`,
+          bounds: selectedBounds,
+        });
+      }
+
+      const confirmedMission = await apiClient.confirmSearchArea(missionRecord.id, {
+        bounds: selectedBounds
+      });
+      setMission(confirmedMission);
+    } catch (err) {
+      console.warn(`Confirm search area failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [apiClient, mission, selectedBounds, setMission]);
+
+  const onConfirmLabelledRegions = useCallback(async () => {
+    if (!mission?.id) return;
+
+    try {
+      const confirmedMission = await apiClient.confirmProbabilityGrid(mission.id);
+      setMission(confirmedMission);
+    } catch (err) {
+      console.warn(`Confirm labelled regions failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [apiClient, mission, setMission]);
 
   const onAlgorithmChange = useCallback((algorithm: AlgorithmOption) => {
     setSelectedAlgorithm(algorithm);
@@ -675,17 +747,21 @@ export default function App() {
 
         <aside className="right-rail">
           <NavigationPanel
+            probabilityMapMode={probabilityMapMode}
             topLeftLat={topLeftLat}
             topLeftLon={topLeftLon}
             bottomRightLat={bottomRightLat}
             bottomRightLon={bottomRightLon}
             isValidBounds={isValidBounds}
             missionActive={missionActive}
+            searchAreaConfirmed={selectedBounds != null}
             onTopLeftLatChange={onTopLeftLatChange}
             onTopLeftLonChange={onTopLeftLonChange}
             onBottomRightLatChange={onBottomRightLatChange}
             onBottomRightLonChange={onBottomRightLonChange}
             onSetSearchArea={onSetSearchArea}
+            onConfirmSearchArea={onConfirmSearchArea}
+            onConfirmLabelledRegions={onConfirmLabelledRegions}
           />
           <ActionsPanel
             selectedBounds={selectedBounds}
