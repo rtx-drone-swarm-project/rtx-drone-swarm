@@ -169,9 +169,21 @@ def rectangle_bounds_to_grid_mask(
     grid_shape: tuple[int, int] | list[int],
     rect_bounds: dict,
 ) -> np.ndarray:
-    """Map a lat/lon rectangle to a boolean mask over the discrete search grid."""
+    """
+    Map a lat/lon rectangle to a boolean mask over the discrete search grid.
+
+    Assumes search_grid was built with the convention:
+        search_grid shape = (rows * cols, 2)
+        search_grid[:, 0] = latitude
+        search_grid[:, 1] = longitude
+
+    Assumes flattening order:
+        flat_index = row * cols + col
+        row = latitude index
+        col = longitude index
+    """
     required_keys = {"min_lat", "max_lat", "min_lon", "max_lon"}
-    missing = required_keys - rect_bounds.keys()
+    missing = required_keys - set(rect_bounds.keys())
     if missing:
         raise ValueError(f"rect_bounds missing required keys: {sorted(missing)}")
 
@@ -181,29 +193,44 @@ def rectangle_bounds_to_grid_mask(
     if flat_grid.shape != (rows * cols, 2):
         raise ValueError("search_grid must have shape (rows * cols, 2) matching grid_shape")
 
-    min_lat = min(float(rect_bounds["min_lat"]), float(rect_bounds["max_lat"]))
-    max_lat = max(float(rect_bounds["min_lat"]), float(rect_bounds["max_lat"]))
-    min_lon = min(float(rect_bounds["min_lon"]), float(rect_bounds["max_lon"]))
-    max_lon = max(float(rect_bounds["min_lon"]), float(rect_bounds["max_lon"]))
+    lat_a = float(rect_bounds["min_lat"])
+    lat_b = float(rect_bounds["max_lat"])
+    lon_a = float(rect_bounds["min_lon"])
+    lon_b = float(rect_bounds["max_lon"])
 
-    values = np.array([min_lat, max_lat, min_lon, max_lon], dtype=float)
+    values = np.array([lat_a, lat_b, lon_a, lon_b], dtype=float)
     if not np.all(np.isfinite(values)):
         raise ValueError("rect_bounds values must be finite numbers")
 
+    min_lat = min(lat_a, lat_b)
+    max_lat = max(lat_a, lat_b)
+    min_lon = min(lon_a, lon_b)
+    max_lon = max(lon_a, lon_b)
+
     lats = flat_grid[:, 0]
     lons = flat_grid[:, 1]
-    matches = (
-        (lats >= min_lat) &
-        (lats <= max_lat) &
-        (lons >= min_lon) &
-        (lons <= max_lon)
+
+    grid_min_lat = float(np.min(lats))
+    grid_max_lat = float(np.max(lats))
+    grid_min_lon = float(np.min(lons))
+    grid_max_lon = float(np.max(lons))
+
+    intersects_grid = not (
+        max_lat < grid_min_lat
+        or min_lat > grid_max_lat
+        or max_lon < grid_min_lon
+        or min_lon > grid_max_lon
     )
 
-    if not np.any(matches):
-        center_lat = (min_lat + max_lat) / 2.0
-        center_lon = (min_lon + max_lon) / 2.0
-        distances_sq = (lats - center_lat) ** 2 + (lons - center_lon) ** 2
-        matches[int(np.argmin(distances_sq))] = True
+    if not intersects_grid:
+        return np.zeros((rows, cols), dtype=bool)
+
+    matches = (
+        (lats >= min_lat)
+        & (lats <= max_lat)
+        & (lons >= min_lon)
+        & (lons <= max_lon)
+    )
 
     return matches.reshape((rows, cols))
 

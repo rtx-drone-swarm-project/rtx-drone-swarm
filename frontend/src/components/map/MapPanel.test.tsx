@@ -1,6 +1,6 @@
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import MapPanel from "./MapPanel";
+import MapPanel, { getGridCellBounds } from "./MapPanel";
 
 const flyTo = vi.fn();
 const getCenter = vi.fn(() => ({ lat: 33.5, lng: -117.2 }));
@@ -12,6 +12,7 @@ const once = vi.fn((eventName: string, handler: () => void) => {
 });
 const off = vi.fn();
 const mocks = vi.hoisted(() => ({
+  mapContainer: vi.fn((_props: Record<string, unknown>) => null),
   marker: vi.fn((_props: Record<string, unknown>) => null),
   polyline: vi.fn((_props: Record<string, unknown>) => null),
   rectangle: vi.fn((_props: Record<string, unknown>) => null),
@@ -23,7 +24,10 @@ const mocks = vi.hoisted(() => ({
 let mapEventHandlers: Record<string, () => void> = {};
 
 vi.mock("react-leaflet", () => ({
-  MapContainer: ({ children }: { children: React.ReactNode }) => <div data-testid="map-container">{children}</div>,
+  MapContainer: (props: { children: React.ReactNode }) => {
+    mocks.mapContainer(props);
+    return <div data-testid="map-container">{props.children}</div>;
+  },
   TileLayer: () => null,
   Marker: mocks.marker,
   Polyline: mocks.polyline,
@@ -98,6 +102,7 @@ describe("MapPanel", () => {
     mocks.marker.mockClear();
     mocks.polyline.mockClear();
     mocks.rectangle.mockClear();
+    mocks.mapContainer.mockClear();
     mocks.makeCentroidIcon.mockClear();
     mocks.makeDroneIcon.mockClear();
     mocks.makePlacedHikerIcon.mockClear();
@@ -353,8 +358,29 @@ describe("MapPanel", () => {
       .filter((props) => (props.pathOptions as { fillColor?: string } | undefined)?.fillColor === "#f97316");
 
     expect(temporaryCellCalls).toHaveLength(2);
-    expect(temporaryCellCalls[0]?.bounds).toEqual([[33.5, -117.2], [33.55, -117.15]]);
-    expect(temporaryCellCalls[1]?.bounds).toEqual([[33.45, -117.25], [33.5, -117.2]]);
+    expect(temporaryCellCalls[0]?.bounds).toEqual([[33.45, -117.2], [33.5, -117.15]]);
+    expect(temporaryCellCalls[1]?.bounds).toEqual([[33.5, -117.25], [33.55, -117.2]]);
+  });
+
+  it("disables Leaflet box zoom so shift-drag does not auto-zoom", () => {
+    render(<MapPanel {...defaultProps} probabilityMapMode />);
+
+    const mapContainerProps = mocks.mapContainer.mock.calls[0]?.[0];
+    expect(mapContainerProps?.boxZoom).toBe(false);
+  });
+
+  it("maps grid cells with row as latitude index and col as longitude index", () => {
+    const bounds = {
+      min_lat: 10,
+      max_lat: 16,
+      min_lon: 20,
+      max_lon: 28,
+    };
+
+    expect(getGridCellBounds(bounds, [3, 4], [0, 0])).toEqual([[10, 20], [12, 22]]);
+    expect(getGridCellBounds(bounds, [3, 4], [2, 3])).toEqual([[14, 26], [16, 28]]);
+    expect(getGridCellBounds(bounds, [3, 4], [0, 1])).toEqual([[10, 22], [12, 24]]);
+    expect(getGridCellBounds(bounds, [3, 4], [1, 0])).toEqual([[12, 20], [14, 22]]);
   });
 
   it("hides placed hiker markers that already exist as runtime targets", () => {

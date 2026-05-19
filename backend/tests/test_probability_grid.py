@@ -1,5 +1,6 @@
 import numpy as np
 
+from app.algorithms.grid import build_search_grid
 from app.probability_grid import (
     REGION_LABEL_CODES,
     apply_operator_label_grid,
@@ -10,6 +11,17 @@ from app.probability_grid import (
     rectangle_bounds_to_grid_mask,
     smooth_probability_grid,
 )
+
+
+METERS_PER_DEGREE_LAT = 111_320.0
+
+
+def meters_to_lat_degrees(distance_m: float) -> float:
+    return distance_m / METERS_PER_DEGREE_LAT
+
+
+def meters_to_lon_degrees(distance_m: float, mid_lat_deg: float = 0.0) -> float:
+    return distance_m / (METERS_PER_DEGREE_LAT * np.cos(np.radians(mid_lat_deg)))
 
 
 def test_normal_grid_with_all_normal_labels_normalizes_to_one():
@@ -129,10 +141,65 @@ def test_all_excluded_cells_remain_zero_without_smoothing():
     assert np.array_equal(probability_grid, np.zeros((2, 2), dtype=float))
 
 
+def test_build_search_grid_uses_rectangular_shape_and_cell_centers_for_wide_bounds():
+    bounds = {
+        "min_lat": 0.0,
+        "max_lat": meters_to_lat_degrees(300.0),
+        "min_lon": 0.0,
+        "max_lon": meters_to_lon_degrees(500.0),
+    }
+
+    search_grid, grid_shape = build_search_grid(
+        bounds,
+        target_cell_size_m=100.0,
+        min_rows=1,
+        min_cols=1,
+    )
+
+    rows, cols = grid_shape
+    assert cols > rows
+    assert search_grid.shape == (rows * cols, 2)
+
+    lat_step_deg = (bounds["max_lat"] - bounds["min_lat"]) / rows
+    lon_step_deg = (bounds["max_lon"] - bounds["min_lon"]) / cols
+
+    assert np.allclose(
+        search_grid[0],
+        [bounds["min_lat"] + (lat_step_deg / 2.0), bounds["min_lon"] + (lon_step_deg / 2.0)],
+    )
+
+    adjacent_lat_spacing_m = (search_grid[cols, 0] - search_grid[0, 0]) * METERS_PER_DEGREE_LAT
+    adjacent_lon_spacing_m = (search_grid[1, 1] - search_grid[0, 1]) * METERS_PER_DEGREE_LAT
+
+    assert np.isclose(adjacent_lat_spacing_m, 100.0, atol=1.0)
+    assert np.isclose(adjacent_lon_spacing_m, 100.0, atol=1.0)
+    assert np.isclose(adjacent_lat_spacing_m, adjacent_lon_spacing_m, atol=1.0)
+
+
+def test_build_search_grid_uses_more_rows_than_cols_for_tall_bounds():
+    bounds = {
+        "min_lat": 0.0,
+        "max_lat": meters_to_lat_degrees(500.0),
+        "min_lon": 0.0,
+        "max_lon": meters_to_lon_degrees(300.0),
+    }
+
+    search_grid, grid_shape = build_search_grid(
+        bounds,
+        target_cell_size_m=100.0,
+        min_rows=1,
+        min_cols=1,
+    )
+
+    rows, cols = grid_shape
+    assert rows > cols
+    assert search_grid.shape == (rows * cols, 2)
+
+
 def test_rectangle_covering_whole_bounds_selects_all_cells():
     search_grid = np.array([
-        [2.0, 10.0], [2.0, 20.0],
         [1.0, 10.0], [1.0, 20.0],
+        [2.0, 10.0], [2.0, 20.0],
     ], dtype=float)
 
     mask = rectangle_bounds_to_grid_mask(
@@ -147,14 +214,14 @@ def test_rectangle_covering_whole_bounds_selects_all_cells():
 
 def test_small_rectangle_around_one_grid_point_selects_that_cell():
     search_grid = np.array([
-        [2.0, 10.0], [2.0, 20.0],
         [1.0, 10.0], [1.0, 20.0],
+        [2.0, 10.0], [2.0, 20.0],
     ], dtype=float)
 
     mask = rectangle_bounds_to_grid_mask(
         search_grid,
         [2, 2],
-        {"min_lat": 1.9, "max_lat": 2.1, "min_lon": 9.9, "max_lon": 10.1},
+        {"min_lat": 0.9, "max_lat": 1.1, "min_lon": 9.9, "max_lon": 10.1},
     )
 
     expected = np.array([
@@ -164,10 +231,10 @@ def test_small_rectangle_around_one_grid_point_selects_that_cell():
     assert np.array_equal(mask, expected)
 
 
-def test_rectangle_between_grid_points_selects_nearest_cell_fallback():
+def test_rectangle_between_grid_points_selects_no_cells():
     search_grid = np.array([
-        [2.0, 10.0], [2.0, 20.0],
         [1.0, 10.0], [1.0, 20.0],
+        [2.0, 10.0], [2.0, 20.0],
     ], dtype=float)
 
     mask = rectangle_bounds_to_grid_mask(
@@ -177,33 +244,29 @@ def test_rectangle_between_grid_points_selects_nearest_cell_fallback():
     )
 
     assert mask.shape == (2, 2)
-    assert int(mask.sum()) == 1
-    assert mask[1, 0] or mask[1, 1]
+    assert not np.any(mask)
 
 
-def test_out_of_bounds_rectangle_uses_in_bounds_matches_or_nearest_fallback():
+def test_out_of_bounds_rectangle_selects_no_cells():
     search_grid = np.array([
-        [2.0, 10.0], [2.0, 20.0], [2.0, 30.0],
         [1.0, 10.0], [1.0, 20.0], [1.0, 30.0],
+        [2.0, 10.0], [2.0, 20.0], [2.0, 30.0],
     ], dtype=float)
 
     mask = rectangle_bounds_to_grid_mask(
         search_grid,
         [2, 3],
-        {"min_lat": 1.5, "max_lat": 2.5, "min_lon": 25.0, "max_lon": 35.0},
+        {"min_lat": 5.0, "max_lat": 6.0, "min_lon": 40.0, "max_lon": 50.0},
     )
 
-    expected = np.array([
-        [False, False, True],
-        [False, False, False],
-    ], dtype=bool)
-    assert np.array_equal(mask, expected)
+    assert mask.shape == (2, 3)
+    assert not np.any(mask)
 
 
 def test_rectangle_mask_returns_shape_matching_grid_shape():
     search_grid = np.array([
-        [3.0, 10.0], [3.0, 20.0], [3.0, 30.0],
         [2.0, 10.0], [2.0, 20.0], [2.0, 30.0],
+        [3.0, 10.0], [3.0, 20.0], [3.0, 30.0],
     ], dtype=float)
 
     mask = rectangle_bounds_to_grid_mask(
@@ -213,4 +276,43 @@ def test_rectangle_mask_returns_shape_matching_grid_shape():
     )
 
     assert mask.shape == (2, 3)
-    assert int(mask.sum()) == 1
+    assert not np.any(mask)
+
+
+def test_partial_overlap_only_selects_in_bounds_centers_inside_rectangle():
+    search_grid = np.array([
+        [1.0, 10.0], [1.0, 20.0], [1.0, 30.0], [1.0, 40.0],
+        [2.0, 10.0], [2.0, 20.0], [2.0, 30.0], [2.0, 40.0],
+        [3.0, 10.0], [3.0, 20.0], [3.0, 30.0], [3.0, 40.0],
+    ], dtype=float)
+
+    mask = rectangle_bounds_to_grid_mask(
+        search_grid,
+        [3, 4],
+        {"min_lat": 1.5, "max_lat": 3.5, "min_lon": 25.0, "max_lon": 45.0},
+    )
+
+    expected = np.array([
+        [False, False, False, False],
+        [False, False, True, True],
+        [False, False, True, True],
+    ], dtype=bool)
+    assert np.array_equal(mask, expected)
+
+
+def test_rectangle_bounds_to_grid_mask_selects_expected_row_and_col():
+    search_grid = np.array([
+        [1.0, 10.0], [1.0, 20.0], [1.0, 30.0], [1.0, 40.0],
+        [2.0, 10.0], [2.0, 20.0], [2.0, 30.0], [2.0, 40.0],
+        [3.0, 10.0], [3.0, 20.0], [3.0, 30.0], [3.0, 40.0],
+    ], dtype=float)
+
+    mask = rectangle_bounds_to_grid_mask(
+        search_grid,
+        [3, 4],
+        {"min_lat": 1.9, "max_lat": 2.1, "min_lon": 29.9, "max_lon": 30.1},
+    )
+
+    expected = np.zeros((3, 4), dtype=bool)
+    expected[1, 2] = True
+    assert np.array_equal(mask, expected)

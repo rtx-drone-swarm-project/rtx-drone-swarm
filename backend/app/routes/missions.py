@@ -37,9 +37,9 @@ from app.missions import (
     _sync_mission_drones_with_sitl,
     mission_db,
 )
-from app.settings import DEFAULT_DISPATCH_HOST, DEFAULT_DISPATCH_TIMEOUT_SECONDS, DEFAULT_SEARCH_GRID_SIDE
+from app.settings import DEFAULT_DISPATCH_HOST, DEFAULT_DISPATCH_TIMEOUT_SECONDS
 from app.simulation import simulation_loop
-from app.algorithms.base import build_search_grid
+from app.algorithms.grid import build_search_grid
 from app.ws import manager
 
 
@@ -71,17 +71,18 @@ def confirm_search_area(mission_id: str, request: ConfirmSearchAreaRequest):
         raise HTTPException(status_code=404, detail="Mission not found")
 
     mission = mission_db[mission_id]
-    bounds = request.bounds.model_dump()
-    grid_side = request.grid_side or DEFAULT_SEARCH_GRID_SIDE
+    mission.bounds = request.bounds.model_dump()
+    mission.grid, mission.grid_shape = build_search_grid(
+        mission.bounds,
+        target_cell_size_m=100.0,
+    )
 
-    mission.bounds = bounds
-    mission.grid_shape = [grid_side, grid_side]
-    mission.grid = build_search_grid(bounds, n=grid_side)
-    mission.operator_label_grid = create_operator_label_grid(grid_side, grid_side)
-    mission.searchable_mask = create_searchable_mask(grid_side, grid_side)
+    rows, cols = mission.grid_shape
+    mission.operator_label_grid = create_operator_label_grid(rows, cols)
+    mission.searchable_mask = create_searchable_mask(rows, cols)
 
     probability_grid_2d, searchable_mask = build_probability_grid(
-        grid_shape=(grid_side, grid_side),
+        grid_shape=mission.grid_shape,
         operator_label_grid=mission.operator_label_grid,
         searchable_mask=mission.searchable_mask,
         smoothing_iterations=mission.probability_grid_config.get("smoothing_passes", 1),
@@ -172,9 +173,9 @@ def confirm_probability_grid(mission_id: str):
         raise HTTPException(status_code=400, detail="Operator label grid is not initialized")
 
     probability_grid_2d, searchable_mask = build_probability_grid(
-        grid_shape=tuple(mission.grid_shape),
+        grid_shape=mission.grid_shape,
         operator_label_grid=mission.operator_label_grid,
-        searchable_mask=None,
+        searchable_mask=mission.searchable_mask,
         smoothing_iterations=mission.probability_grid_config.get("smoothing_passes", 1),
     )
     if not np.any(searchable_mask):
