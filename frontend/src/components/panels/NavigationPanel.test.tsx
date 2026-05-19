@@ -4,23 +4,27 @@ import NavigationPanel from "./NavigationPanel";
 
 function renderPanel(overrides: Partial<React.ComponentProps<typeof NavigationPanel>> = {}) {
   const defaults = {
+    probabilityMapMode: false,
     topLeftLat: "33.550000",
     topLeftLon: "-117.250000",
     bottomRightLat: "33.450000",
     bottomRightLon: "-117.150000",
     isValidBounds: true,
     missionActive: false,
+    searchAreaConfirmed: true,
     onTopLeftLatChange: vi.fn(),
     onTopLeftLonChange: vi.fn(),
     onBottomRightLatChange: vi.fn(),
     onBottomRightLonChange: vi.fn(),
-    onSetSearchArea: vi.fn()
+    onSetSearchArea: vi.fn(),
+    onConfirmSearchArea: vi.fn(),
+    onConfirmLabelledRegions: vi.fn()
   };
   return render(<NavigationPanel {...defaults} {...overrides} />);
 }
 
 describe("NavigationPanel", () => {
-  it("renders four corner inputs and Set Search Area button", () => {
+  it("renders four corner inputs plus search-area actions", () => {
     renderPanel();
 
     expect(screen.getByText("Navigation")).toBeTruthy();
@@ -29,6 +33,7 @@ describe("NavigationPanel", () => {
     expect(screen.getByLabelText("Bottom-right latitude")).toBeTruthy();
     expect(screen.getByLabelText("Bottom-right longitude")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Set Search Area" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Confirm Search Area" })).toBeTruthy();
   });
 
   it("does not render the Pan to Drones button", () => {
@@ -51,10 +56,20 @@ describe("NavigationPanel", () => {
     expect(onSetSearchArea).toHaveBeenCalledTimes(1);
   });
 
+  it("calls onConfirmSearchArea when confirm button is clicked", () => {
+    const onConfirmSearchArea = vi.fn();
+    renderPanel({ onConfirmSearchArea });
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    expect(onConfirmSearchArea).toHaveBeenCalledTimes(1);
+  });
+
   it("disables Set Search Area when missionActive is true", () => {
     renderPanel({ missionActive: true });
     const btn = screen.getByRole("button", { name: "Set Search Area" }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
+    const confirmBtn = screen.getByRole("button", { name: "Confirm Search Area" }) as HTMLButtonElement;
+    expect(confirmBtn.disabled).toBe(true);
   });
 
   it("disables Set Search Area when bounds are invalid", () => {
@@ -78,5 +93,13 @@ describe("NavigationPanel", () => {
 
     fireEvent.change(screen.getByLabelText("Bottom-right longitude"), { target: { value: "-118.0" } });
     expect(onBottomRightLonChange).toHaveBeenCalledWith("-118.0");
+  });
+
+  it("renders probability-map mode with instructions and confirm button", () => {
+    renderPanel({ probabilityMapMode: true });
+
+    expect(screen.getByText("Hold Shift and drag on the map to select a region.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Set Search Area" })).toBeNull();
   });
 });

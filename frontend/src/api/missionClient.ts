@@ -4,6 +4,7 @@ import type {
   BenchmarkRun,
   BenchmarkScenarioProfile,
   MissionCreateRequest,
+  MissionStartRequest,
   MissionRecord
 } from "../types/mission";
 
@@ -17,7 +18,12 @@ async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Pro
 
 export type MissionApiClient = {
   createMission: (payload: MissionCreateRequest) => Promise<MissionRecord>;
-  startMission: (missionId: string | number, algorithm?: string) => Promise<MissionRecord>;
+  confirmSearchArea: (
+    missionId: string | number,
+    payload: { bounds: MissionCreateRequest["bounds"]; grid_side?: number }
+  ) => Promise<MissionRecord>;
+  confirmProbabilityGrid: (missionId: string | number) => Promise<MissionRecord>;
+  startMission: (missionId: string | number, payload: MissionStartRequest) => Promise<MissionRecord>;
   stopMission: (missionId: string | number) => Promise<MissionRecord>;
   deleteMission: (missionId: string | number) => Promise<void>;
   listAlgorithms: () => Promise<{ algorithms: AlgorithmMetadata[] }>;
@@ -39,15 +45,23 @@ export function createMissionClient(apiBase: string): MissionApiClient {
         body: JSON.stringify(payload)
       }),
 
-    startMission: (missionId, algorithm) =>
+    confirmSearchArea: (missionId, payload) =>
+      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/confirm-search-area`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }),
+
+    confirmProbabilityGrid: (missionId) =>
+      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/probability-grid/confirm`, {
+        method: "POST"
+      }),
+
+    startMission: (missionId, payload) =>
       requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/start`, {
         method: "POST",
-        ...(algorithm
-          ? {
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ algorithm })
-            }
-          : {})
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
       }),
 
     stopMission: (missionId) =>

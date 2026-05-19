@@ -171,6 +171,12 @@ export type MissionRecord = {
   progress?: number;
   targets?: Target[];
   algorithm?: string;
+  bounds?: Bounds;
+  grid?: Array<[number, number]>;
+  grid_shape?: [number, number] | number[];
+  probability_grid?: number[];
+  search_area_confirmed?: boolean;
+  probability_grid_confirmed?: boolean;
 };
 
 export type MissionMetrics = {
@@ -224,17 +230,26 @@ export type MissionDroneInput = {
   role?: string | null;
 };
 
+export type MissionHikerInput = {
+  id: string;
+  lat: number;
+  lon: number;
+  found: boolean;
+  movement?: HikerMovement;
+};
+
 export type MissionCreateRequest = {
   name: string;
   bounds: Bounds;
-  drones: MissionDroneInput[];
+  drones?: MissionDroneInput[];
+  hikers?: MissionHikerInput[];
   /** Must match backend-discovered algorithm keys; echoed on the mission until start overrides. */
   algorithm?: AlgorithmOption;
-  hikers?: Array<{
-    id: string;
-    lat: number;
-    lon: number;
-    found: boolean;
-    movement?: HikerMovement;
-  }>;
+};
+
+export type MissionStartRequest = {
+  drones: MissionDroneInput[];
+  hikers?: MissionHikerInput[];
+  /** Must match backend-discovered algorithm keys. */
+  algorithm?: AlgorithmOption;
 };
