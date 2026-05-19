@@ -5,12 +5,28 @@ import logging
 import random
 import uuid
 from typing import List, Optional
+import numpy as np
 
 from fastapi import APIRouter, HTTPException
 
 from app.dispatch import run_direct_dispatch, run_dispatch_script
-from app.models import DispatchTargetsRequest, MissionCreate, MissionStart, Mission
+from app.models import (
+    ApplyProbabilityRegionRequest,
+    ConfirmSearchAreaRequest,
+    DispatchTargetsRequest,
+    MissionCreate,
+    MissionStart,
+    Mission,
+    PreviewProbabilityRegionRequest,
+)
 from app.algorithms.base import build_dense_coverage_grid
+from app.probability_grid import (
+    REGION_LABEL_CODES,
+    build_probability_grid,
+    create_operator_label_grid,
+    create_searchable_mask,
+    rectangle_bounds_to_grid_mask,
+)
 from app.missions import (
     _assign_start_area_targets,
     _build_start_dispatch_assignments,
@@ -21,7 +37,7 @@ from app.missions import (
     _sync_mission_drones_with_sitl,
     mission_db,
 )
-from app.settings import DEFAULT_DISPATCH_HOST, DEFAULT_DISPATCH_TIMEOUT_SECONDS
+from app.settings import DEFAULT_DISPATCH_HOST, DEFAULT_DISPATCH_TIMEOUT_SECONDS, DEFAULT_SEARCH_GRID_SIDE
 from app.simulation import simulation_loop
 from app.algorithms.base import build_search_grid
 from app.ws import manager
@@ -46,6 +62,128 @@ def get_mission(mission_id: str):
     if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
     return mission_db[mission_id].to_dict()
+
+
+@router.post("/missions/{mission_id}/confirm-search-area")
+def confirm_search_area(mission_id: str, request: ConfirmSearchAreaRequest):
+    """Confirm mission bounds and initialize search-grid/probability-grid state."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    bounds = request.bounds.model_dump()
+    grid_side = request.grid_side or DEFAULT_SEARCH_GRID_SIDE
+
+    mission.bounds = bounds
+    mission.grid_shape = [grid_side, grid_side]
+    mission.grid = build_search_grid(bounds, n=grid_side)
+    mission.operator_label_grid = create_operator_label_grid(grid_side, grid_side)
+    mission.searchable_mask = create_searchable_mask(grid_side, grid_side)
+
+    probability_grid_2d, searchable_mask = build_probability_grid(
+        grid_shape=(grid_side, grid_side),
+        operator_label_grid=mission.operator_label_grid,
+        searchable_mask=mission.searchable_mask,
+        smoothing_iterations=mission.probability_grid_config.get("smoothing_passes", 1),
+    )
+
+    mission.searchable_mask = searchable_mask
+    mission.probability_grid = probability_grid_2d.ravel()
+    mission.search_area_confirmed = True
+    mission.probability_grid_confirmed = False
+
+    return mission.to_dict()
+
+
+@router.post("/missions/{mission_id}/probability-grid/preview-region")
+def preview_probability_region(mission_id: str, request: PreviewProbabilityRegionRequest):
+    """Preview which discrete probability-grid cells a drawn rectangle would affect."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    if not mission.search_area_confirmed or mission.grid is None or mission.grid_shape is None:
+        raise HTTPException(status_code=400, detail="Search area must be confirmed before previewing regions")
+
+    mask = rectangle_bounds_to_grid_mask(
+        search_grid=mission.grid,
+        grid_shape=mission.grid_shape,
+        rect_bounds=request.rect_bounds.model_dump(),
+    )
+    rows, cols = np.where(mask)
+    cells = [[int(row), int(col)] for row, col in zip(rows.tolist(), cols.tolist())]
+    return {
+        "cells": cells,
+        "count": len(cells),
+    }
+
+
+@router.post("/missions/{mission_id}/probability-grid/apply-region")
+def apply_probability_region(mission_id: str, request: ApplyProbabilityRegionRequest):
+    """Apply an operator-selected label to the cells covered by a drawn rectangle."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    if not mission.search_area_confirmed or mission.grid is None or mission.grid_shape is None:
+        raise HTTPException(status_code=400, detail="Search area must be confirmed before applying regions")
+    if mission.operator_label_grid is None:
+        raise HTTPException(status_code=400, detail="Operator label grid is not initialized")
+
+    mask = rectangle_bounds_to_grid_mask(
+        search_grid=mission.grid,
+        grid_shape=mission.grid_shape,
+        rect_bounds=request.rect_bounds.model_dump(),
+    )
+    label_code = REGION_LABEL_CODES[request.label]
+    mission.operator_label_grid = np.asarray(mission.operator_label_grid, dtype=np.uint8).copy()
+    mission.operator_label_grid[mask] = label_code
+
+    probability_grid_2d, searchable_mask = build_probability_grid(
+        grid_shape=tuple(mission.grid_shape),
+        operator_label_grid=mission.operator_label_grid,
+        searchable_mask=None,
+        smoothing_iterations=mission.probability_grid_config.get("smoothing_passes", 1),
+    )
+    mission.searchable_mask = searchable_mask
+    mission.probability_grid = probability_grid_2d.ravel()
+    mission.probability_grid_confirmed = False
+
+    rows, cols = np.where(mask)
+    cells = [[int(row), int(col)] for row, col in zip(rows.tolist(), cols.tolist())]
+    return {
+        "operator_label_grid": mission.operator_label_grid.tolist(),
+        "probability_grid": mission.probability_grid.tolist(),
+        "cells": cells,
+        "count": len(cells),
+    }
+
+
+@router.post("/missions/{mission_id}/probability-grid/confirm")
+def confirm_probability_grid(mission_id: str):
+    """Finalize the current operator labels into the mission's probability grid."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    if not mission.search_area_confirmed or mission.grid_shape is None:
+        raise HTTPException(status_code=400, detail="Search area must be confirmed before confirming probability grid")
+    if mission.operator_label_grid is None:
+        raise HTTPException(status_code=400, detail="Operator label grid is not initialized")
+
+    probability_grid_2d, searchable_mask = build_probability_grid(
+        grid_shape=tuple(mission.grid_shape),
+        operator_label_grid=mission.operator_label_grid,
+        searchable_mask=None,
+        smoothing_iterations=mission.probability_grid_config.get("smoothing_passes", 1),
+    )
+    if not np.any(searchable_mask):
+        raise HTTPException(status_code=400, detail="Probability grid confirmation failed: no searchable cells remain")
+
+    mission.searchable_mask = searchable_mask
+    mission.probability_grid = probability_grid_2d.ravel()
+    mission.probability_grid_confirmed = True
+    return mission.to_dict()
 
 
 async def _background_dispatch(mission: Mission, mission_id: str, assignments: List[dict]) -> None:
@@ -94,6 +232,21 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
     if mission.status != "idle":
         raise HTTPException(status_code=400, detail="Only 'idle' missions can be started")
 
+    missing_setup_steps: list[str] = []
+    if not mission.search_area_confirmed:
+        missing_setup_steps.append("search area must be confirmed")
+    if mission.grid is None:
+        missing_setup_steps.append("search grid is not initialized")
+    if mission.probability_grid is None:
+        missing_setup_steps.append("probability grid is not initialized")
+    if not mission.probability_grid_confirmed:
+        missing_setup_steps.append("probability grid must be confirmed")
+    if missing_setup_steps:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mission setup incomplete: {', '.join(missing_setup_steps)}",
+        )
+
     mission.status = "searching"
     mission.elapsed_seconds = 0
 
@@ -134,7 +287,6 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
                 }
             )
     mission.targets = targets
-    mission.grid = build_search_grid(bounds, n=15)
     mission._dense_coverage_grid = build_dense_coverage_grid(bounds)
     mission._dense_grid_size = len(mission._dense_coverage_grid)
 
