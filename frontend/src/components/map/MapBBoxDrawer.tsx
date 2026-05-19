@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Rectangle, useMap, useMapEvents } from "react-leaflet";
+import type { PathOptions } from "leaflet";
 import type { Bounds } from "../../types/mission";
 
 const MIN_BOX_DEG = 0.001;
@@ -7,9 +8,17 @@ const MIN_BOX_DEG = 0.001;
 type MapBBoxDrawerProps = {
   enabled: boolean;
   onBoundsDrawn: (bounds: Bounds) => void;
+  pathOptions?: PathOptions;
 };
 
-export default function MapBBoxDrawer({ enabled, onBoundsDrawn }: MapBBoxDrawerProps) {
+const DEFAULT_PATH_OPTIONS: PathOptions = {
+  color: "#3b82f6",
+  fillOpacity: 0.08,
+  dashArray: "8 8",
+  weight: 2,
+};
+
+export default function MapBBoxDrawer({ enabled, onBoundsDrawn, pathOptions }: MapBBoxDrawerProps) {
   const map = useMap();
   const [start, setStart] = useState<[number, number] | null>(null);
   const [current, setCurrent] = useState<[number, number] | null>(null);
@@ -76,7 +85,7 @@ export default function MapBBoxDrawer({ enabled, onBoundsDrawn }: MapBBoxDrawerP
   return (
     <Rectangle
       bounds={previewBounds}
-      pathOptions={{ color: "#3b82f6", fillOpacity: 0.08, dashArray: "8 8", weight: 2 }}
+      pathOptions={pathOptions ?? DEFAULT_PATH_OPTIONS}
     />
   );
 }

@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import { createMissionClient } from "../api/missionClient";
 import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionHikerInput, MissionState, PlacedHiker, Target, ValidDrone } from "../types/mission";
 import type { MissionStatus } from "../types/ws";
-import { build } from "vite";
 
 type UseMissionActionsArgs = {
   apiBase: string;
@@ -24,6 +23,8 @@ type UseMissionActionsArgs = {
   setCompletedTargets: (value: Target[]) => void;
   setSummaryMissionId: (value: string | number | null) => void;
   setHikerLabelById: (value: Record<string, number>) => void;
+  setIsValidBounds: (value: boolean) => void;
+  clearTemporaryRegionSelection: () => void;
 };
 
 function isFiniteNumber(value: unknown): value is number {
@@ -104,12 +105,40 @@ export default function useMissionActions({
   setSearchSummaryOpen,
   setCompletedTargets,
   setSummaryMissionId,
-  setHikerLabelById
+  setHikerLabelById,
+  setIsValidBounds,
+  clearTemporaryRegionSelection,
 }: UseMissionActionsArgs) {
   const missionClient = useMemo(() => createMissionClient(apiBase), [apiBase]);
 
+  const confirmSearchArea = async () => {
+    if (!selectedBounds) {
+      setIsValidBounds(false);
+      return;
+    }
+
+    let missionRecord = mission;
+
+    try {
+      if (!missionRecord?.id) {
+        missionRecord = await missionClient.createMission({
+          name: `SAR-${new Date().toISOString()}`,
+          bounds: selectedBounds,
+        });
+      }
+
+      const confirmedMission = await missionClient.confirmSearchArea(missionRecord.id, {
+        bounds: selectedBounds
+      });
+      clearTemporaryRegionSelection();
+      setMission(confirmedMission);
+    } catch (err) {
+      console.warn(`Confirm search area failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   const startMission = async () => {
-    if (!mission?.id || missionLocked || !selectedBounds) {
+    if (missionLocked || !selectedBounds) {
       return;
     }
 
@@ -125,12 +154,24 @@ export default function useMissionActions({
     const missionDrones: MissionDroneInput[] = buildMissionDrones(validDrones, validDroneCount, selectedBounds);
     const missionHikers: MissionHikerInput[] = placedHikers.map(toMissionHikerInput);
     try {
+      let missionRecord = mission;
+      if (!missionRecord?.id) {
+        missionRecord = await missionClient.createMission({
+          name: `SAR-${new Date().toISOString()}`,
+          bounds: selectedBounds,
+          drones: missionDrones,
+          hikers: missionHikers,
+          algorithm: selectedAlgorithm,
+        });
+        setMission(missionRecord);
+      }
+
       const payload = {
         drones: missionDrones,
         hikers: missionHikers,
         algorithm: selectedAlgorithm,
       }
-      const started = await missionClient.startMission(mission.id, payload);
+      const started = await missionClient.startMission(missionRecord.id, payload);
       setMission(started);
       setMissionStatus("searching");
       setProgress(started.progress ?? 0);
@@ -184,6 +225,7 @@ export default function useMissionActions({
   };
 
   return {
+    confirmSearchArea,
     startMission,
     stopMission,
     resetMissionLock,

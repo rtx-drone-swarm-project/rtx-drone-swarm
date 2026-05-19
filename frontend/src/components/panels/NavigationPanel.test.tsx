@@ -12,12 +12,17 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof NavigationPa
     isValidBounds: true,
     missionActive: false,
     searchAreaConfirmed: true,
+    temporaryRegionSelectedCellCount: 0,
+    temporaryRegionLabel: "" as const,
     onTopLeftLatChange: vi.fn(),
     onTopLeftLonChange: vi.fn(),
     onBottomRightLatChange: vi.fn(),
     onBottomRightLonChange: vi.fn(),
     onSetSearchArea: vi.fn(),
     onConfirmSearchArea: vi.fn(),
+    onTemporaryRegionLabelChange: vi.fn(),
+    onApplyTemporaryRegion: vi.fn(),
+    onCancelTemporaryRegion: vi.fn(),
     onConfirmLabelledRegions: vi.fn()
   };
   return render(<NavigationPanel {...defaults} {...overrides} />);
@@ -101,5 +106,27 @@ describe("NavigationPanel", () => {
     expect(screen.getByText("Hold Shift and drag on the map to select a region.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Set Search Area" })).toBeNull();
+  });
+
+  it("shows temporary region controls once cells are selected", () => {
+    const onApplyTemporaryRegion = vi.fn();
+    const onCancelTemporaryRegion = vi.fn();
+    renderPanel({
+      probabilityMapMode: true,
+      temporaryRegionSelectedCellCount: 6,
+      temporaryRegionLabel: "likely",
+      onApplyTemporaryRegion,
+      onCancelTemporaryRegion
+    });
+
+    expect(screen.getByText("Selected cells")).toBeTruthy();
+    expect(screen.getByText("6")).toBeTruthy();
+    expect(screen.getByLabelText("Region label")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply Region" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Selection" }));
+
+    expect(onApplyTemporaryRegion).toHaveBeenCalledTimes(1);
+    expect(onCancelTemporaryRegion).toHaveBeenCalledTimes(1);
   });
 });
