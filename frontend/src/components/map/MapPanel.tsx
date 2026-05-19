@@ -136,15 +136,15 @@ function trailColorForIndex(idx: number): string {
   return TRAIL_COLORS[idx % TRAIL_COLORS.length];
 }
 
-function getGridCellBounds(
+export function getGridCellBounds(
   bounds: Bounds,
   gridShape: [number, number] | number[] | undefined,
   cell: ProbabilityGridCell
 ) {
   if (!gridShape || gridShape.length !== 2) return null;
 
-  const rows = Number(gridShape[0]); // longitude steps in current backend ordering
-  const cols = Number(gridShape[1]); // latitude steps in current backend ordering
+  const rows = Number(gridShape[0]);
+  const cols = Number(gridShape[1]);
 
   if (!Number.isFinite(rows) || !Number.isFinite(cols) || rows <= 0 || cols <= 0) {
     return null;
@@ -156,21 +156,21 @@ function getGridCellBounds(
     return null;
   }
 
-  const latStep = (bounds.max_lat - bounds.min_lat) / cols;
-  const lonStep = (bounds.max_lon - bounds.min_lon) / rows;
+  const latStep = (bounds.max_lat - bounds.min_lat) / rows;
+  const lonStep = (bounds.max_lon - bounds.min_lon) / cols;
 
-  // Current backend convention:
-  // row = longitude index
-  // col = latitude index
-  const leftLon = bounds.min_lon + row * lonStep;
-  const rightLon = bounds.min_lon + (row + 1) * lonStep;
+  // Backend/UI probability-grid convention:
+  // row = latitude index
+  // col = longitude index
+  const minLat = bounds.min_lat + row * latStep;
+  const maxLat = bounds.min_lat + (row + 1) * latStep;
 
-  const bottomLat = bounds.min_lat + col * latStep;
-  const topLat = bounds.min_lat + (col + 1) * latStep;
+  const minLon = bounds.min_lon + col * lonStep;
+  const maxLon = bounds.min_lon + (col + 1) * lonStep;
 
   return [
-    [bottomLat, leftLon],
-    [topLat, rightLon],
+    [minLat, minLon],
+    [maxLat, maxLon],
   ] as [[number, number], [number, number]];
 }
 

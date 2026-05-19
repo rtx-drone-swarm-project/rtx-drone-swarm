@@ -21,7 +21,8 @@ from app.algorithms.boustrophedon import (
 from app.voronoi import lloyd_step
 from app.algorithms.voronoi import VoronoiCoverage
 from app.algorithms.base import build_search_grid
-from app.settings import DEFAULT_SEARCH_GRID_SIDE, _positive_float_env
+from app.algorithms.grid import choose_grid_shape
+from app.settings import _positive_float_env
 import app.main as main_module
 import app.missions as missions_app
 import app.routes.missions as missions_routes
@@ -400,29 +401,31 @@ def test_confirm_search_area_initializes_grid_and_probability_state():
     assert create_response.status_code == 200
     mission_id = create_response.json()["id"]
 
-    grid_side = 7
     confirm_response = client.post(
         f"/missions/{mission_id}/confirm-search-area",
         json={
             "bounds": mission_data["bounds"],
-            "grid_side": grid_side,
+            "grid_side": 7,
         },
     )
 
     assert confirm_response.status_code == 200
     payload = confirm_response.json()
-    assert payload["grid_shape"] == [grid_side, grid_side]
-    assert len(payload["grid"]) == grid_side * grid_side
+    expected_rows, expected_cols = choose_grid_shape(mission_data["bounds"], target_cell_size_m=100.0)
+    assert payload["grid_shape"] == [expected_rows, expected_cols]
+    assert len(payload["grid"]) == expected_rows * expected_cols
     assert len(payload["grid"][0]) == 2
-    assert len(payload["probability_grid"]) == grid_side * grid_side
+    assert len(payload["probability_grid"]) == expected_rows * expected_cols
     assert np.isclose(sum(payload["probability_grid"]), 1.0)
     assert payload["search_area_confirmed"] is True
     assert payload["probability_grid_confirmed"] is False
-    assert len(payload["operator_label_grid"]) == grid_side
-    assert len(payload["searchable_mask"]) == grid_side
+    assert len(payload["operator_label_grid"]) == expected_rows
+    assert len(payload["operator_label_grid"][0]) == expected_cols
+    assert len(payload["searchable_mask"]) == expected_rows
+    assert len(payload["searchable_mask"][0]) == expected_cols
 
 
-def test_confirm_search_area_uses_default_grid_side_when_omitted():
+def test_confirm_search_area_uses_target_cell_size_when_grid_side_is_omitted():
     mission_data = {
         "name": "Default Grid Side Mission",
         "bounds": {
@@ -446,7 +449,8 @@ def test_confirm_search_area_uses_default_grid_side_when_omitted():
 
     assert confirm_response.status_code == 200
     payload = confirm_response.json()
-    assert payload["grid_shape"] == [DEFAULT_SEARCH_GRID_SIDE, DEFAULT_SEARCH_GRID_SIDE]
+    expected_rows, expected_cols = choose_grid_shape(mission_data["bounds"], target_cell_size_m=100.0)
+    assert payload["grid_shape"] == [expected_rows, expected_cols]
 
 
 def test_confirm_search_area_rejects_non_positive_grid_side():
