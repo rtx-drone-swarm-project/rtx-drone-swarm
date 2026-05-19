@@ -27,7 +27,6 @@ import type {
   MissionState,
   PlacedHiker,
   SelectedDrone,
-  SearchAreaCorners,
   Target,
   TelemetryDrone,
   ValidDrone
@@ -40,104 +39,17 @@ import type {
   TargetFoundMessage,
   TelemetryMessage
 } from "./types/ws";
-import { boundsToSearchAreaCorners, searchAreaCornersToBounds } from "./utils/geo";
-import { parseCoordinate } from "./utils/validate";
+import { useProbabilityMapEditor } from "./hooks/useProbabilityMapEditor";
+import { useSearchAreaSetup } from "./hooks/useSearchAreaSetup";
 
 const DEFAULT_CENTER: [number, number] = [33.5, -117.2];
 const DEFAULT_ZOOM = 13;
-
-function isPointInsideBounds(lat: number, lon: number, bounds: Bounds) {
-  return lat >= bounds.min_lat && lat <= bounds.max_lat && lon >= bounds.min_lon && lon <= bounds.max_lon;
-}
 
 function clampPointToBounds(lat: number, lon: number, bounds: Bounds): [number, number] {
   return [
     Math.min(bounds.max_lat, Math.max(bounds.min_lat, lat)),
     Math.min(bounds.max_lon, Math.max(bounds.min_lon, lon))
   ];
-}
-
-function formatCornerValue(value: number): string {
-  return value.toFixed(6);
-}
-
-function getBoundsCenter(bounds: Bounds): [number, number] {
-  return [
-    (bounds.min_lat + bounds.max_lat) / 2,
-    (bounds.min_lon + bounds.max_lon) / 2
-  ];
-}
-
-function parseSearchAreaCorners(corners: {
-  topLeftLat: string;
-  topLeftLon: string;
-  bottomRightLat: string;
-  bottomRightLon: string;
-}): SearchAreaCorners | null {
-  const topLeftLat = parseCoordinate(corners.topLeftLat, -90, 90);
-  const topLeftLon = parseCoordinate(corners.topLeftLon, -180, 180);
-  const bottomRightLat = parseCoordinate(corners.bottomRightLat, -90, 90);
-  const bottomRightLon = parseCoordinate(corners.bottomRightLon, -180, 180);
-
-  if (topLeftLat == null || topLeftLon == null || bottomRightLat == null || bottomRightLon == null) {
-    return null;
-  }
-
-  return {
-    topLeftLat,
-    topLeftLon,
-    bottomRightLat,
-    bottomRightLon
-  };
-}
-
-function isValidSearchAreaDraft(corners: {
-  topLeftLat: string;
-  topLeftLon: string;
-  bottomRightLat: string;
-  bottomRightLon: string;
-}): boolean {
-  const parsedCorners = parseSearchAreaCorners(corners);
-  if (!parsedCorners) return false;
-  const bounds = searchAreaCornersToBounds(parsedCorners);
-  return bounds.min_lat !== bounds.max_lat && bounds.min_lon !== bounds.max_lon;
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function hasText(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
-}
-
-function toMissionDroneInput(drone: ValidDrone) {
-  const payload: {
-    id: string | number;
-    lat: number;
-    lon: number;
-    sysid?: number | null;
-    alt?: number;
-    heading?: number;
-    groundspeed?: number;
-    target_lat?: number;
-    target_lon?: number;
-    role?: string | null;
-  } = {
-    id: drone.id,
-    lat: drone.lat,
-    lon: drone.lon
-  };
-
-  if (isFiniteNumber(drone.sysid)) payload.sysid = drone.sysid;
-  if (isFiniteNumber(drone.alt)) payload.alt = drone.alt;
-  if (isFiniteNumber(drone.heading)) payload.heading = drone.heading;
-  if (isFiniteNumber(drone.groundspeed)) payload.groundspeed = drone.groundspeed;
-  if (isFiniteNumber(drone.target_lat)) payload.target_lat = drone.target_lat;
-  if (isFiniteNumber(drone.target_lon)) payload.target_lon = drone.target_lon;
-  if (hasText(drone.role)) payload.role = drone.role;
-
-  return payload;
 }
 
 export default function App() {
@@ -153,14 +65,8 @@ export default function App() {
   const [targets, setTargets] = useState<Target[]>([]);
   const [foundHikers, setFoundHikers] = useState<FoundHiker[]>([]);
   const [missionLocked, setMissionLocked] = useState(false);
-  const [topLeftLat, setTopLeftLat] = useState("");
-  const [topLeftLon, setTopLeftLon] = useState("");
-  const [bottomRightLat, setBottomRightLat] = useState("");
-  const [bottomRightLon, setBottomRightLon] = useState("");
-  const [isValidBounds, setIsValidBounds] = useState(true);
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(DEFAULT_CENTER);
   const [mapAutocentered, setMapAutocentered] = useState(false);
-  const [selectedBounds, setSelectedBounds] = useState<Bounds | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [selectedDrone, setSelectedDrone] = useState<SelectedDrone>(null);
   const [searchSummaryOpen, setSearchSummaryOpen] = useState(false);
@@ -188,6 +94,46 @@ export default function App() {
   const [droneTrails, setDroneTrails] = useState<Record<string, [number, number][]>>({});
   const TRAIL_MAX_POINTS = 120;
   const [hikerLabelById, setHikerLabelById] = useState<Record<string, number>>({});
+
+  const {
+    probabilityMapMode,
+    temporaryRegionBounds,
+    temporaryRegionCells,
+    temporaryRegionLabel,
+    setTemporaryRegionLabel,
+    clearTemporaryRegionSelection,
+    onSelectTemporaryRegion,
+    onApplyTemporaryRegion,
+    onConfirmLabelledRegions,
+  } = useProbabilityMapEditor({
+    apiClient,
+    mission,
+    setMission,
+  });
+
+  const {
+    selectedBounds,
+    setSelectedBounds,
+    topLeftLat,
+    topLeftLon,
+    bottomRightLat,
+    bottomRightLon,
+    isValidBounds,
+    isPointInsideBounds,
+    setIsValidBounds,
+    updateSearchAreaFields,
+    onTopLeftLatChange,
+    onTopLeftLonChange,
+    onBottomRightLatChange,
+    onBottomRightLonChange,
+    onSelectArea,
+    onSetSearchArea,
+  } = useSearchAreaSetup({
+    clearTemporaryRegionSelection,
+    setMapCenter,
+    setPlacedHikers,
+    setIsPlacingHiker,
+  });
 
   const telemetryMode = useMemo(() => {
     const sources = telemetry
@@ -251,6 +197,35 @@ export default function App() {
   );
 
   const validDroneCount = validDrones.length;
+  const { 
+    confirmSearchArea, 
+    startMission, 
+    stopMission, 
+    resetMissionLock, 
+    recallDrones 
+  } = useMissionActions({
+    apiBase,
+    missionLocked,
+    selectedBounds,
+    selectedAlgorithm,
+    placedHikers,
+    validDrones,
+    validDroneCount,
+    mission,
+    setMission,
+    setMissionStatus,
+    setProgress,
+    setTargets,
+    setElapsedSeconds,
+    setMissionLocked,
+    setFoundHikers,
+    setSearchSummaryOpen,
+    setCompletedTargets,
+    setSummaryMissionId,
+    setHikerLabelById,
+    setIsValidBounds,
+    clearTemporaryRegionSelection
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -439,35 +414,12 @@ export default function App() {
   const missionActive = missionStatus !== "idle" && missionStatus !== "mission_complete";
   const missionComplete = missionStatus === "mission_complete";
   const hikerPlacementEditable = selectedBounds != null && !missionActive && !missionLocked;
-  const probabilityMapMode = mission?.search_area_confirmed === true;
 
   useEffect(() => {
     if (!hikerPlacementEditable) {
       setIsPlacingHiker(false);
     }
   }, [hikerPlacementEditable]);
-
-  const { startMission, stopMission, resetMissionLock, recallDrones } = useMissionActions({
-    apiBase,
-    missionLocked,
-    selectedBounds,
-    selectedAlgorithm,
-    placedHikers,
-    validDrones,
-    validDroneCount,
-    mission,
-    setMission,
-    setMissionStatus,
-    setProgress,
-    setTargets,
-    setElapsedSeconds,
-    setMissionLocked,
-    setFoundHikers,
-    setSearchSummaryOpen,
-    setCompletedTargets,
-    setSummaryMissionId,
-    setHikerLabelById
-  });
 
   useEffect(() => {
     if (!mission || !targets.length) return;
@@ -493,134 +445,6 @@ export default function App() {
     });
   }, [assignHikerLabels, targets]);
 
-  const updateSearchAreaFields = useCallback((bounds: Bounds) => {
-    const corners = boundsToSearchAreaCorners(bounds);
-    setTopLeftLat(formatCornerValue(corners.topLeftLat));
-    setTopLeftLon(formatCornerValue(corners.topLeftLon));
-    setBottomRightLat(formatCornerValue(corners.bottomRightLat));
-    setBottomRightLon(formatCornerValue(corners.bottomRightLon));
-  }, []);
-
-  const onTopLeftLatChange = useCallback((value: string) => {
-    setTopLeftLat(value);
-    setIsValidBounds(
-      isValidSearchAreaDraft({
-        topLeftLat: value,
-        topLeftLon,
-        bottomRightLat,
-        bottomRightLon
-      })
-    );
-  }, [bottomRightLat, bottomRightLon, topLeftLon]);
-
-  const onTopLeftLonChange = useCallback((value: string) => {
-    setTopLeftLon(value);
-    setIsValidBounds(
-      isValidSearchAreaDraft({
-        topLeftLat,
-        topLeftLon: value,
-        bottomRightLat,
-        bottomRightLon
-      })
-    );
-  }, [bottomRightLat, bottomRightLon, topLeftLat]);
-
-  const onBottomRightLatChange = useCallback((value: string) => {
-    setBottomRightLat(value);
-    setIsValidBounds(
-      isValidSearchAreaDraft({
-        topLeftLat,
-        topLeftLon,
-        bottomRightLat: value,
-        bottomRightLon
-      })
-    );
-  }, [bottomRightLon, topLeftLat, topLeftLon]);
-
-  const onBottomRightLonChange = useCallback((value: string) => {
-    setBottomRightLon(value);
-    setIsValidBounds(
-      isValidSearchAreaDraft({
-        topLeftLat,
-        topLeftLon,
-        bottomRightLat,
-        bottomRightLon: value
-      })
-    );
-  }, [bottomRightLat, topLeftLat, topLeftLon]);
-
-  const onSelectArea = useCallback(
-    (bounds: Bounds) => {
-      setSelectedBounds(bounds);
-      updateSearchAreaFields(bounds);
-      setMapCenter(getBoundsCenter(bounds));
-      setIsValidBounds(true);
-      setPlacedHikers((prev) => prev.filter((hiker) => isPointInsideBounds(hiker.lat, hiker.lon, bounds)));
-      setIsPlacingHiker(false);
-    },
-    [updateSearchAreaFields]
-  );
-
-  const onSetSearchArea = useCallback(() => {
-    const parsedCorners = parseSearchAreaCorners({
-      topLeftLat,
-      topLeftLon,
-      bottomRightLat,
-      bottomRightLon
-    });
-    if (!parsedCorners) {
-      setIsValidBounds(false);
-      return;
-    }
-
-    const bounds = searchAreaCornersToBounds(parsedCorners);
-    if (bounds.min_lat === bounds.max_lat || bounds.min_lon === bounds.max_lon) {
-      setIsValidBounds(false);
-      return;
-    }
-
-    updateSearchAreaFields(bounds);
-    setIsValidBounds(true);
-    setSelectedBounds(bounds);
-    setMapCenter(getBoundsCenter(bounds));
-  }, [bottomRightLat, bottomRightLon, topLeftLat, topLeftLon, updateSearchAreaFields]);
-
-  const onConfirmSearchArea = useCallback(async () => {
-    if (!selectedBounds) {
-      setIsValidBounds(false);
-      return;
-    }
-
-    let missionRecord = mission;
-
-    try {
-      if (!missionRecord?.id) {
-        missionRecord = await apiClient.createMission({
-          name: `SAR-${new Date().toISOString()}`,
-          bounds: selectedBounds,
-        });
-      }
-
-      const confirmedMission = await apiClient.confirmSearchArea(missionRecord.id, {
-        bounds: selectedBounds
-      });
-      setMission(confirmedMission);
-    } catch (err) {
-      console.warn(`Confirm search area failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }, [apiClient, mission, selectedBounds, setMission]);
-
-  const onConfirmLabelledRegions = useCallback(async () => {
-    if (!mission?.id) return;
-
-    try {
-      const confirmedMission = await apiClient.confirmProbabilityGrid(mission.id);
-      setMission(confirmedMission);
-    } catch (err) {
-      console.warn(`Confirm labelled regions failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }, [apiClient, mission, setMission]);
-
   const onAlgorithmChange = useCallback((algorithm: AlgorithmOption) => {
     setSelectedAlgorithm(algorithm);
     runningMissionIdRef.current = null;
@@ -634,8 +458,9 @@ export default function App() {
     setPlacedHikers([]);
     setSelectedHikerId(null);
     setIsPlacingHiker(false);
+    clearTemporaryRegionSelection();
     resetMissionLock();
-  }, [resetMissionLock]);
+  }, [clearTemporaryRegionSelection, resetMissionLock]);
 
   const onAddHiker = useCallback(() => {
     if (!selectedBounds || !hikerPlacementEditable) return;
@@ -707,6 +532,8 @@ export default function App() {
           defaultZoom={DEFAULT_ZOOM}
           mapCenter={mapCenter}
           selectedBounds={selectedBounds}
+          gridShape={mission?.grid_shape}
+          probabilityMapMode={probabilityMapMode}
           missionActive={missionActive}
           validDrones={validDrones}
           targets={targets}
@@ -722,6 +549,9 @@ export default function App() {
           droneTrails={droneTrails}
           selectedAlgorithm={selectedAlgorithm}
           onSelectArea={onSelectArea}
+          onSelectTemporaryRegion={onSelectTemporaryRegion}
+          temporaryRegionBounds={temporaryRegionBounds}
+          temporaryRegionCells={temporaryRegionCells}
         />
 
         <aside className="left-rail">
@@ -755,12 +585,17 @@ export default function App() {
             isValidBounds={isValidBounds}
             missionActive={missionActive}
             searchAreaConfirmed={selectedBounds != null}
+            temporaryRegionSelectedCellCount={temporaryRegionCells.length}
+            temporaryRegionLabel={temporaryRegionLabel}
             onTopLeftLatChange={onTopLeftLatChange}
             onTopLeftLonChange={onTopLeftLonChange}
             onBottomRightLatChange={onBottomRightLatChange}
             onBottomRightLonChange={onBottomRightLonChange}
             onSetSearchArea={onSetSearchArea}
-            onConfirmSearchArea={onConfirmSearchArea}
+            onConfirmSearchArea={confirmSearchArea}
+            onTemporaryRegionLabelChange={setTemporaryRegionLabel}
+            onApplyTemporaryRegion={onApplyTemporaryRegion}
+            onCancelTemporaryRegion={clearTemporaryRegionSelection}
             onConfirmLabelledRegions={onConfirmLabelledRegions}
           />
           <ActionsPanel

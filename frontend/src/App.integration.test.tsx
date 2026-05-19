@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./components/map/MapPanel", () => ({
   default: (props: {
     onSelectArea: (bounds: any) => void;
+    onSelectTemporaryRegion: (bounds: any) => void;
     onPlaceHiker?: (lat: number, lon: number) => void;
   }) => {
     mocks.mapPanelProps.push(props);
@@ -26,6 +27,19 @@ vi.mock("./components/map/MapPanel", () => ({
           }
         >
           Select Area
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            props.onSelectTemporaryRegion({
+              min_lat: 33.47,
+              max_lat: 33.53,
+              min_lon: -117.24,
+              max_lon: -117.18
+            })
+          }
+        >
+          Select Temp Region
         </button>
         <button type="button" onClick={() => props.onPlaceHiker?.(33.5, -117.2)}>
           Place Hiker On Map
@@ -271,6 +285,77 @@ describe("App integration", () => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m1/confirm-search-area"))).toBe(true);
       expect(screen.getByText("Hold Shift and drag on the map to select a region.")).toBeTruthy();
       expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
+    });
+  });
+
+  it("previews and cancels a temporary probability region selection", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/algorithms")) {
+        return Promise.resolve({ ok: true, json: async () => ({ algorithms: [] }) });
+      }
+      if (url.endsWith("/missions")) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m1", status: "idle" }) });
+      }
+      if (url.endsWith("/missions/m1/confirm-search-area")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m1",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.25, 0.25, 0.25, 0.25],
+            search_area_confirmed: true,
+            probability_grid_confirmed: false
+          })
+        });
+      }
+      if (url.endsWith("/missions/m1/probability-grid/preview-region")) {
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({
+          rect_bounds: {
+            min_lat: 33.47,
+            max_lat: 33.53,
+            min_lon: -117.24,
+            max_lon: -117.18
+          }
+        });
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ cells: [[0, 0], [0, 1], [1, 0]], count: 3 })
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Temp Region" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m1/probability-grid/preview-region"))).toBe(true);
+      expect(screen.getByText("Selected cells")).toBeTruthy();
+      expect(screen.getByText("3")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Cancel Selection" })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Selection" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Cancel Selection" })).toBeNull();
+      expect(screen.queryByText("Selected cells")).toBeNull();
     });
   });
 

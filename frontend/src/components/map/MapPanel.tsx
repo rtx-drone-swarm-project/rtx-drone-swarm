@@ -1,6 +1,14 @@
 import { MapContainer, Marker, Polyline, Rectangle, TileLayer } from "react-leaflet";
 import type { LeafletEvent, Marker as LeafletMarker } from "leaflet";
-import type { AlgorithmOption, Bounds, PlacedHiker, SelectedDrone, Target, ValidDrone } from "../../types/mission";
+import type {
+  AlgorithmOption,
+  Bounds,
+  PlacedHiker,
+  ProbabilityGridCell,
+  SelectedDrone,
+  Target,
+  ValidDrone
+} from "../../types/mission";
 import { boundsToLeaflet } from "../../utils/geo";
 import MapBBoxDrawer from "./MapBBoxDrawer";
 import MapClickSelector from "./MapClickSelector";
@@ -104,6 +112,8 @@ type MapPanelProps = {
   defaultZoom: number;
   mapCenter: [number, number] | null;
   selectedBounds: Bounds | null;
+  gridShape?: [number, number] | number[];
+  probabilityMapMode: boolean;
   missionActive: boolean;
   validDrones: ValidDrone[];
   targets: Target[];
@@ -117,6 +127,9 @@ type MapPanelProps = {
   onPlaceHiker: (lat: number, lon: number) => void;
   onMoveHiker: (hikerId: string, lat: number, lon: number) => void;
   onSelectArea: (bounds: Bounds) => void;
+  onSelectTemporaryRegion: (bounds: Bounds) => void;
+  temporaryRegionBounds: Bounds | null;
+  temporaryRegionCells: ProbabilityGridCell[];
   droneTrails?: Record<string, [number, number][]>;
   selectedAlgorithm?: AlgorithmOption;
 };
@@ -129,11 +142,51 @@ function trailColorForIndex(idx: number): string {
   return TRAIL_COLORS[idx % TRAIL_COLORS.length];
 }
 
+function getGridCellBounds(
+  bounds: Bounds,
+  gridShape: [number, number] | number[] | undefined,
+  cell: ProbabilityGridCell
+) {
+  if (!gridShape || gridShape.length !== 2) return null;
+
+  const rows = Number(gridShape[0]); // longitude steps in current backend ordering
+  const cols = Number(gridShape[1]); // latitude steps in current backend ordering
+
+  if (!Number.isFinite(rows) || !Number.isFinite(cols) || rows <= 0 || cols <= 0) {
+    return null;
+  }
+
+  const [row, col] = cell;
+
+  if (row < 0 || row >= rows || col < 0 || col >= cols) {
+    return null;
+  }
+
+  const latStep = (bounds.max_lat - bounds.min_lat) / cols;
+  const lonStep = (bounds.max_lon - bounds.min_lon) / rows;
+
+  // Current backend convention:
+  // row = longitude index
+  // col = latitude index
+  const leftLon = bounds.min_lon + row * lonStep;
+  const rightLon = bounds.min_lon + (row + 1) * lonStep;
+
+  const bottomLat = bounds.min_lat + col * latStep;
+  const topLat = bounds.min_lat + (col + 1) * latStep;
+
+  return [
+    [bottomLat, leftLon],
+    [topLat, rightLon],
+  ] as [[number, number], [number, number]];
+}
+
 export default function MapPanel({
   defaultCenter,
   defaultZoom,
   mapCenter,
   selectedBounds,
+  gridShape,
+  probabilityMapMode,
   missionActive,
   validDrones,
   targets,
@@ -147,11 +200,15 @@ export default function MapPanel({
   onPlaceHiker,
   onMoveHiker,
   onSelectArea,
+  onSelectTemporaryRegion,
+  temporaryRegionBounds,
+  temporaryRegionCells,
   droneTrails,
   selectedAlgorithm
 }: MapPanelProps) {
   const sweepActive = selectedAlgorithm === "sweep" && missionActive;
   const rectBounds = selectedBounds ? boundsToLeaflet(selectedBounds) : null;
+  const temporaryRectBounds = temporaryRegionBounds ? boundsToLeaflet(temporaryRegionBounds) : null;
   const runtimeTargetIds = new Set(targets.map((target) => String(target.id)));
 
   return (
@@ -165,8 +222,13 @@ export default function MapPanel({
         <MapControlStack drones={validDrones} />
         <MapClickSelector enabled={hikerPlacementMode && hikerPlacementEditable} onSelect={onPlaceHiker} />
         <MapBBoxDrawer
-          enabled={!missionActive && !hikerPlacementMode}
+          enabled={!probabilityMapMode && !missionActive && !hikerPlacementMode}
           onBoundsDrawn={onSelectArea}
+        />
+        <MapBBoxDrawer
+          enabled={probabilityMapMode}
+          onBoundsDrawn={onSelectTemporaryRegion}
+          pathOptions={{ color: "#f59e0b", fillOpacity: 0.06, dashArray: "10 6", weight: 2 }}
         />
 
         {rectBounds && (
@@ -175,6 +237,25 @@ export default function MapPanel({
             pathOptions={{ color: "#3b82f6", fillOpacity: 0.08, dashArray: "8 8", weight: 2 }}
           />
         )}
+
+        {temporaryRectBounds && (
+          <Rectangle
+            bounds={temporaryRectBounds}
+            pathOptions={{ color: "#f59e0b", fillOpacity: 0.06, dashArray: "10 6", weight: 2 }}
+          />
+        )}
+
+        {selectedBounds && temporaryRegionCells.map((cell) => {
+          const cellBounds = getGridCellBounds(selectedBounds, gridShape, cell);
+          if (!cellBounds) return null;
+          return (
+            <Rectangle
+              key={`temp-cell-${cell[0]}-${cell[1]}`}
+              bounds={cellBounds}
+              pathOptions={{ color: "#f97316", fillColor: "#f97316", fillOpacity: 0.28, weight: 1 }}
+            />
+          );
+        })}
 
         {droneTrails &&
           validDrones.map((drone, idx) => {

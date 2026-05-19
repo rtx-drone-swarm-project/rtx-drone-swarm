@@ -1,11 +1,15 @@
 import type {
+  AlgorithmOption,
   AlgorithmMetadata,
+  ApplyProbabilityRegionResponse,
   BenchmarkRequestPayload,
   BenchmarkRun,
   BenchmarkScenarioProfile,
   MissionCreateRequest,
   MissionStartRequest,
-  MissionRecord
+  MissionRecord,
+  PreviewProbabilityRegionResponse,
+  ProbabilityRegionLabel
 } from "../types/mission";
 
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
@@ -22,8 +26,19 @@ export type MissionApiClient = {
     missionId: string | number,
     payload: { bounds: MissionCreateRequest["bounds"]; grid_side?: number }
   ) => Promise<MissionRecord>;
+  previewProbabilityRegion: (
+    missionId: string | number,
+    payload: { rect_bounds: MissionCreateRequest["bounds"] }
+  ) => Promise<PreviewProbabilityRegionResponse>;
+  applyProbabilityRegion: (
+    missionId: string | number,
+    payload: { label: ProbabilityRegionLabel; rect_bounds: MissionCreateRequest["bounds"] }
+  ) => Promise<ApplyProbabilityRegionResponse>;
   confirmProbabilityGrid: (missionId: string | number) => Promise<MissionRecord>;
-  startMission: (missionId: string | number, payload: MissionStartRequest) => Promise<MissionRecord>;
+  startMission: (
+    missionId: string | number,
+    payload?: MissionStartRequest
+  ) => Promise<MissionRecord>;
   stopMission: (missionId: string | number) => Promise<MissionRecord>;
   deleteMission: (missionId: string | number) => Promise<void>;
   listAlgorithms: () => Promise<{ algorithms: AlgorithmMetadata[] }>;
@@ -52,17 +67,41 @@ export function createMissionClient(apiBase: string): MissionApiClient {
         body: JSON.stringify(payload)
       }),
 
+    previewProbabilityRegion: (missionId, payload) =>
+      requestJson<PreviewProbabilityRegionResponse>(`${apiBase}/missions/${missionId}/probability-grid/preview-region`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }),
+
+    applyProbabilityRegion: (missionId, payload) =>
+      requestJson<ApplyProbabilityRegionResponse>(`${apiBase}/missions/${missionId}/probability-grid/apply-region`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }),
+
     confirmProbabilityGrid: (missionId) =>
       requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/probability-grid/confirm`, {
         method: "POST"
       }),
 
-    startMission: (missionId, payload) =>
-      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/start`, {
+    startMission: (missionId, payload) => {
+      const normalizedPayload =
+        typeof payload === "string"
+          ? { algorithm: payload }
+          : payload;
+
+      return requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/start`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      }),
+        ...(normalizedPayload
+          ? {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(normalizedPayload)
+            }
+          : {})
+      });
+    },
 
     stopMission: (missionId) =>
       requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/stop`, {

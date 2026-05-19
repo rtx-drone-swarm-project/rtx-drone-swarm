@@ -175,8 +175,32 @@ export type MissionRecord = {
   grid?: Array<[number, number]>;
   grid_shape?: [number, number] | number[];
   probability_grid?: number[];
+  operator_label_grid?: number[][];
+  searchable_mask?: boolean[][];
   search_area_confirmed?: boolean;
   probability_grid_confirmed?: boolean;
+};
+
+export type ProbabilityRegionLabel =
+  | "very_unlikely"
+  | "unlikely"
+  | "normal"
+  | "likely"
+  | "very_likely"
+  | "excluded";
+
+export type ProbabilityGridCell = [number, number];
+
+export type PreviewProbabilityRegionResponse = {
+  cells: ProbabilityGridCell[];
+  count: number;
+};
+
+export type ApplyProbabilityRegionResponse = {
+  operator_label_grid: number[][];
+  probability_grid: number[];
+  cells: ProbabilityGridCell[];
+  count: number;
 };
 
 export type MissionMetrics = {

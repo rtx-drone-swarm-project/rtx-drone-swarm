@@ -322,7 +322,8 @@ body,
   font-size: 12px;
 }
 
-.field input {
+.field input,
+.field select {
   margin-top: 4px;
   width: 100%;
   border: 1px solid #475569;
@@ -333,7 +334,8 @@ body,
   outline: none;
 }
 
-.field input:focus {
+.field input:focus,
+.field select:focus {
   border-color: #3b82f6;
 }
 
@@ -469,6 +471,10 @@ body,
   color: #94a3b8;
   font-size: 12px;
   margin-bottom: 8px;
+}
+
+.region-preview-stats {
+  margin-bottom: 10px;
 }
 
 .hiker-setup.is-disabled {

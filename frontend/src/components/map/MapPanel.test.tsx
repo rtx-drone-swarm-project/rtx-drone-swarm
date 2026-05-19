@@ -14,6 +14,7 @@ const off = vi.fn();
 const mocks = vi.hoisted(() => ({
   marker: vi.fn((_props: Record<string, unknown>) => null),
   polyline: vi.fn((_props: Record<string, unknown>) => null),
+  rectangle: vi.fn((_props: Record<string, unknown>) => null),
   makeCentroidIcon: vi.fn((_label: string, _phase?: string | null) => ({ icon: "centroid" })),
   makeDroneIcon: vi.fn((_label: string, _role?: string | null, _heading?: number) => ({ icon: "drone" })),
   makePlacedHikerIcon: vi.fn((_label: string, _movement: string, _locked?: boolean) => ({ icon: "placed-hiker" })),
@@ -26,7 +27,7 @@ vi.mock("react-leaflet", () => ({
   TileLayer: () => null,
   Marker: mocks.marker,
   Polyline: mocks.polyline,
-  Rectangle: () => null,
+  Rectangle: mocks.rectangle,
   useMap: () => ({
     flyTo,
     getCenter,
@@ -65,6 +66,8 @@ const defaultProps = {
   defaultZoom: 13,
   mapCenter: null,
   selectedBounds: null,
+  gridShape: undefined,
+  probabilityMapMode: false,
   missionActive: false,
   validDrones: [],
   targets: [],
@@ -77,7 +80,10 @@ const defaultProps = {
   onSelectHiker: vi.fn(),
   onPlaceHiker: vi.fn(),
   onMoveHiker: vi.fn(),
-  onSelectArea: vi.fn()
+  onSelectArea: vi.fn(),
+  onSelectTemporaryRegion: vi.fn(),
+  temporaryRegionBounds: null,
+  temporaryRegionCells: []
 };
 
 describe("MapPanel", () => {
@@ -91,6 +97,7 @@ describe("MapPanel", () => {
     off.mockClear();
     mocks.marker.mockClear();
     mocks.polyline.mockClear();
+    mocks.rectangle.mockClear();
     mocks.makeCentroidIcon.mockClear();
     mocks.makeDroneIcon.mockClear();
     mocks.makePlacedHikerIcon.mockClear();
@@ -285,8 +292,8 @@ describe("MapPanel", () => {
     const onSelectArea = vi.fn();
     render(<MapPanel {...defaultProps} onSelectArea={onSelectArea} />);
 
-    const latestProps = bboxDrawerMock.props[bboxDrawerMock.props.length - 1];
-    latestProps.onBoundsDrawn({
+    const searchAreaDrawerProps = bboxDrawerMock.props[0];
+    searchAreaDrawerProps.onBoundsDrawn({
       min_lat: 33.45,
       max_lat: 33.55,
       min_lon: -117.25,
@@ -299,6 +306,55 @@ describe("MapPanel", () => {
       min_lon: -117.25,
       max_lon: -117.15
     });
+  });
+
+  it("switches shift-drag handling to temporary region selection in probability-map mode", () => {
+    const onSelectTemporaryRegion = vi.fn();
+    render(
+      <MapPanel
+        {...defaultProps}
+        probabilityMapMode
+        onSelectTemporaryRegion={onSelectTemporaryRegion}
+      />
+    );
+
+    expect(bboxDrawerMock.props).toHaveLength(2);
+    expect(bboxDrawerMock.props[0].enabled).toBe(false);
+    expect(bboxDrawerMock.props[1].enabled).toBe(true);
+
+    bboxDrawerMock.props[1].onBoundsDrawn({
+      min_lat: 33.46,
+      max_lat: 33.5,
+      min_lon: -117.24,
+      max_lon: -117.2
+    });
+
+    expect(onSelectTemporaryRegion).toHaveBeenCalledWith({
+      min_lat: 33.46,
+      max_lat: 33.5,
+      min_lon: -117.24,
+      max_lon: -117.2
+    });
+  });
+
+  it("renders temporary region cells as highlighted rectangles", () => {
+    render(
+      <MapPanel
+        {...defaultProps}
+        selectedBounds={{ min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 }}
+        gridShape={[2, 2]}
+        temporaryRegionBounds={{ min_lat: 33.45, max_lat: 33.5, min_lon: -117.25, max_lon: -117.2 }}
+        temporaryRegionCells={[[0, 1], [1, 0]]}
+      />
+    );
+
+    const temporaryCellCalls = mocks.rectangle.mock.calls
+      .map(([props]) => props)
+      .filter((props) => (props.pathOptions as { fillColor?: string } | undefined)?.fillColor === "#f97316");
+
+    expect(temporaryCellCalls).toHaveLength(2);
+    expect(temporaryCellCalls[0]?.bounds).toEqual([[33.5, -117.2], [33.55, -117.15]]);
+    expect(temporaryCellCalls[1]?.bounds).toEqual([[33.45, -117.25], [33.5, -117.2]]);
   });
 
   it("hides placed hiker markers that already exist as runtime targets", () => {
