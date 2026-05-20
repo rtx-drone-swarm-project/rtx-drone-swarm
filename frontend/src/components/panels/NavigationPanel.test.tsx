@@ -14,12 +14,14 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof NavigationPa
     searchAreaConfirmed: true,
     temporaryRegionSelectedCellCount: 0,
     temporaryRegionLabel: "" as const,
+    showLabelledRegions: true,
     onTopLeftLatChange: vi.fn(),
     onTopLeftLonChange: vi.fn(),
     onBottomRightLatChange: vi.fn(),
     onBottomRightLonChange: vi.fn(),
     onSetSearchArea: vi.fn(),
     onConfirmSearchArea: vi.fn(),
+    onShowLabelledRegionsChange: vi.fn(),
     onTemporaryRegionLabelChange: vi.fn(),
     onApplyTemporaryRegion: vi.fn(),
     onCancelTemporaryRegion: vi.fn(),
@@ -100,10 +102,14 @@ describe("NavigationPanel", () => {
     expect(onBottomRightLonChange).toHaveBeenCalledWith("-118.0");
   });
 
-  it("renders probability-map mode with instructions and confirm button", () => {
+  it("renders probability-map mode with instruction, toggle, legend, and confirm button", () => {
     renderPanel({ probabilityMapMode: true });
 
     expect(screen.getByText("Hold Shift and drag on the map to select a region.")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Show labelled regions" })).toBeTruthy();
+    expect(screen.getByText("Label legend")).toBeTruthy();
+    expect(screen.getByText("Very unlikely")).toBeTruthy();
+    expect(screen.getByText("Excluded")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Set Search Area" })).toBeNull();
   });
@@ -122,11 +128,24 @@ describe("NavigationPanel", () => {
     expect(screen.getByText("Selected cells")).toBeTruthy();
     expect(screen.getByText("6")).toBeTruthy();
     expect(screen.getByLabelText("Region label")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Confirm Labelled Regions" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Apply Region" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel Selection" }));
 
     expect(onApplyTemporaryRegion).toHaveBeenCalledTimes(1);
     expect(onCancelTemporaryRegion).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onShowLabelledRegionsChange when the overlay toggle changes", () => {
+    const onShowLabelledRegionsChange = vi.fn();
+    renderPanel({
+      probabilityMapMode: true,
+      showLabelledRegions: true,
+      onShowLabelledRegionsChange,
+    });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show labelled regions" }));
+    expect(onShowLabelledRegionsChange).toHaveBeenCalledWith(false);
   });
 });
