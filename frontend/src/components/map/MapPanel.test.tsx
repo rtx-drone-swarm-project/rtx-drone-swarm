@@ -14,6 +14,7 @@ const off = vi.fn();
 const mocks = vi.hoisted(() => ({
   marker: vi.fn((_props: Record<string, unknown>) => null),
   polyline: vi.fn((_props: Record<string, unknown>) => null),
+  rectangle: vi.fn((_props: Record<string, unknown>) => null),
   makeCentroidIcon: vi.fn((_label: string, _phase?: string | null) => ({ icon: "centroid" })),
   makeDroneIcon: vi.fn((_label: string, _role?: string | null, _heading?: number) => ({ icon: "drone" })),
   makePlacedHikerIcon: vi.fn((_label: string, _movement: string, _locked?: boolean) => ({ icon: "placed-hiker" })),
@@ -26,7 +27,7 @@ vi.mock("react-leaflet", () => ({
   TileLayer: () => null,
   Marker: mocks.marker,
   Polyline: mocks.polyline,
-  Rectangle: () => null,
+  Rectangle: mocks.rectangle,
   useMap: () => ({
     flyTo,
     getCenter,
@@ -70,6 +71,11 @@ const defaultProps = {
   onSelectArea: vi.fn()
 };
 
+function isPmvHeatmapRectangle(props: Record<string, unknown>) {
+  const pathOptions = props.pathOptions as { className?: string } | undefined;
+  return pathOptions?.className === "pmv-heatmap-cell";
+}
+
 describe("MapPanel", () => {
   beforeEach(() => {
     flyTo.mockClear();
@@ -81,6 +87,7 @@ describe("MapPanel", () => {
     off.mockClear();
     mocks.marker.mockClear();
     mocks.polyline.mockClear();
+    mocks.rectangle.mockClear();
     mocks.makeCentroidIcon.mockClear();
     mocks.makeDroneIcon.mockClear();
     mocks.makePlacedHikerIcon.mockClear();
@@ -250,6 +257,84 @@ describe("MapPanel", () => {
         className: "sweep-drone-trail"
       })
     );
+  });
+
+  it("renders PMV heatmap rectangles only for active PMV missions", () => {
+    render(
+      <MapPanel
+        {...defaultProps}
+        missionActive
+        selectedAlgorithm="pmv"
+        pmvHeatmap={{
+          type: "pmv_heatmap",
+          mission_id: "mission-1",
+          algorithm: "pmv",
+          rows: 2,
+          cols: 2,
+          bounds: { min_lat: 0, max_lat: 2, min_lon: 10, max_lon: 12 },
+          values: [0.1, 0.2, 0.3, 0.4],
+          max_value: 0.4,
+          total_probability: 1
+        }}
+      />
+    );
+
+    expect(screen.getByLabelText("PMV heatmap")).toBeTruthy();
+    const heatmapRectangles = mocks.rectangle.mock.calls
+      .map(([props]) => props)
+      .filter(isPmvHeatmapRectangle);
+    expect(heatmapRectangles).toHaveLength(4);
+    expect(heatmapRectangles[0]?.bounds).toEqual([[0, 10], [1, 11]]);
+    expect(heatmapRectangles[3]?.bounds).toEqual([[1, 11], [2, 12]]);
+  });
+
+  it("hides PMV heatmap rectangles for non-PMV algorithms and when toggled off", () => {
+    const heatmap = {
+      type: "pmv_heatmap" as const,
+      mission_id: "mission-1",
+      algorithm: "pmv",
+      rows: 1,
+      cols: 1,
+      bounds: { min_lat: 0, max_lat: 1, min_lon: 0, max_lon: 1 },
+      values: [1],
+      max_value: 1,
+      total_probability: 1
+    };
+    const { rerender } = render(
+      <MapPanel
+        {...defaultProps}
+        missionActive
+        selectedAlgorithm="sweep"
+        pmvHeatmap={heatmap}
+      />
+    );
+
+    expect(screen.queryByLabelText("PMV heatmap")).toBeNull();
+    expect(mocks.rectangle.mock.calls.some(([props]) => isPmvHeatmapRectangle(props))).toBe(false);
+
+    mocks.rectangle.mockClear();
+    rerender(
+      <MapPanel
+        {...defaultProps}
+        missionActive
+        selectedAlgorithm="pmv"
+        pmvHeatmap={heatmap}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText("PMV heatmap"));
+
+    mocks.rectangle.mockClear();
+    rerender(
+      <MapPanel
+        {...defaultProps}
+        missionActive
+        selectedAlgorithm="pmv"
+        pmvHeatmap={heatmap}
+      />
+    );
+
+    expect(mocks.rectangle.mock.calls.some(([props]) => isPmvHeatmapRectangle(props))).toBe(false);
   });
 
   it("renders placed hikers as draggable markers before mission start", () => {

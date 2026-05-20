@@ -36,6 +36,8 @@ _MOVING_PROFILES = {
     "moving_edge_escape",
     "diverging_group",
 }
+DEFAULT_HEATMAP_ROWS = 20
+DEFAULT_HEATMAP_COLS = 20
 
 
 def _getm(mission, key: str, default=None):
@@ -49,6 +51,61 @@ def _setm(mission, key: str, value) -> None:
         mission[key] = value
     else:
         setattr(mission, key, value)
+
+
+def build_pmv_heatmap_payload(
+    mission,
+    *,
+    mission_id: str | None = None,
+    rows: int = DEFAULT_HEATMAP_ROWS,
+    cols: int = DEFAULT_HEATMAP_COLS,
+) -> dict | None:
+    """Return a bounded, coarse heatmap sampled from PMV posterior state."""
+    bounds = _getm(mission, "bounds", {})
+    grid = _getm(mission, "pmv_grid")
+    posterior = _getm(mission, "pmv_P")
+    if not bounds or grid is None or posterior is None or rows <= 0 or cols <= 0:
+        return None
+
+    min_lat = float(bounds["min_lat"])
+    max_lat = float(bounds["max_lat"])
+    min_lon = float(bounds["min_lon"])
+    max_lon = float(bounds["max_lon"])
+    lat_span = max(max_lat - min_lat, EPS)
+    lon_span = max(max_lon - min_lon, EPS)
+
+    grid_np = np.asarray(grid, dtype=float)
+    posterior_np = normalize_probability(np.asarray(posterior, dtype=float))
+    if len(grid_np) == 0 or len(grid_np) != len(posterior_np):
+        return None
+
+    heatmap = np.zeros((rows, cols), dtype=float)
+    lat_bins = np.floor(((grid_np[:, 0] - min_lat) / lat_span) * rows).astype(int)
+    lon_bins = np.floor(((grid_np[:, 1] - min_lon) / lon_span) * cols).astype(int)
+    lat_bins = np.clip(lat_bins, 0, rows - 1)
+    lon_bins = np.clip(lon_bins, 0, cols - 1)
+
+    for row_idx, col_idx, value in zip(lat_bins, lon_bins, posterior_np):
+        heatmap[int(row_idx), int(col_idx)] += float(value)
+
+    values = [round(float(value), 12) for value in heatmap.reshape(rows * cols)]
+    total_probability = float(sum(values))
+    return {
+        "type": "pmv_heatmap",
+        "mission_id": mission_id or str(_getm(mission, "id", "")),
+        "algorithm": "pmv",
+        "rows": rows,
+        "cols": cols,
+        "bounds": {
+            "min_lat": min_lat,
+            "max_lat": max_lat,
+            "min_lon": min_lon,
+            "max_lon": max_lon,
+        },
+        "values": values,
+        "max_value": round(max(values, default=0.0), 12),
+        "total_probability": round(total_probability, 12),
+    }
 
 
 class PMVSearchAlgorithm(BaseSearchAlgorithm):
@@ -99,6 +156,8 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
 
         profile = str(_getm(mission, "scenario_profile", "uniform_random") or "uniform_random")
         scenario_params = _getm(mission, "scenario_params", None)
+        # This is the Bayesian "belief map": one probability per dense-grid
+        # point, shaped by profile-level SAR clues and normalized to sum to 1.
         posterior = build_prior(bounds, dense_grid, profile, scenario_params)
 
         _setm(mission, "pmv_grid", dense_grid)
@@ -157,6 +216,9 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
             travel_cost = np.linalg.norm(candidate_points - pos, axis=1)
             travel_weight = np.exp(-travel_cost / max(LAMBDA_DEG, EPS))
             overlap_weight = self._overlap_weights(candidate_points, planned_points)
+            # Information-gain score: prefer high posterior mass, avoid sending
+            # two drones to overlapping sensor footprints in the same tick, and
+            # mildly penalize very long jumps across the assigned Voronoi cell.
             scores = posterior[cell_indices] * overlap_weight * travel_weight
 
             if float(scores.max(initial=0.0)) <= EPS:
@@ -185,6 +247,8 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
         updated = posterior.copy()
         scanned = _scanned_indices(grid, _getm(mission, "drones", []))
         if len(scanned) > 0:
+            # A scanned cell is not impossible, just much less likely after a
+            # failed detection; renormalization redistributes belief elsewhere.
             updated[scanned] *= (1.0 - DETECTION_PROB)
             updated = normalize_probability(updated)
 
@@ -193,6 +257,8 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
         last_diffuse = int(_getm(mission, "pmv_last_diffuse_t", elapsed) or 0)
         if profile in _MOVING_PROFILES and elapsed - last_diffuse >= DIFFUSE_INTERVAL_S:
             bounds = _getm(mission, "bounds", {})
+            # Moving-target profiles use a simple random-walk transition model:
+            # blur the posterior a little so probability can leak to neighbors.
             updated = _diffuse_probability(updated, grid, bounds, DIFFUSE_SIGMA_DEG)
             _setm(mission, "pmv_last_diffuse_t", elapsed)
 

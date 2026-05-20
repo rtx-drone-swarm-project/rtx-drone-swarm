@@ -38,6 +38,8 @@ def build_prior(
     scenario_params = scenario_params or {}
     clue_prior = _explicit_clue_prior(bounds, grid_np, scenario_params)
     if clue_prior is not None:
+        # Real SAR callers may provide explicit clues; benchmark runs should not
+        # populate these with sampled target internals, or PMV would get leakage.
         return normalize_probability(clue_prior)
 
     if scenario_profile in {"edge_targets", "moving_edge_escape"}:

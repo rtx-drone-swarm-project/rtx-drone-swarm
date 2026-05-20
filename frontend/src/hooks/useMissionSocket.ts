@@ -4,6 +4,7 @@ import type {
   BenchmarkProgressMessage,
   MissionProgressMessage,
   MissionStatusMessage,
+  PmvHeatmapMessage,
   TelemetryMessage,
   TargetFoundMessage
 } from "../types/ws";
@@ -15,6 +16,7 @@ type UseMissionSocketArgs = {
   onMissionStatus: (message: MissionStatusMessage) => void;
   onMissionProgress: (message: MissionProgressMessage) => void;
   onTargetFound: (message: TargetFoundMessage) => void;
+  onPmvHeatmap?: (message: PmvHeatmapMessage) => void;
   onBenchmarkProgress?: (message: BenchmarkProgressMessage) => void;
 };
 
@@ -29,6 +31,7 @@ export default function useMissionSocket({
   onMissionStatus,
   onMissionProgress,
   onTargetFound,
+  onPmvHeatmap,
   onBenchmarkProgress
 }: UseMissionSocketArgs) {
   useEffect(() => {
@@ -71,6 +74,11 @@ export default function useMissionSocket({
           return;
         }
 
+        if (payload.type === "pmv_heatmap") {
+          onPmvHeatmap?.(payload as PmvHeatmapMessage);
+          return;
+        }
+
         if (payload.type === "benchmark_progress") {
           onBenchmarkProgress?.(payload as BenchmarkProgressMessage);
         }
@@ -80,5 +88,5 @@ export default function useMissionSocket({
     };
 
     return () => ws.close();
-  }, [apiPort, onBenchmarkProgress, onConnectedChange, onMissionProgress, onMissionStatus, onTargetFound, onTelemetry]);
+  }, [apiPort, onBenchmarkProgress, onConnectedChange, onMissionProgress, onMissionStatus, onPmvHeatmap, onTargetFound, onTelemetry]);
 }
