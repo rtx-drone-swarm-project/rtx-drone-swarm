@@ -4,11 +4,13 @@ import type {
   AlgorithmOption,
   Bounds,
   PlacedHiker,
+  ProbabilityRegionLabel,
   ProbabilityGridCell,
   SelectedDrone,
   Target,
   ValidDrone
 } from "../../types/mission";
+import { PROBABILITY_REGION_CODE_BY_LABEL } from "../../types/mission";
 import { boundsToLeaflet } from "../../utils/geo";
 import MapBBoxDrawer from "./MapBBoxDrawer";
 import MapClickSelector from "./MapClickSelector";
@@ -130,6 +132,8 @@ type MapPanelProps = {
   onSelectTemporaryRegion: (bounds: Bounds) => void;
   temporaryRegionBounds: Bounds | null;
   temporaryRegionCells: ProbabilityGridCell[];
+  operatorLabelGrid?: number[][];
+  showLabelledRegions: boolean;
   droneTrails?: Record<string, [number, number][]>;
   selectedAlgorithm?: AlgorithmOption;
 };
@@ -140,6 +144,42 @@ const TRAIL_COLORS = ["#34d399", "#60a5fa", "#f472b6", "#fbbf24", "#a78bfa", "#2
 
 function trailColorForIndex(idx: number): string {
   return TRAIL_COLORS[idx % TRAIL_COLORS.length];
+}
+
+const APPLIED_REGION_STYLES: Record<Exclude<ProbabilityRegionLabel, "normal">, {
+  color: string;
+  fillColor: string;
+  fillOpacity: number;
+}> = {
+  very_unlikely: { color: "#7f1d1d", fillColor: "#7f1d1d", fillOpacity: 0.35 },
+  unlikely: { color: "#b91c1c", fillColor: "#b91c1c", fillOpacity: 0.25 },
+  likely: { color: "#15803d", fillColor: "#15803d", fillOpacity: 0.25 },
+  very_likely: { color: "#14532d", fillColor: "#14532d", fillOpacity: 0.35 },
+  excluded: { color: "#1f2937", fillColor: "#1f2937", fillOpacity: 0.5 },
+};
+
+function getAppliedRegionStyle(labelCode: number) {
+  if (labelCode === PROBABILITY_REGION_CODE_BY_LABEL.normal) {
+    return null;
+  }
+
+  if (labelCode === PROBABILITY_REGION_CODE_BY_LABEL.very_unlikely) {
+    return APPLIED_REGION_STYLES.very_unlikely;
+  }
+  if (labelCode === PROBABILITY_REGION_CODE_BY_LABEL.unlikely) {
+    return APPLIED_REGION_STYLES.unlikely;
+  }
+  if (labelCode === PROBABILITY_REGION_CODE_BY_LABEL.likely) {
+    return APPLIED_REGION_STYLES.likely;
+  }
+  if (labelCode === PROBABILITY_REGION_CODE_BY_LABEL.very_likely) {
+    return APPLIED_REGION_STYLES.very_likely;
+  }
+  if (labelCode === PROBABILITY_REGION_CODE_BY_LABEL.excluded) {
+    return APPLIED_REGION_STYLES.excluded;
+  }
+
+  return null;
 }
 
 export function getGridCellBounds(
@@ -203,6 +243,8 @@ export default function MapPanel({
   onSelectTemporaryRegion,
   temporaryRegionBounds,
   temporaryRegionCells,
+  operatorLabelGrid,
+  showLabelledRegions,
   droneTrails,
   selectedAlgorithm
 }: MapPanelProps) {
@@ -245,6 +287,32 @@ export default function MapPanel({
           />
         )}
 
+        {probabilityMapMode &&
+          showLabelledRegions &&
+          selectedBounds &&
+          Array.isArray(operatorLabelGrid) &&
+          operatorLabelGrid.flatMap((labelRow, row) =>
+            Array.isArray(labelRow)
+              ? labelRow.map((labelCode, col) => {
+                  const pathStyle = getAppliedRegionStyle(Number(labelCode));
+                  if (!pathStyle) return null;
+                  const cellBounds = getGridCellBounds(selectedBounds, gridShape, [row, col]);
+                  if (!cellBounds) return null;
+                  return (
+                    <Rectangle
+                      key={`applied-cell-${row}-${col}`}
+                      bounds={cellBounds}
+                      pathOptions={{
+                        ...pathStyle,
+                        weight: 0.4,
+                        opacity: 0.35,
+                      }}
+                    />
+                  );
+                })
+              : []
+          )}
+
         {selectedBounds && temporaryRegionCells.map((cell) => {
           const cellBounds = getGridCellBounds(selectedBounds, gridShape, cell);
           if (!cellBounds) return null;
@@ -252,7 +320,13 @@ export default function MapPanel({
             <Rectangle
               key={`temp-cell-${cell[0]}-${cell[1]}`}
               bounds={cellBounds}
-              pathOptions={{ color: "#f97316", fillColor: "#f97316", fillOpacity: 0.28, weight: 1 }}
+              pathOptions={{
+                color: "#38bdf8",
+                fillColor: "#60a5fa",
+                fillOpacity: 0.24,
+                dashArray: "6 4",
+                weight: 1.6,
+              }}
             />
           );
         })}

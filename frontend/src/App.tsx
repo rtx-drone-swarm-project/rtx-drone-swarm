@@ -80,6 +80,7 @@ export default function App() {
   const [placedHikers, setPlacedHikers] = useState<PlacedHiker[]>([]);
   const [selectedHikerId, setSelectedHikerId] = useState<string | null>(null);
   const [isPlacingHiker, setIsPlacingHiker] = useState(false);
+  const [showLabelledRegions, setShowLabelledRegions] = useState(true);
 
   // Ref so onMissionStatus can read current elapsed without it being a dep,
   // which would recreate the callback every second and reconnect the WebSocket.
@@ -552,6 +553,8 @@ export default function App() {
           onSelectTemporaryRegion={onSelectTemporaryRegion}
           temporaryRegionBounds={temporaryRegionBounds}
           temporaryRegionCells={temporaryRegionCells}
+          operatorLabelGrid={mission?.operator_label_grid}
+          showLabelledRegions={showLabelledRegions}
         />
 
         <aside className="left-rail">
@@ -587,12 +590,14 @@ export default function App() {
             searchAreaConfirmed={selectedBounds != null}
             temporaryRegionSelectedCellCount={temporaryRegionCells.length}
             temporaryRegionLabel={temporaryRegionLabel}
+            showLabelledRegions={showLabelledRegions}
             onTopLeftLatChange={onTopLeftLatChange}
             onTopLeftLonChange={onTopLeftLonChange}
             onBottomRightLatChange={onBottomRightLatChange}
             onBottomRightLonChange={onBottomRightLonChange}
             onSetSearchArea={onSetSearchArea}
             onConfirmSearchArea={confirmSearchArea}
+            onShowLabelledRegionsChange={setShowLabelledRegions}
             onTemporaryRegionLabelChange={setTemporaryRegionLabel}
             onApplyTemporaryRegion={onApplyTemporaryRegion}
             onCancelTemporaryRegion={clearTemporaryRegionSelection}

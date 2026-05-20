@@ -477,6 +477,84 @@ body,
   margin-bottom: 10px;
 }
 
+.panel-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 9px 10px;
+  border: 1px solid rgb(71 85 105 / 0.75);
+  border-radius: 8px;
+  background: rgb(15 23 42 / 0.55);
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.panel-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #3b82f6;
+}
+
+.probability-legend-block {
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid rgb(71 85 105 / 0.65);
+  border-radius: 8px;
+  background: rgb(2 6 23 / 0.42);
+}
+
+.probability-legend-title {
+  margin-bottom: 8px;
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.probability-legend-list {
+  display: grid;
+  gap: 7px;
+}
+
+.probability-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #e2e8f0;
+  font-size: 12px;
+}
+
+.probability-legend-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+}
+
+.probability-legend-swatch.very-unlikely {
+  background: rgb(127 29 29 / 0.8);
+}
+
+.probability-legend-swatch.unlikely {
+  background: rgb(185 28 28 / 0.72);
+}
+
+.probability-legend-swatch.likely {
+  background: rgb(21 128 61 / 0.72);
+}
+
+.probability-legend-swatch.very-likely {
+  background: rgb(20 83 45 / 0.82);
+}
+
+.probability-legend-swatch.excluded {
+  background: rgb(31 41 55 / 0.9);
+}
+
 .hiker-setup.is-disabled {
   opacity: 0.72;
 }

@@ -87,7 +87,9 @@ const defaultProps = {
   onSelectArea: vi.fn(),
   onSelectTemporaryRegion: vi.fn(),
   temporaryRegionBounds: null,
-  temporaryRegionCells: []
+  temporaryRegionCells: [],
+  operatorLabelGrid: undefined,
+  showLabelledRegions: true
 };
 
 describe("MapPanel", () => {
@@ -355,11 +357,67 @@ describe("MapPanel", () => {
 
     const temporaryCellCalls = mocks.rectangle.mock.calls
       .map(([props]) => props)
-      .filter((props) => (props.pathOptions as { fillColor?: string } | undefined)?.fillColor === "#f97316");
+      .filter((props) => (props.pathOptions as { fillColor?: string } | undefined)?.fillColor === "#60a5fa");
 
     expect(temporaryCellCalls).toHaveLength(2);
     expect(temporaryCellCalls[0]?.bounds).toEqual([[33.45, -117.2], [33.5, -117.15]]);
     expect(temporaryCellCalls[1]?.bounds).toEqual([[33.5, -117.25], [33.55, -117.2]]);
+  });
+
+  it("renders applied labelled-region overlays for non-normal cells only", () => {
+    render(
+      <MapPanel
+        {...defaultProps}
+        probabilityMapMode
+        selectedBounds={{ min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 }}
+        gridShape={[2, 3]}
+        operatorLabelGrid={[
+          [2, 3, 5],
+          [0, 4, 1],
+        ]}
+      />
+    );
+
+    const appliedCellCalls = mocks.rectangle.mock.calls
+      .map(([props]) => props)
+      .filter((props) => {
+        const fillColor = (props.pathOptions as { fillColor?: string } | undefined)?.fillColor;
+        return fillColor != null && fillColor !== "#60a5fa";
+      });
+
+    expect(appliedCellCalls).toHaveLength(5);
+    expect(appliedCellCalls.map((props) => props.bounds)).toEqual(
+      expect.arrayContaining([
+        [[33.45, -117.21666666666667], [33.5, -117.18333333333334]],
+        [[33.45, -117.18333333333334], [33.5, -117.15]],
+        [[33.5, -117.25], [33.55, -117.21666666666667]],
+      ])
+    );
+  });
+
+  it("hides applied labelled-region overlays when the toggle is off", () => {
+    render(
+      <MapPanel
+        {...defaultProps}
+        probabilityMapMode
+        showLabelledRegions={false}
+        selectedBounds={{ min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 }}
+        gridShape={[2, 2]}
+        operatorLabelGrid={[
+          [3, 5],
+          [2, 4],
+        ]}
+      />
+    );
+
+    const appliedCellCalls = mocks.rectangle.mock.calls
+      .map(([props]) => props)
+      .filter((props) => {
+        const fillColor = (props.pathOptions as { fillColor?: string } | undefined)?.fillColor;
+        return fillColor != null && fillColor !== "#60a5fa";
+      });
+
+    expect(appliedCellCalls).toHaveLength(0);
   });
 
   it("disables Leaflet box zoom so shift-drag does not auto-zoom", () => {

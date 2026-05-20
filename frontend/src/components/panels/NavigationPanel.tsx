@@ -1,13 +1,28 @@
 import CollapsibleSection from "../common/CollapsibleSection";
-import type { ProbabilityRegionLabel } from "../../types/mission";
+import {
+  PROBABILITY_REGION_LABELS,
+  type ProbabilityRegionLabel,
+} from "../../types/mission";
 
 const REGION_LABEL_OPTIONS: Array<{ value: ProbabilityRegionLabel; label: string }> = [
+  { value: "excluded", label: "Excluded" },
   { value: "very_unlikely", label: "Very unlikely" },
   { value: "unlikely", label: "Unlikely" },
   { value: "normal", label: "Normal" },
   { value: "likely", label: "Likely" },
   { value: "very_likely", label: "Very likely" },
-  { value: "excluded", label: "Excluded" },
+];
+
+const REGION_LABEL_LEGEND: Array<{
+  value: ProbabilityRegionLabel;
+  label: string;
+  className: string;
+}> = [
+  { value: "very_unlikely", label: "Very unlikely", className: "very-unlikely" },
+  { value: "unlikely", label: "Unlikely", className: "unlikely" },
+  { value: "likely", label: "Likely", className: "likely" },
+  { value: "very_likely", label: "Very likely", className: "very-likely" },
+  { value: "excluded", label: "Excluded", className: "excluded" },
 ];
 
 type NavigationPanelProps = {
@@ -21,17 +36,35 @@ type NavigationPanelProps = {
   searchAreaConfirmed: boolean;
   temporaryRegionSelectedCellCount: number;
   temporaryRegionLabel: ProbabilityRegionLabel | "";
+  showLabelledRegions: boolean;
   onTopLeftLatChange: (value: string) => void;
   onTopLeftLonChange: (value: string) => void;
   onBottomRightLatChange: (value: string) => void;
   onBottomRightLonChange: (value: string) => void;
   onSetSearchArea: () => void;
   onConfirmSearchArea: () => void;
+  onShowLabelledRegionsChange: (value: boolean) => void;
   onTemporaryRegionLabelChange: (value: ProbabilityRegionLabel | "") => void;
   onApplyTemporaryRegion: () => void;
   onCancelTemporaryRegion: () => void;
   onConfirmLabelledRegions: () => void;
 };
+
+function renderProbabilityLegend() {
+  return (
+    <div className="probability-legend-block">
+      <div className="probability-legend-title">Label legend</div>
+      <div className="probability-legend-list">
+        {REGION_LABEL_LEGEND.map((entry) => (
+          <div key={entry.value} className="probability-legend-item">
+            <span className={`probability-legend-swatch ${entry.className}`} />
+            <span>{entry.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function NavigationPanel({
   probabilityMapMode,
@@ -44,12 +77,14 @@ export default function NavigationPanel({
   searchAreaConfirmed,
   temporaryRegionSelectedCellCount,
   temporaryRegionLabel,
+  showLabelledRegions,
   onTopLeftLatChange,
   onTopLeftLonChange,
   onBottomRightLatChange,
   onBottomRightLonChange,
   onSetSearchArea,
   onConfirmSearchArea,
+  onShowLabelledRegionsChange,
   onTemporaryRegionLabelChange,
   onApplyTemporaryRegion,
   onCancelTemporaryRegion,
@@ -60,7 +95,9 @@ export default function NavigationPanel({
 
     return (
       <CollapsibleSection title="Navigation">
-        <div className="hint-text">Hold Shift and drag on the map to select a region.</div>
+        {!hasTemporarySelection && (
+          <div className="hint-text">Hold Shift and drag on the map to select a region.</div>
+        )}
         {hasTemporarySelection && (
           <>
             <div className="kv-grid region-preview-stats">
@@ -75,7 +112,7 @@ export default function NavigationPanel({
                 className="algorithm-select"
               >
                 <option value="">Select label</option>
-                {REGION_LABEL_OPTIONS.map((option) => (
+                {REGION_LABEL_OPTIONS.filter((option) => PROBABILITY_REGION_LABELS.includes(option.value)).map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -97,13 +134,24 @@ export default function NavigationPanel({
             </button>
           </>
         )}
-        <button
-          className="action-btn start"
-          onClick={onConfirmLabelledRegions}
-          disabled={missionActive}
-        >
-          Confirm Labelled Regions
-        </button>
+        <label className="panel-toggle">
+          <span>Show labelled regions</span>
+          <input
+            type="checkbox"
+            checked={showLabelledRegions}
+            onChange={(e) => onShowLabelledRegionsChange(e.target.checked)}
+          />
+        </label>
+        {renderProbabilityLegend()}
+        {!hasTemporarySelection && (
+          <button
+            className="action-btn start"
+            onClick={onConfirmLabelledRegions}
+            disabled={missionActive}
+          >
+            Confirm Labelled Regions
+          </button>
+        )}
       </CollapsibleSection>
     );
   }

@@ -191,6 +191,24 @@ export type ProbabilityRegionLabel =
 
 export type ProbabilityGridCell = [number, number];
 
+export const PROBABILITY_REGION_LABELS = [
+  "very_unlikely",
+  "unlikely",
+  "normal",
+  "likely",
+  "very_likely",
+  "excluded",
+] as const;
+
+export const PROBABILITY_REGION_CODE_BY_LABEL: Record<ProbabilityRegionLabel, number> = {
+  very_unlikely: 0,
+  unlikely: 1,
+  normal: 2,
+  likely: 3,
+  very_likely: 4,
+  excluded: 5,
+};
+
 export type PreviewProbabilityRegionResponse = {
   cells: ProbabilityGridCell[];
   count: number;
