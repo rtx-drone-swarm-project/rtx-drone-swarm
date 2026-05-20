@@ -32,6 +32,7 @@ ALGORITHM_SEED_OFFSETS = {
     "apf": 202,
     "sweep": 303,
     "vaco": 404,
+    "pmv": 505,
     "pso": 606,
 }
 
@@ -224,6 +225,7 @@ async def run_headless_trial(
         "progress": 0.0,
         "elapsed_seconds": 0,
         "algorithm": algorithm,
+        "scenario_profile": scenario_profile,
         "bounds": bounds,
         "grid": build_search_grid(bounds, n=15).tolist(),
         "drones": [dict[str, Any](drone) for drone in drone_starts],

@@ -1431,9 +1431,11 @@ def test_algorithms_endpoint_lists_discovered_registry_metadata():
     algorithms = response.json()["algorithms"]
     by_key = {item["key"]: item for item in algorithms}
 
-    assert {"voronoi", "voronoi_aco", "vaco", "apf", "sweep"}.issubset(by_key.keys())
+    assert {"voronoi", "voronoi_aco", "vaco", "apf", "sweep", "pmv"}.issubset(by_key.keys())
     assert by_key["voronoi"]["label"] == "Voronoi (Lloyd's)"
     assert by_key["voronoi_aco"]["label"] == "Voronoi (ACO)"
+    assert by_key["pmv"]["label"] == "PMV (Probability Map Voronoi)"
+    assert by_key["pmv"]["class_name"] == "PMVSearchAlgorithm"
     assert by_key["vaco"]["label"] == "VACO Hybrid (Optimized)"
     assert by_key["vaco"]["class_name"] == "VoronoiACOHybridCoverage"
 

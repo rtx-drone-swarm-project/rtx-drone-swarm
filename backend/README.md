@@ -162,4 +162,4 @@ cd backend
 pytest tests/
 ```
 
-The tests in `tests/test_main.py` cover health, mission lifecycle endpoints, SITL status behavior, and major simulation flows.
+The tests in `tests/test_main.py` cover health, mission lifecycle endpoints, SITL status behavior, and major simulation flows. Algorithm-specific tests such as `tests/test_pmv.py` exercise newer search logic and deterministic benchmark behavior.
