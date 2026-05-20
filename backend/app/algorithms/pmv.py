@@ -19,7 +19,7 @@ from app.algorithms.boustrophedon import (
     _partition_seeds,
     _voronoi_assign,
 )
-from app.algorithms.priors import build_prior
+from app.algorithms.priors import build_prior, normalize_probability
 
 
 logger = logging.getLogger(__name__)
@@ -186,7 +186,7 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
         scanned = _scanned_indices(grid, _getm(mission, "drones", []))
         if len(scanned) > 0:
             updated[scanned] *= (1.0 - DETECTION_PROB)
-            updated = _normalize(updated)
+            updated = normalize_probability(updated)
 
         profile = str(_getm(mission, "pmv_profile", _getm(mission, "scenario_profile", "uniform_random")))
         elapsed = int(_getm(mission, "elapsed_seconds", 0) or 0)
@@ -196,7 +196,7 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
             updated = _diffuse_probability(updated, grid, bounds, DIFFUSE_SIGMA_DEG)
             _setm(mission, "pmv_last_diffuse_t", elapsed)
 
-        return _normalize(updated)
+        return normalize_probability(updated)
 
     def _overlap_weights(
         self,
@@ -231,17 +231,6 @@ def _scanned_indices(grid: np.ndarray, drones: list[dict]) -> np.ndarray:
     return np.array(sorted(scanned), dtype=int)
 
 
-def _normalize(values: np.ndarray) -> np.ndarray:
-    values = np.asarray(values, dtype=float)
-    values = np.where(np.isfinite(values) & (values > 0), values, 0.0)
-    total = float(values.sum())
-    if total <= 0:
-        if len(values) == 0:
-            return values
-        return np.ones(len(values), dtype=float) / len(values)
-    return values / total
-
-
 def _diffuse_probability(
     posterior: np.ndarray,
     grid: np.ndarray,
@@ -249,12 +238,12 @@ def _diffuse_probability(
     sigma_deg: float,
 ) -> np.ndarray:
     if len(posterior) <= 1:
-        return _normalize(posterior)
+        return normalize_probability(posterior)
 
     unique_lats = np.unique(np.round(grid[:, 0], 12))
     unique_lons = np.unique(np.round(grid[:, 1], 12))
     if len(unique_lats) * len(unique_lons) != len(posterior):
-        return _normalize(posterior)
+        return normalize_probability(posterior)
 
     lat_index = {value: idx for idx, value in enumerate(unique_lats.tolist())}
     lon_index = {value: idx for idx, value in enumerate(unique_lons.tolist())}
@@ -273,7 +262,7 @@ def _diffuse_probability(
     diffused = _convolve_axis(diffused, lon_kernel, axis=1)
 
     flat = diffused[lat_ids, lon_ids]
-    return _normalize(flat)
+    return normalize_probability(flat)
 
 
 def _axis_step(axis_values: np.ndarray, fallback_span: float) -> float:

@@ -38,23 +38,25 @@ def build_prior(
     scenario_params = scenario_params or {}
     clue_prior = _explicit_clue_prior(bounds, grid_np, scenario_params)
     if clue_prior is not None:
-        return _normalize(clue_prior)
+        return normalize_probability(clue_prior)
 
     if scenario_profile in {"edge_targets", "moving_edge_escape"}:
-        return _normalize(_edge_prior(bounds, grid_np))
+        return normalize_probability(_edge_prior(bounds, grid_np))
     if scenario_profile == "corridor_route":
-        return _normalize(_corridor_prior(bounds, grid_np, scenario_params))
+        return normalize_probability(_corridor_prior(bounds, grid_np, scenario_params))
     if scenario_profile in {"clustered_targets", "diverging_group"}:
-        return _normalize(_center_prior(bounds, grid_np))
+        return normalize_probability(_center_prior(bounds, grid_np))
     if scenario_profile == "split_clusters":
-        return _normalize(_split_cluster_prior(bounds, grid_np))
+        return normalize_probability(_split_cluster_prior(bounds, grid_np))
 
     # uniform_random, clustered_drones, wandering_hikers, and unknown future
-    # profiles fall back to the uninformative prior.
-    return _normalize(np.ones(len(grid_np), dtype=float))
+    # profiles fall back to the uninformative prior. wandering_hikers is still
+    # treated as moving during posterior diffusion; it has no launch-time
+    # spatial cue in the benchmark generator.
+    return normalize_probability(np.ones(len(grid_np), dtype=float))
 
 
-def _normalize(weights: np.ndarray) -> np.ndarray:
+def normalize_probability(weights: np.ndarray) -> np.ndarray:
     weights = np.asarray(weights, dtype=float)
     weights = np.where(np.isfinite(weights) & (weights > 0), weights, 0.0)
     total = float(weights.sum())

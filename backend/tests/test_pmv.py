@@ -12,6 +12,7 @@ from app.algorithms.priors import (
     BOUNDARY_BAND_DEG,
     CORRIDOR_HALFWIDTH_DEG,
     build_prior,
+    normalize_probability,
 )
 from app.benchmark import AttrDict, SCENARIO_PROFILES, run_headless_trial
 
@@ -93,6 +94,20 @@ def test_pmv_priors_have_expected_mass_location():
         (_BOUNDS["max_lat"], _BOUNDS["max_lon"]),
     ) <= CORRIDOR_HALFWIDTH_DEG
     assert float(corridor_prior[corridor_mask].sum()) > 0.5
+
+
+def test_wandering_hikers_prior_is_uniform_without_explicit_clues():
+    grid = build_dense_coverage_grid(_BOUNDS)
+
+    prior = build_prior(_BOUNDS, grid, "wandering_hikers")
+
+    assert np.allclose(prior, np.ones(len(grid), dtype=float) / len(grid))
+
+
+def test_probability_normalization_sanitizes_invalid_weights():
+    normalized = normalize_probability(np.array([np.nan, np.inf, -1.0, 0.0, 2.0]))
+
+    assert np.allclose(normalized, np.array([0.0, 0.0, 0.0, 0.0, 1.0]))
 
 
 def test_pmv_posterior_decays_after_scan():
