@@ -843,6 +843,69 @@ def test_confirm_probability_grid_sets_probability_grid_confirmed_true():
     assert response.json()["probability_grid_confirmed"] is True
 
 
+def test_reopen_probability_grid_sets_probability_grid_confirmed_false_and_keeps_labels():
+    mission_data = {
+        "name": "Reopen Probability Grid Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=5)
+
+    apply_response = client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={
+            "label": "likely",
+            "rect_bounds": {
+                "min_lat": 34.07,
+                "max_lat": 34.1,
+                "min_lon": -118.1,
+                "max_lon": -118.04,
+            },
+        },
+    )
+    assert apply_response.status_code == 200
+    expected_labels = mission_db[mission_id].operator_label_grid.tolist()
+
+    confirm_response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
+    assert confirm_response.status_code == 200
+    assert confirm_response.json()["probability_grid_confirmed"] is True
+
+    reopen_response = client.post(f"/missions/{mission_id}/probability-grid/reopen")
+    assert reopen_response.status_code == 200
+    payload = reopen_response.json()
+    assert payload["probability_grid_confirmed"] is False
+    assert payload["operator_label_grid"] == expected_labels
+    assert payload["probability_grid"] is not None
+
+
+def test_reopen_probability_grid_rejects_when_search_area_not_confirmed():
+    mission_data = {
+        "name": "Reopen Without Search Area Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+
+    reopen_response = client.post(f"/missions/{mission_id}/probability-grid/reopen")
+    assert reopen_response.status_code == 400
+    assert reopen_response.json() == {
+        "detail": "Search area must be confirmed before reopening probability grid"
+    }
+
+
 def test_confirm_probability_grid_rejects_if_all_cells_are_excluded():
     mission_data = {
         "name": "Reject All Excluded Probability Grid Mission",

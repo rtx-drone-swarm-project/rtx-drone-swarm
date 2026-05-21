@@ -219,4 +219,27 @@ describe("missionClient", () => {
       })
     );
   });
+
+  it("confirms and reopens the probability grid with expected requests", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", probability_grid_confirmed: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", probability_grid_confirmed: false }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMissionClient("http://localhost:8000");
+
+    await client.confirmProbabilityGrid("m1");
+    await client.reopenProbabilityGrid("m1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8000/missions/m1/probability-grid/confirm",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8000/missions/m1/probability-grid/reopen",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
 });

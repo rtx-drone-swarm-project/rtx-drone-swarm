@@ -5,16 +5,20 @@ import NavigationPanel from "./NavigationPanel";
 function renderPanel(overrides: Partial<React.ComponentProps<typeof NavigationPanel>> = {}) {
   const defaults = {
     probabilityMapMode: false,
+    probabilityMapReviewMode: false,
     topLeftLat: "33.550000",
     topLeftLon: "-117.250000",
     bottomRightLat: "33.450000",
     bottomRightLon: "-117.150000",
+    selectedBounds: null,
+    gridShape: undefined,
     isValidBounds: true,
     missionActive: false,
     searchAreaConfirmed: true,
     temporaryRegionSelectedCellCount: 0,
     temporaryRegionLabel: "" as const,
     showLabelledRegions: true,
+    showProbabilityHeatmap: false,
     onTopLeftLatChange: vi.fn(),
     onTopLeftLonChange: vi.fn(),
     onBottomRightLatChange: vi.fn(),
@@ -22,10 +26,12 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof NavigationPa
     onSetSearchArea: vi.fn(),
     onConfirmSearchArea: vi.fn(),
     onShowLabelledRegionsChange: vi.fn(),
+    onShowProbabilityHeatmapChange: vi.fn(),
     onTemporaryRegionLabelChange: vi.fn(),
     onApplyTemporaryRegion: vi.fn(),
     onCancelTemporaryRegion: vi.fn(),
-    onConfirmLabelledRegions: vi.fn()
+    onConfirmLabelledRegions: vi.fn(),
+    onBackToLabelledRegions: vi.fn(),
   };
   return render(<NavigationPanel {...defaults} {...overrides} />);
 }
@@ -107,7 +113,7 @@ describe("NavigationPanel", () => {
 
     expect(screen.getByText("Hold Shift and drag on the map to select a region.")).toBeTruthy();
     expect(screen.getByRole("checkbox", { name: "Show labelled regions" })).toBeTruthy();
-    expect(screen.getByText("Label legend")).toBeTruthy();
+    expect(screen.getByText("Region label legend")).toBeTruthy();
     expect(screen.getByText("Very unlikely")).toBeTruthy();
     expect(screen.getByText("Excluded")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
@@ -147,5 +153,56 @@ describe("NavigationPanel", () => {
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Show labelled regions" }));
     expect(onShowLabelledRegionsChange).toHaveBeenCalledWith(false);
+  });
+
+  it("renders the post-confirmation probability review panel", () => {
+    const onBackToLabelledRegions = vi.fn();
+    const onShowProbabilityHeatmapChange = vi.fn();
+
+    renderPanel({
+      probabilityMapMode: true,
+      probabilityMapReviewMode: true,
+      selectedBounds: {
+        min_lat: 33.45,
+        max_lat: 33.55,
+        min_lon: -117.25,
+        max_lon: -117.15,
+      },
+      gridShape: [4, 6],
+      showProbabilityHeatmap: true,
+      showLabelledRegions: false,
+      onBackToLabelledRegions,
+      onShowProbabilityHeatmapChange,
+    });
+
+    expect(screen.getByText("Probability Map")).toBeTruthy();
+    expect(screen.getByText("Search area bounds")).toBeTruthy();
+    expect(screen.getByText("Grid shape")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Show probability heatmap" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Show labelled regions" })).toBeTruthy();
+    expect(screen.getByText("Heatmap legend")).toBeTruthy();
+    expect(screen.getByText("Low probability")).toBeTruthy();
+    expect(screen.getByText("High probability")).toBeTruthy();
+    expect(screen.queryByText("Region label legend")).toBeNull();
+    expect(screen.getByRole("button", { name: "Back to Labelled Regions" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Confirm Labelled Regions" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show probability heatmap" }));
+    expect(onShowProbabilityHeatmapChange).toHaveBeenCalledWith(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to Labelled Regions" }));
+    expect(onBackToLabelledRegions).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the raw label legend separately in review mode when labelled regions are enabled", () => {
+    renderPanel({
+      probabilityMapMode: true,
+      probabilityMapReviewMode: true,
+      showProbabilityHeatmap: false,
+      showLabelledRegions: true,
+    });
+
+    expect(screen.queryByText("Heatmap legend")).toBeNull();
+    expect(screen.getByText("Region label legend")).toBeTruthy();
   });
 });

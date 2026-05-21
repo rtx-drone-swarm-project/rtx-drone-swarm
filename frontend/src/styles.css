@@ -520,6 +520,30 @@ body,
   gap: 7px;
 }
 
+.heatmap-legend-block {
+  display: grid;
+  gap: 8px;
+}
+
+.heatmap-legend-scale {
+  height: 12px;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  background: linear-gradient(90deg, #bfdbfe 0%, #60a5fa 45%, #3b82f6 70%, #1e40af 100%);
+}
+
+.heatmap-legend-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #cbd5e1;
+  font-size: 11px;
+}
+
+.heatmap-excluded-item {
+  margin-top: 2px;
+}
+
 .probability-legend-item {
   display: flex;
   align-items: center;
@@ -553,6 +577,20 @@ body,
 
 .probability-legend-swatch.excluded {
   background: rgb(31 41 55 / 0.9);
+}
+
+.review-grid {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.review-title {
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .hiker-setup.is-disabled {

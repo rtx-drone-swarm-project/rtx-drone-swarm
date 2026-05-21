@@ -187,6 +187,22 @@ def confirm_probability_grid(mission_id: str):
     return mission.to_dict()
 
 
+@router.post("/missions/{mission_id}/probability-grid/reopen")
+def reopen_probability_grid(mission_id: str):
+    """Return a confirmed probability map to editable label-review mode."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    if not mission.search_area_confirmed:
+        raise HTTPException(status_code=400, detail="Search area must be confirmed before reopening probability grid")
+    if mission.operator_label_grid is None:
+        raise HTTPException(status_code=400, detail="Operator label grid is not initialized")
+
+    mission.probability_grid_confirmed = False
+    return mission.to_dict()
+
+
 async def _background_dispatch(mission: Mission, mission_id: str, assignments: List[dict]) -> None:
     """Run startup dispatch in the background and broadcast normalized results."""
     logger.info("_background_dispatch: dispatching %d drones for mission %s", len(assignments), mission_id)
