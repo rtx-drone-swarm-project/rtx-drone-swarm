@@ -1,4 +1,4 @@
-import type { AlgorithmMetadata, AlgorithmOption, Bounds, MissionRecord } from "../../types/mission";
+import type { AlgorithmMetadata, AlgorithmOption, Bounds, MissionRecord, SetupStage } from "../../types/mission";
 import type { MissionStatus } from "../../types/ws";
 import CollapsibleSection from "../common/CollapsibleSection";
 
@@ -9,6 +9,9 @@ type ActionsPanelProps = {
   missionLocked: boolean;
   validDroneCount: number;
   mission: MissionRecord | null;
+  setupStage: SetupStage;
+  canStartMission: boolean;
+  startMissionHelperText: string | null;
   selectedAlgorithm: AlgorithmOption;
   algorithmOptions: AlgorithmMetadata[];
   onAlgorithmChange: (algorithm: AlgorithmOption) => void;
@@ -25,6 +28,9 @@ export default function ActionsPanel({
   missionLocked,
   validDroneCount,
   mission,
+  setupStage,
+  canStartMission,
+  startMissionHelperText,
   selectedAlgorithm,
   algorithmOptions,
   onAlgorithmChange,
@@ -36,7 +42,6 @@ export default function ActionsPanel({
   const selectorDisabled = missionActive || missionLocked;
   const missionRunning = missionStatus === "searching" || missionStatus === "recalling";
   const probabilityGridConfirmed = mission?.probability_grid_confirmed === true;
-  const canStartMission = Boolean(selectedBounds) && !missionActive && !missionLocked;
 
   return (
     <CollapsibleSection title="Actions">
@@ -68,8 +73,9 @@ export default function ActionsPanel({
       </button>
 
       {!selectedBounds && <div className="hint-text">Enter coordinates above and press "Set Search Area", or Shift-drag on the map to draw the search area.</div>}
-      {selectedBounds && !probabilityGridConfirmed && !missionActive && !missionLocked && (
-        <div className="hint-text">Optional: configure a probability map before starting if you want weighted search behavior.</div>
+      {startMissionHelperText && <div className="hint-text">{startMissionHelperText}</div>}
+      {setupStage === "review_probability_map" && !probabilityGridConfirmed && (
+        <div className="hint-text">Confirm the labelled regions before starting with a probability map.</div>
       )}
 
       {missionLocked && (

@@ -27,6 +27,7 @@ import type {
   MissionState,
   PlacedHiker,
   SelectedDrone,
+  SetupStage,
   Target,
   TelemetryDrone,
   ValidDrone
@@ -80,7 +81,8 @@ export default function App() {
   const [placedHikers, setPlacedHikers] = useState<PlacedHiker[]>([]);
   const [selectedHikerId, setSelectedHikerId] = useState<string | null>(null);
   const [isPlacingHiker, setIsPlacingHiker] = useState(false);
-  const [showLabelledRegions, setShowLabelledRegions] = useState(true);
+  const [setupStage, setSetupStage] = useState<SetupStage>("search_area");
+  const [showLabelledRegions, setShowLabelledRegions] = useState(false);
   const [showProbabilityHeatmap, setShowProbabilityHeatmap] = useState(false);
 
   // Ref so onMissionStatus can read current elapsed without it being a dep,
@@ -88,7 +90,6 @@ export default function App() {
   const elapsedSecondsRef = useRef(elapsedSeconds);
   const runningMissionIdRef = useRef<string | null>(null);
   const nextHikerNumberRef = useRef(1);
-  const previousProbabilityPanelModeRef = useRef<"off" | "label" | "review">("off");
   useEffect(() => {
     elapsedSecondsRef.current = elapsedSeconds;
   }, [elapsedSeconds]);
@@ -99,7 +100,6 @@ export default function App() {
   const [hikerLabelById, setHikerLabelById] = useState<Record<string, number>>({});
 
   const {
-    probabilityMapMode,
     temporaryRegionBounds,
     temporaryRegionCells,
     temporaryRegionLabel,
@@ -109,15 +109,16 @@ export default function App() {
     onApplyTemporaryRegion,
     onConfirmLabelledRegions,
     onReopenProbabilityGrid,
+    onResetProbabilityGrid,
   } = useProbabilityMapEditor({
     apiClient,
     mission,
     setMission,
+    probabilityRegionEditingEnabled: setupStage === "label_regions",
   });
 
   const {
     selectedBounds,
-    setSelectedBounds,
     topLeftLat,
     topLeftLon,
     bottomRightLat,
@@ -125,7 +126,6 @@ export default function App() {
     isValidBounds,
     isPointInsideBounds,
     setIsValidBounds,
-    updateSearchAreaFields,
     onTopLeftLatChange,
     onTopLeftLonChange,
     onBottomRightLatChange,
@@ -418,50 +418,21 @@ export default function App() {
   const missionActive = missionStatus !== "idle" && missionStatus !== "mission_complete";
   const missionComplete = missionStatus === "mission_complete";
   const hikerPlacementEditable = selectedBounds != null && !missionActive && !missionLocked;
-  const probabilityMapReviewMode =
-    probabilityMapMode && mission?.probability_grid_confirmed === true;
-  const probabilityPanelMode: "off" | "label" | "review" = !probabilityMapMode
-    ? "off"
-    : probabilityMapReviewMode
-      ? "review"
-      : "label";
-
-  useEffect(() => {
-    if (previousProbabilityPanelModeRef.current === probabilityPanelMode) {
-      return;
-    }
-
-    previousProbabilityPanelModeRef.current = probabilityPanelMode;
-
-    if (probabilityPanelMode === "review") {
-      setShowProbabilityHeatmap(true);
-      setShowLabelledRegions(false);
-      return;
-    }
-
-    if (probabilityPanelMode === "label") {
-      setShowProbabilityHeatmap(false);
-      setShowLabelledRegions(true);
-      return;
-    }
-
-    if (probabilityPanelMode === "off") {
-      setShowProbabilityHeatmap(false);
-      setShowLabelledRegions(true);
-    }
-  }, [probabilityPanelMode]);
-
-  useEffect(() => {
-    if (missionActive) {
-      setShowProbabilityHeatmap(false);
-    }
-  }, [missionActive]);
 
   useEffect(() => {
     if (!hikerPlacementEditable) {
       setIsPlacingHiker(false);
     }
   }, [hikerPlacementEditable]);
+
+  useEffect(() => {
+    if (missionActive && setupStage !== "active_mission") {
+      setSetupStage("active_mission");
+      setShowProbabilityHeatmap(false);
+      setShowLabelledRegions(false);
+      clearTemporaryRegionSelection();
+    }
+  }, [clearTemporaryRegionSelection, missionActive, setupStage]);
 
   useEffect(() => {
     if (!mission || !targets.length) return;
@@ -493,13 +464,119 @@ export default function App() {
     setDroneTrails({});
   }, []);
 
-  const handleConfirmLabelledRegions = useCallback(async () => {
-    await onConfirmLabelledRegions();
-  }, [onConfirmLabelledRegions]);
+  const configureProbabilityMap = useCallback(async () => {
+    if (!selectedBounds) {
+      setIsValidBounds(false);
+      return;
+    }
 
-  const onBackToLabelledRegions = useCallback(async () => {
-    await onReopenProbabilityGrid();
-  }, [onReopenProbabilityGrid]);
+    const confirmedMission = await confirmSearchArea();
+    if (!confirmedMission) return;
+
+    clearTemporaryRegionSelection();
+    setSetupStage("label_regions");
+    setShowLabelledRegions(true);
+    setShowProbabilityHeatmap(false);
+  }, [clearTemporaryRegionSelection, confirmSearchArea, selectedBounds, setIsValidBounds]);
+
+  const backFromLabelRegions = useCallback(async () => {
+    if (mission?.id) {
+      await onResetProbabilityGrid();
+    } else {
+      setMission((current) =>
+        current
+          ? {
+              ...current,
+              probability_grid_confirmed: false,
+            }
+          : current
+      );
+    }
+
+    clearTemporaryRegionSelection();
+    setSetupStage("search_area");
+    setShowLabelledRegions(false);
+    setShowProbabilityHeatmap(false);
+  }, [clearTemporaryRegionSelection, mission?.id, onResetProbabilityGrid, setMission]);
+
+  const handleConfirmLabelledRegions = useCallback(async () => {
+    const confirmedMission = await onConfirmLabelledRegions();
+    if (!confirmedMission) return;
+
+    clearTemporaryRegionSelection();
+    setSetupStage("review_probability_map");
+    setShowProbabilityHeatmap(true);
+    setShowLabelledRegions(false);
+  }, [clearTemporaryRegionSelection, onConfirmLabelledRegions]);
+
+  const backFromReview = useCallback(async () => {
+    if (mission?.id) {
+      await onReopenProbabilityGrid();
+    } else {
+      setMission((current) =>
+        current
+          ? {
+              ...current,
+              probability_grid_confirmed: false,
+            }
+          : current
+      );
+    }
+
+    clearTemporaryRegionSelection();
+    setSetupStage("label_regions");
+    setShowProbabilityHeatmap(false);
+    setShowLabelledRegions(true);
+  }, [clearTemporaryRegionSelection, mission?.id, onReopenProbabilityGrid, setMission]);
+
+  const handleStartMission = useCallback(async () => {
+    if (setupStage === "label_regions") {
+      return;
+    }
+
+    if (setupStage === "review_probability_map" && mission?.probability_grid_confirmed !== true) {
+      return;
+    }
+
+    const startedMission = await startMission();
+    if (!startedMission) return;
+
+    clearTemporaryRegionSelection();
+    setSetupStage("active_mission");
+    setShowProbabilityHeatmap(false);
+    setShowLabelledRegions(false);
+  }, [clearTemporaryRegionSelection, mission?.probability_grid_confirmed, setupStage, startMission]);
+
+  const hasCustomProbabilityLabels = useMemo(() => {
+    const labelGrid = mission?.operator_label_grid;
+    if (!Array.isArray(labelGrid)) return false;
+    return labelGrid.some((row) => Array.isArray(row) && row.some((labelCode) => Number(labelCode) !== 2));
+  }, [mission?.operator_label_grid]);
+
+  const probabilityMapAvailable = mission?.probability_grid_confirmed === true;
+
+  const probabilityMapConfigured = setupStage !== "search_area" || mission?.probability_grid_confirmed === true;
+
+  const canStartMission = useMemo(() => {
+    if (!selectedBounds || missionActive || missionLocked) return false;
+    if (setupStage === "label_regions") return false;
+    if (setupStage === "review_probability_map") {
+      return mission?.probability_grid_confirmed === true;
+    }
+    return true;
+  }, [mission?.probability_grid_confirmed, missionActive, missionLocked, selectedBounds, setupStage]);
+
+  const startMissionHelperText = useMemo(() => {
+    if (setupStage === "label_regions") {
+      return "Finish or go back from probability-map setup before starting.";
+    }
+    if (selectedBounds && !missionActive && !missionLocked && !probabilityMapConfigured) {
+      return "Optional: configure a probability map before starting if you want weighted search behavior.";
+    }
+    return null;
+  }, [missionActive, missionLocked, probabilityMapConfigured, selectedBounds, setupStage]);
+
+  const searchAreaEditingDisabled = setupStage === "active_mission";
 
   const onResetMission = useCallback(() => {
     runningMissionIdRef.current = null;
@@ -509,6 +586,9 @@ export default function App() {
     setSelectedHikerId(null);
     setIsPlacingHiker(false);
     clearTemporaryRegionSelection();
+    setSetupStage("search_area");
+    setShowLabelledRegions(false);
+    setShowProbabilityHeatmap(false);
     resetMissionLock();
   }, [clearTemporaryRegionSelection, resetMissionLock]);
 
@@ -582,9 +662,9 @@ export default function App() {
           defaultZoom={DEFAULT_ZOOM}
           mapCenter={mapCenter}
           selectedBounds={selectedBounds}
+          missionBounds={mission?.bounds}
           gridShape={mission?.grid_shape}
-          probabilityMapMode={probabilityMapMode}
-          probabilityMapReviewMode={probabilityMapReviewMode}
+          setupStage={setupStage}
           missionActive={missionActive}
           validDrones={validDrones}
           targets={targets}
@@ -633,8 +713,7 @@ export default function App() {
 
         <aside className="right-rail">
           <NavigationPanel
-            probabilityMapMode={probabilityMapMode}
-            probabilityMapReviewMode={probabilityMapReviewMode}
+            setupStage={setupStage}
             topLeftLat={topLeftLat}
             topLeftLon={topLeftLon}
             bottomRightLat={bottomRightLat}
@@ -643,25 +722,30 @@ export default function App() {
             gridShape={mission?.grid_shape}
             isValidBounds={isValidBounds}
             missionActive={missionActive}
+            missionLocked={missionLocked}
             missionStatus={missionStatus}
             searchAreaConfirmed={selectedBounds != null}
             temporaryRegionSelectedCellCount={temporaryRegionCells.length}
             temporaryRegionLabel={temporaryRegionLabel}
             showLabelledRegions={showLabelledRegions}
             showProbabilityHeatmap={showProbabilityHeatmap}
+            hasCustomProbabilityLabels={hasCustomProbabilityLabels}
+            probabilityMapAvailable={probabilityMapAvailable}
+            searchAreaEditingDisabled={searchAreaEditingDisabled}
             onTopLeftLatChange={onTopLeftLatChange}
             onTopLeftLonChange={onTopLeftLonChange}
             onBottomRightLatChange={onBottomRightLatChange}
             onBottomRightLonChange={onBottomRightLonChange}
             onSetSearchArea={onSetSearchArea}
-            onConfirmSearchArea={confirmSearchArea}
+            onConfigureProbabilityMap={configureProbabilityMap}
             onShowLabelledRegionsChange={setShowLabelledRegions}
             onShowProbabilityHeatmapChange={setShowProbabilityHeatmap}
             onTemporaryRegionLabelChange={setTemporaryRegionLabel}
             onApplyTemporaryRegion={onApplyTemporaryRegion}
             onCancelTemporaryRegion={clearTemporaryRegionSelection}
+            onBackFromLabelRegions={backFromLabelRegions}
             onConfirmLabelledRegions={handleConfirmLabelledRegions}
-            onBackToLabelledRegions={onBackToLabelledRegions}
+            onBackFromReview={backFromReview}
           />
           <ActionsPanel
             selectedBounds={selectedBounds}
@@ -670,10 +754,13 @@ export default function App() {
             missionLocked={missionLocked}
             validDroneCount={validDroneCount}
             mission={mission}
+            setupStage={setupStage}
+            canStartMission={canStartMission}
+            startMissionHelperText={startMissionHelperText}
             selectedAlgorithm={selectedAlgorithm}
             algorithmOptions={algorithmOptions}
             onAlgorithmChange={onAlgorithmChange}
-            onStartMission={startMission}
+            onStartMission={handleStartMission}
             onStopMission={stopMission}
             onRecallDrones={recallDrones}
             onResetMission={onResetMission}

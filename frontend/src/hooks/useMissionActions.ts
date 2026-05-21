@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { createMissionClient } from "../api/missionClient";
-import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionHikerInput, MissionState, PlacedHiker, Target, ValidDrone } from "../types/mission";
+import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionHikerInput, MissionRecord, MissionState, PlacedHiker, Target, ValidDrone } from "../types/mission";
 import type { MissionStatus } from "../types/ws";
 
 type UseMissionActionsArgs = {
@@ -111,36 +111,50 @@ export default function useMissionActions({
 }: UseMissionActionsArgs) {
   const missionClient = useMemo(() => createMissionClient(apiBase), [apiBase]);
 
-  const confirmSearchArea = async () => {
-    if (!selectedBounds) {
-      setIsValidBounds(false);
-      return;
+  const ensureMission = async (
+    bounds: Bounds,
+    missionDrones?: MissionDroneInput[],
+    missionHikers?: MissionHikerInput[]
+  ): Promise<MissionRecord> => {
+    if (mission?.id) {
+      return mission;
     }
 
-    let missionRecord = mission;
+    const createdMission = await missionClient.createMission({
+      name: `SAR-${new Date().toISOString()}`,
+      bounds,
+      ...(missionDrones ? { drones: missionDrones } : {}),
+      ...(missionHikers && missionHikers.length > 0 ? { hikers: missionHikers } : {}),
+      algorithm: selectedAlgorithm,
+    });
+    setMission(createdMission);
+    return createdMission;
+  };
+
+  const confirmSearchArea = async (): Promise<MissionRecord | null> => {
+    if (!selectedBounds) {
+      setIsValidBounds(false);
+      return null;
+    }
 
     try {
-      if (!missionRecord?.id) {
-        missionRecord = await missionClient.createMission({
-          name: `SAR-${new Date().toISOString()}`,
-          bounds: selectedBounds,
-        });
-      }
-
+      const missionRecord = await ensureMission(selectedBounds);
       const confirmedMission = await missionClient.confirmSearchArea(missionRecord.id, {
         bounds: selectedBounds
       });
       clearTemporaryRegionSelection();
       setMission(confirmedMission);
+      return confirmedMission;
     } catch (err) {
       console.warn(`Confirm search area failed: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
     }
-  }
+  };
 
-  const startMission = async () => {
+  const startMission = async (): Promise<MissionRecord | null> => {
     if (missionLocked || !selectedBounds) {
       console.warn("Start failed: search area must be selected before starting the mission");
-      return;
+      return null;
     }
 
     setMissionStatus("searching");
@@ -155,31 +169,23 @@ export default function useMissionActions({
     const missionDrones: MissionDroneInput[] = buildMissionDrones(validDrones, validDroneCount, selectedBounds);
     const missionHikers: MissionHikerInput[] = placedHikers.map(toMissionHikerInput);
     try {
-      let missionRecord = mission;
-      if (!missionRecord?.id) {
-        missionRecord = await missionClient.createMission({
-          name: `SAR-${new Date().toISOString()}`,
-          bounds: selectedBounds,
-          drones: missionDrones,
-          hikers: missionHikers,
-          algorithm: selectedAlgorithm,
-        });
-        setMission(missionRecord);
-      }
+      const missionRecord = await ensureMission(selectedBounds, missionDrones, missionHikers);
 
       const payload = {
         drones: missionDrones,
-        hikers: missionHikers,
+        ...(missionHikers.length > 0 ? { hikers: missionHikers } : {}),
         algorithm: selectedAlgorithm,
-      }
+      };
       const started = await missionClient.startMission(missionRecord.id, payload);
       setMission(started);
       setMissionStatus("searching");
       setProgress(started.progress ?? 0);
       if (Array.isArray(started.targets)) setTargets(started.targets);
+      return started;
     } catch (err) {
       setMissionStatus("idle");
       console.warn(`Start failed: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
     }
   };
 

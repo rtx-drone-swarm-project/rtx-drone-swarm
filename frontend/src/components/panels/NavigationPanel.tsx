@@ -2,6 +2,7 @@ import CollapsibleSection from "../common/CollapsibleSection";
 import {
   PROBABILITY_REGION_LABELS,
   type ProbabilityRegionLabel,
+  type SetupStage,
 } from "../../types/mission";
 
 const REGION_LABEL_OPTIONS: Array<{ value: ProbabilityRegionLabel; label: string }> = [
@@ -26,8 +27,7 @@ const REGION_LABEL_LEGEND: Array<{
 ];
 
 type NavigationPanelProps = {
-  probabilityMapMode: boolean;
-  probabilityMapReviewMode: boolean;
+  setupStage: SetupStage;
   topLeftLat: string;
   topLeftLon: string;
   bottomRightLat: string;
@@ -41,25 +41,30 @@ type NavigationPanelProps = {
   gridShape?: [number, number] | number[];
   isValidBounds: boolean;
   missionActive: boolean;
+  missionLocked: boolean;
   missionStatus: string;
   searchAreaConfirmed: boolean;
   temporaryRegionSelectedCellCount: number;
   temporaryRegionLabel: ProbabilityRegionLabel | "";
   showLabelledRegions: boolean;
   showProbabilityHeatmap: boolean;
+  hasCustomProbabilityLabels: boolean;
+  probabilityMapAvailable: boolean;
+  searchAreaEditingDisabled: boolean;
   onTopLeftLatChange: (value: string) => void;
   onTopLeftLonChange: (value: string) => void;
   onBottomRightLatChange: (value: string) => void;
   onBottomRightLonChange: (value: string) => void;
   onSetSearchArea: () => void;
-  onConfirmSearchArea: () => void;
+  onConfigureProbabilityMap: () => void;
   onShowLabelledRegionsChange: (value: boolean) => void;
   onShowProbabilityHeatmapChange: (value: boolean) => void;
   onTemporaryRegionLabelChange: (value: ProbabilityRegionLabel | "") => void;
   onApplyTemporaryRegion: () => void;
   onCancelTemporaryRegion: () => void;
+  onBackFromLabelRegions: () => void;
   onConfirmLabelledRegions: () => void;
-  onBackToLabelledRegions: () => void;
+  onBackFromReview: () => void;
 };
 
 function renderProbabilityLegend() {
@@ -96,8 +101,7 @@ function renderHeatmapLegend() {
 }
 
 export default function NavigationPanel({
-  probabilityMapMode,
-  probabilityMapReviewMode,
+  setupStage,
   topLeftLat,
   topLeftLon,
   bottomRightLat,
@@ -106,78 +110,96 @@ export default function NavigationPanel({
   gridShape,
   isValidBounds,
   missionActive,
+  missionLocked,
   missionStatus,
   searchAreaConfirmed,
   temporaryRegionSelectedCellCount,
   temporaryRegionLabel,
   showLabelledRegions,
   showProbabilityHeatmap,
+  hasCustomProbabilityLabels,
+  probabilityMapAvailable,
+  searchAreaEditingDisabled,
   onTopLeftLatChange,
   onTopLeftLonChange,
   onBottomRightLatChange,
   onBottomRightLonChange,
   onSetSearchArea,
-  onConfirmSearchArea,
+  onConfigureProbabilityMap,
   onShowLabelledRegionsChange,
   onShowProbabilityHeatmapChange,
   onTemporaryRegionLabelChange,
   onApplyTemporaryRegion,
   onCancelTemporaryRegion,
+  onBackFromLabelRegions,
   onConfirmLabelledRegions,
-  onBackToLabelledRegions,
+  onBackFromReview,
 }: NavigationPanelProps) {
-  if (probabilityMapMode) {
-    if (probabilityMapReviewMode) {
-      return (
-        <CollapsibleSection title="Probability Map">
-          {selectedBounds && (
-            <div className="review-grid">
-              <div className="review-title">Search area bounds</div>
-              <div className="kv-grid">
-                <span>Min latitude</span>
-                <strong>{selectedBounds.min_lat.toFixed(6)}</strong>
-                <span>Max latitude</span>
-                <strong>{selectedBounds.max_lat.toFixed(6)}</strong>
-                <span>Min longitude</span>
-                <strong>{selectedBounds.min_lon.toFixed(6)}</strong>
-                <span>Max longitude</span>
-                <strong>{selectedBounds.max_lon.toFixed(6)}</strong>
-              </div>
+  if (setupStage === "review_probability_map" || (setupStage === "active_mission" && probabilityMapAvailable)) {
+    return (
+      <CollapsibleSection title= "Mission Map">
+        {selectedBounds && (
+          <div className="review-grid">
+            <div className="review-title">Search area bounds</div>
+            <div className="kv-grid">
+              <span>Min latitude</span>
+              <strong>{selectedBounds.min_lat.toFixed(6)}</strong>
+              <span>Max latitude</span>
+              <strong>{selectedBounds.max_lat.toFixed(6)}</strong>
+              <span>Min longitude</span>
+              <strong>{selectedBounds.min_lon.toFixed(6)}</strong>
+              <span>Max longitude</span>
+              <strong>{selectedBounds.max_lon.toFixed(6)}</strong>
+              {gridShape?.length === 2 && (
+                <>
+                  <span>Grid shape</span>
+                  <strong>{`${gridShape[0]} x ${gridShape[1]}`}</strong>
+                </>
+              )}
             </div>
-          )}
-          <label className="panel-toggle">
-            <span>Show probability heatmap</span>
-            <input
-              type="checkbox"
-              checked={showProbabilityHeatmap}
-              onChange={(e) => onShowProbabilityHeatmapChange(e.target.checked)}
-            />
-          </label>
-          {showProbabilityHeatmap && renderHeatmapLegend()}
-          <label className="panel-toggle">
-            <span>Show labelled regions</span>
-            <input
-              type="checkbox"
-              checked={showLabelledRegions}
-              onChange={(e) => onShowLabelledRegionsChange(e.target.checked)}
-            />
-          </label>
-          {showLabelledRegions && renderProbabilityLegend()}
+          </div>
+        )}
+        <label className="panel-toggle">
+          <span>Show probability heatmap</span>
+          <input
+            type="checkbox"
+            checked={showProbabilityHeatmap}
+            onChange={(e) => onShowProbabilityHeatmapChange(e.target.checked)}
+          />
+        </label>
+        {showProbabilityHeatmap && renderHeatmapLegend()}
+        <label className="panel-toggle">
+          <span>Show labelled regions</span>
+          <input
+            type="checkbox"
+            checked={showLabelledRegions}
+            onChange={(e) => onShowLabelledRegionsChange(e.target.checked)}
+          />
+        </label>
+        {showLabelledRegions && renderProbabilityLegend()}
+        {setupStage === "active_mission" && (
+          <div className="hint-text">
+            Probability overlays are hidden during active missions by default. Use toggles to show them.
+          </div>
+        )}
+        {setupStage === "review_probability_map" && (
           <button
             className="action-btn reset"
-            onClick={onBackToLabelledRegions}
+            onClick={onBackFromReview}
             disabled={missionActive || missionStatus === "mission_completed"}
           >
-            Back to Labelled Regions
+          Back
           </button>
-        </CollapsibleSection>
-      );
-    }
+        )}
+      </CollapsibleSection>
+    );
+  }
 
+  if (setupStage === "label_regions") {
     const hasTemporarySelection = temporaryRegionSelectedCellCount > 0;
 
     return (
-      <CollapsibleSection title="Navigation">
+      <CollapsibleSection title="Region Labelling">
         {!hasTemporarySelection && (
           <div className="hint-text">Hold Shift and drag on the map to select a region.</div>
         )}
@@ -209,38 +231,26 @@ export default function NavigationPanel({
             >
               Apply Region
             </button>
-            <button
-              className="action-btn reset"
-              onClick={onCancelTemporaryRegion}
-            >
+            <button className="action-btn reset" onClick={onCancelTemporaryRegion}>
               Cancel Selection
             </button>
           </>
         )}
-        <label className="panel-toggle">
-          <span>Show labelled regions</span>
-          <input
-            type="checkbox"
-            checked={showLabelledRegions}
-            onChange={(e) => onShowLabelledRegionsChange(e.target.checked)}
-          />
-        </label>
         {renderProbabilityLegend()}
         {!hasTemporarySelection && (
-          <button
-            className="action-btn start"
-            onClick={onConfirmLabelledRegions}
-            disabled={missionActive}
-          >
+          <button className="action-btn start" onClick={onConfirmLabelledRegions} disabled={missionActive}>
             Confirm Labelled Regions
           </button>
         )}
+        <button className="action-btn reset" onClick={onBackFromLabelRegions}>
+          Back
+        </button>
       </CollapsibleSection>
     );
   }
 
   return (
-    <CollapsibleSection title="Navigation">
+    <CollapsibleSection title="Search Area">
       <label className="field">
         Top-left latitude
         <input
@@ -249,6 +259,7 @@ export default function NavigationPanel({
           placeholder="e.g. 33.5000"
           onChange={(e) => onTopLeftLatChange(e.target.value)}
           className={isValidBounds ? "" : "invalid"}
+          disabled={searchAreaEditingDisabled}
         />
       </label>
       <label className="field">
@@ -259,6 +270,7 @@ export default function NavigationPanel({
           placeholder="e.g. -117.2000"
           onChange={(e) => onTopLeftLonChange(e.target.value)}
           className={isValidBounds ? "" : "invalid"}
+          disabled={searchAreaEditingDisabled}
         />
       </label>
       <label className="field">
@@ -269,6 +281,7 @@ export default function NavigationPanel({
           placeholder="e.g. 33.4500"
           onChange={(e) => onBottomRightLatChange(e.target.value)}
           className={isValidBounds ? "" : "invalid"}
+          disabled={searchAreaEditingDisabled}
         />
       </label>
       <label className="field">
@@ -279,6 +292,7 @@ export default function NavigationPanel({
           placeholder="e.g. -117.1500"
           onChange={(e) => onBottomRightLonChange(e.target.value)}
           className={isValidBounds ? "" : "invalid"}
+          disabled={searchAreaEditingDisabled}
         />
       </label>
       {!isValidBounds && (
@@ -290,14 +304,14 @@ export default function NavigationPanel({
       <button
         className="action-btn start"
         onClick={onSetSearchArea}
-        disabled={!isValidBounds || missionActive}
+        disabled={!isValidBounds || missionActive || missionLocked || searchAreaEditingDisabled}
       >
         Set Search Area
       </button>
       <button
         className="action-btn start"
-        onClick={onConfirmSearchArea}
-        disabled={!isValidBounds || !searchAreaConfirmed || missionActive}
+        onClick={onConfigureProbabilityMap}
+        disabled={!isValidBounds || !searchAreaConfirmed || missionActive || missionLocked || searchAreaEditingDisabled}
       >
         Configure Probability Map
       </button>

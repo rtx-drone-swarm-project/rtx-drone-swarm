@@ -181,6 +181,12 @@ export type MissionRecord = {
   probability_grid_confirmed?: boolean;
 };
 
+export type SetupStage =
+  | "search_area"
+  | "label_regions"
+  | "review_probability_map"
+  | "active_mission";
+
 export type ProbabilityRegionLabel =
   | "very_unlikely"
   | "unlikely"

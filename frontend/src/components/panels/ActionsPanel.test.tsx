@@ -17,6 +17,9 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof ActionsPanel
     missionLocked: false,
     validDroneCount: 15,
     mission: null,
+    setupStage: "search_area" as const,
+    canStartMission: true,
+    startMissionHelperText: null,
     selectedAlgorithm: "voronoi" as const,
     algorithmOptions: DEFAULT_ALGORITHM_OPTIONS,
     onAlgorithmChange: vi.fn(),
@@ -71,6 +74,7 @@ describe("ActionsPanel", () => {
         search_area_confirmed: true,
         probability_grid_confirmed: false,
       },
+      startMissionHelperText: "Optional: configure a probability map before starting if you want weighted search behavior.",
     });
 
     const startButton = screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement;
@@ -90,5 +94,17 @@ describe("ActionsPanel", () => {
 
     const startButton = screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement;
     expect(startButton.disabled).toBe(false);
+  });
+
+  it("disables start during region labelling", () => {
+    renderPanel({
+      setupStage: "label_regions",
+      canStartMission: false,
+      startMissionHelperText: "Finish or go back from probability-map setup before starting.",
+    });
+
+    const startButton = screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement;
+    expect(startButton.disabled).toBe(true);
+    expect(screen.getByText("Finish or go back from probability-map setup before starting.")).toBeTruthy();
   });
 });

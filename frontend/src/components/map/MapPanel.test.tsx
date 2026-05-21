@@ -70,9 +70,9 @@ const defaultProps = {
   defaultZoom: 13,
   mapCenter: null,
   selectedBounds: null,
+  missionBounds: undefined,
   gridShape: undefined,
-  probabilityMapMode: false,
-  probabilityMapReviewMode: false,
+  setupStage: "search_area" as const,
   missionActive: false,
   validDrones: [],
   targets: [],
@@ -93,6 +93,11 @@ const defaultProps = {
   showLabelledRegions: true,
   probabilityGrid: undefined,
   showProbabilityHeatmap: false
+};
+
+type MockRectangleProps = {
+  bounds: [[number, number], [number, number]];
+  pathOptions?: { fillColor?: string; fillOpacity?: number };
 };
 
 describe("MapPanel", () => {
@@ -126,6 +131,48 @@ describe("MapPanel", () => {
   it("renders the map container", () => {
     render(<MapPanel {...defaultProps} />);
     expect(screen.getByTestId("map-container")).toBeTruthy();
+  });
+
+  it("renders probability overlays with mission bounds during an active mission", () => {
+    render(
+      <MapPanel
+        {...defaultProps}
+        setupStage="active_mission"
+        missionActive
+        selectedBounds={null}
+        missionBounds={{
+          min_lat: 33.45,
+          max_lat: 33.55,
+          min_lon: -117.25,
+          max_lon: -117.15,
+        }}
+        gridShape={[2, 2]}
+        operatorLabelGrid={[
+          [2, 3],
+          [2, 5],
+        ]}
+        searchableMask={[
+          [true, true],
+          [true, false],
+        ]}
+        probabilityGrid={[0.1, 0.2, 0.7, 0]}
+        showLabelledRegions
+        showProbabilityHeatmap
+      />
+    );
+
+    const overlayCalls = mocks.rectangle.mock.calls.map(([props]) => props as MockRectangleProps);
+    const heatmapCalls = overlayCalls.filter((props) => {
+      const fillColor = props.pathOptions?.fillColor;
+      return fillColor === "#bfdbfe" || fillColor === "#3b82f6" || fillColor === "#1e40af" || fillColor === "#1f2937";
+    });
+    expect(heatmapCalls.length).toBeGreaterThan(0);
+
+    const labelledCalls = overlayCalls.filter((props) => {
+      const fillColor = props.pathOptions?.fillColor;
+      return fillColor === "#15803d" || fillColor === "#1f2937";
+    });
+    expect(labelledCalls.length).toBeGreaterThan(0);
   });
 
   it("pan button is disabled when hasDrones is false", () => {
@@ -323,7 +370,7 @@ describe("MapPanel", () => {
     render(
       <MapPanel
         {...defaultProps}
-        probabilityMapMode
+        setupStage="label_regions"
         onSelectTemporaryRegion={onSelectTemporaryRegion}
       />
     );
@@ -371,7 +418,7 @@ describe("MapPanel", () => {
     render(
       <MapPanel
         {...defaultProps}
-        probabilityMapMode
+        setupStage="label_regions"
         selectedBounds={{ min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 }}
         gridShape={[2, 3]}
         operatorLabelGrid={[
@@ -402,7 +449,7 @@ describe("MapPanel", () => {
     render(
       <MapPanel
         {...defaultProps}
-        probabilityMapMode
+        setupStage="label_regions"
         showLabelledRegions={false}
         selectedBounds={{ min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 }}
         gridShape={[2, 2]}
@@ -427,7 +474,7 @@ describe("MapPanel", () => {
     render(
       <MapPanel
         {...defaultProps}
-        probabilityMapMode
+        setupStage="label_regions"
         selectedBounds={{ min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 }}
         gridShape={[2, 2]}
         probabilityGrid={[0, 0.1, 0.3, 0.6]}
@@ -445,7 +492,7 @@ describe("MapPanel", () => {
     );
 
     const heatmapCalls = mocks.rectangle.mock.calls
-      .map(([props]) => props)
+      .map(([props]) => props as MockRectangleProps)
       .filter((props) => {
         const fillColor = (props.pathOptions as { fillColor?: string } | undefined)?.fillColor;
         return fillColor === "#bfdbfe" || fillColor === "#3b82f6" || fillColor === "#1e40af" || fillColor === "#1f2937";
@@ -505,7 +552,7 @@ describe("MapPanel", () => {
     render(
       <MapPanel
         {...defaultProps}
-        probabilityMapMode
+        setupStage="label_regions"
         selectedBounds={{ min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 }}
         gridShape={[2, 2]}
         probabilityGrid={[0, 0.25, 0.25, 0.25]}
@@ -565,14 +612,14 @@ describe("MapPanel", () => {
   });
 
   it("disables Leaflet box zoom so shift-drag does not auto-zoom", () => {
-    render(<MapPanel {...defaultProps} probabilityMapMode />);
+    render(<MapPanel {...defaultProps} setupStage="label_regions" />);
 
     const mapContainerProps = mocks.mapContainer.mock.calls[0]?.[0];
     expect(mapContainerProps?.boxZoom).toBe(false);
   });
 
   it("disables probability-region shift-drag in review mode", () => {
-    render(<MapPanel {...defaultProps} probabilityMapMode probabilityMapReviewMode />);
+    render(<MapPanel {...defaultProps} setupStage="review_probability_map" />);
 
     expect(bboxDrawerMock.props).toHaveLength(2);
     expect(bboxDrawerMock.props[1].enabled).toBe(false);

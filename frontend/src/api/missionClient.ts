@@ -36,9 +36,10 @@ export type MissionApiClient = {
   ) => Promise<ApplyProbabilityRegionResponse>;
   confirmProbabilityGrid: (missionId: string | number) => Promise<MissionRecord>;
   reopenProbabilityGrid: (missionId: string | number) => Promise<MissionRecord>;
+  resetProbabilityGrid: (missionId: string | number) => Promise<MissionRecord>;
   startMission: (
     missionId: string | number,
-    payload?: MissionStartRequest
+    payload?: MissionStartRequest | AlgorithmOption
   ) => Promise<MissionRecord>;
   stopMission: (missionId: string | number) => Promise<MissionRecord>;
   deleteMission: (missionId: string | number) => Promise<void>;
@@ -89,6 +90,11 @@ export function createMissionClient(apiBase: string): MissionApiClient {
 
     reopenProbabilityGrid: (missionId) =>
       requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/probability-grid/reopen`, {
+        method: "POST"
+      }),
+
+    resetProbabilityGrid: (missionId) =>
+      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/probability-grid/reset`, {
         method: "POST"
       }),
 
