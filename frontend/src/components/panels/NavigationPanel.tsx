@@ -27,16 +27,26 @@ const REGION_LABEL_LEGEND: Array<{
 
 type NavigationPanelProps = {
   probabilityMapMode: boolean;
+  probabilityMapReviewMode: boolean;
   topLeftLat: string;
   topLeftLon: string;
   bottomRightLat: string;
   bottomRightLon: string;
+  selectedBounds: {
+    min_lat: number;
+    max_lat: number;
+    min_lon: number;
+    max_lon: number;
+  } | null;
+  gridShape?: [number, number] | number[];
   isValidBounds: boolean;
   missionActive: boolean;
+  missionStatus: string;
   searchAreaConfirmed: boolean;
   temporaryRegionSelectedCellCount: number;
   temporaryRegionLabel: ProbabilityRegionLabel | "";
   showLabelledRegions: boolean;
+  showProbabilityHeatmap: boolean;
   onTopLeftLatChange: (value: string) => void;
   onTopLeftLonChange: (value: string) => void;
   onBottomRightLatChange: (value: string) => void;
@@ -44,16 +54,18 @@ type NavigationPanelProps = {
   onSetSearchArea: () => void;
   onConfirmSearchArea: () => void;
   onShowLabelledRegionsChange: (value: boolean) => void;
+  onShowProbabilityHeatmapChange: (value: boolean) => void;
   onTemporaryRegionLabelChange: (value: ProbabilityRegionLabel | "") => void;
   onApplyTemporaryRegion: () => void;
   onCancelTemporaryRegion: () => void;
   onConfirmLabelledRegions: () => void;
+  onBackToLabelledRegions: () => void;
 };
 
 function renderProbabilityLegend() {
   return (
     <div className="probability-legend-block">
-      <div className="probability-legend-title">Label legend</div>
+      <div className="probability-legend-title">Region label legend</div>
       <div className="probability-legend-list">
         {REGION_LABEL_LEGEND.map((entry) => (
           <div key={entry.value} className="probability-legend-item">
@@ -66,18 +78,40 @@ function renderProbabilityLegend() {
   );
 }
 
+function renderHeatmapLegend() {
+  return (
+    <div className="probability-legend-block heatmap-legend-block">
+      <div className="probability-legend-title">Heatmap legend</div>
+      <div className="heatmap-legend-scale" aria-hidden="true" />
+      <div className="heatmap-legend-labels">
+        <span>Low probability</span>
+        <span>High probability</span>
+      </div>
+      <div className="probability-legend-item heatmap-excluded-item">
+        <span className="probability-legend-swatch excluded" />
+        <span>Excluded</span>
+      </div>
+    </div>
+  );
+}
+
 export default function NavigationPanel({
   probabilityMapMode,
+  probabilityMapReviewMode,
   topLeftLat,
   topLeftLon,
   bottomRightLat,
   bottomRightLon,
+  selectedBounds,
+  gridShape,
   isValidBounds,
   missionActive,
+  missionStatus,
   searchAreaConfirmed,
   temporaryRegionSelectedCellCount,
   temporaryRegionLabel,
   showLabelledRegions,
+  showProbabilityHeatmap,
   onTopLeftLatChange,
   onTopLeftLonChange,
   onBottomRightLatChange,
@@ -85,12 +119,71 @@ export default function NavigationPanel({
   onSetSearchArea,
   onConfirmSearchArea,
   onShowLabelledRegionsChange,
+  onShowProbabilityHeatmapChange,
   onTemporaryRegionLabelChange,
   onApplyTemporaryRegion,
   onCancelTemporaryRegion,
-  onConfirmLabelledRegions
+  onConfirmLabelledRegions,
+  onBackToLabelledRegions,
 }: NavigationPanelProps) {
   if (probabilityMapMode) {
+    if (probabilityMapReviewMode) {
+      const rows = Number(gridShape?.[0] ?? 0);
+      const cols = Number(gridShape?.[1] ?? 0);
+
+      return (
+        <CollapsibleSection title="Probability Map">
+          {selectedBounds && (
+            <div className="review-grid">
+              <div className="review-title">Search area bounds</div>
+              <div className="kv-grid">
+                <span>Min latitude</span>
+                <strong>{selectedBounds.min_lat.toFixed(6)}</strong>
+                <span>Max latitude</span>
+                <strong>{selectedBounds.max_lat.toFixed(6)}</strong>
+                <span>Min longitude</span>
+                <strong>{selectedBounds.min_lon.toFixed(6)}</strong>
+                <span>Max longitude</span>
+                <strong>{selectedBounds.max_lon.toFixed(6)}</strong>
+              </div>
+              <div className="review-title">Grid shape</div>
+              <div className="kv-grid">
+                <span>Rows</span>
+                <strong>{Number.isFinite(rows) ? rows : 0}</strong>
+                <span>Columns</span>
+                <strong>{Number.isFinite(cols) ? cols : 0}</strong>
+              </div>
+            </div>
+          )}
+          <label className="panel-toggle">
+            <span>Show probability heatmap</span>
+            <input
+              type="checkbox"
+              checked={showProbabilityHeatmap}
+              onChange={(e) => onShowProbabilityHeatmapChange(e.target.checked)}
+            />
+          </label>
+          {showProbabilityHeatmap && renderHeatmapLegend()}
+          <label className="panel-toggle">
+            <span>Show labelled regions</span>
+            <input
+              type="checkbox"
+              checked={showLabelledRegions}
+              onChange={(e) => onShowLabelledRegionsChange(e.target.checked)}
+            />
+          </label>
+          {showLabelledRegions && renderProbabilityLegend()}
+          <button
+            className="action-btn reset"
+            onClick={onBackToLabelledRegions}
+            disabled={missionActive || missionStatus === "mission_completed"}
+          >
+            Back to Labelled Regions
+          </button>
+        </CollapsibleSection>
+      );
+    }
+
     const hasTemporarySelection = temporaryRegionSelectedCellCount > 0;
 
     return (

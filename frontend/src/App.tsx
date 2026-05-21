@@ -83,12 +83,14 @@ export default function App() {
   const [selectedHikerId, setSelectedHikerId] = useState<string | null>(null);
   const [isPlacingHiker, setIsPlacingHiker] = useState(false);
   const [showLabelledRegions, setShowLabelledRegions] = useState(true);
+  const [showProbabilityHeatmap, setShowProbabilityHeatmap] = useState(false);
 
   // Ref so onMissionStatus can read current elapsed without it being a dep,
   // which would recreate the callback every second and reconnect the WebSocket.
   const elapsedSecondsRef = useRef(elapsedSeconds);
   const runningMissionIdRef = useRef<string | null>(null);
   const nextHikerNumberRef = useRef(1);
+  const previousProbabilityPanelModeRef = useRef<"off" | "label" | "review">("off");
   useEffect(() => {
     elapsedSecondsRef.current = elapsedSeconds;
   }, [elapsedSeconds]);
@@ -108,6 +110,7 @@ export default function App() {
     onSelectTemporaryRegion,
     onApplyTemporaryRegion,
     onConfirmLabelledRegions,
+    onReopenProbabilityGrid,
   } = useProbabilityMapEditor({
     apiClient,
     mission,
@@ -396,6 +399,44 @@ export default function App() {
   const missionActive = missionStatus !== "idle" && missionStatus !== "mission_complete";
   const missionComplete = missionStatus === "mission_complete";
   const hikerPlacementEditable = selectedBounds != null && !missionActive && !missionLocked;
+  const probabilityMapReviewMode =
+    probabilityMapMode && mission?.probability_grid_confirmed === true;
+  const probabilityPanelMode: "off" | "label" | "review" = !probabilityMapMode
+    ? "off"
+    : probabilityMapReviewMode
+      ? "review"
+      : "label";
+
+  useEffect(() => {
+    if (previousProbabilityPanelModeRef.current === probabilityPanelMode) {
+      return;
+    }
+
+    previousProbabilityPanelModeRef.current = probabilityPanelMode;
+
+    if (probabilityPanelMode === "review") {
+      setShowProbabilityHeatmap(true);
+      setShowLabelledRegions(false);
+      return;
+    }
+
+    if (probabilityPanelMode === "label") {
+      setShowProbabilityHeatmap(false);
+      setShowLabelledRegions(true);
+      return;
+    }
+
+    if (probabilityPanelMode === "off") {
+      setShowProbabilityHeatmap(false);
+      setShowLabelledRegions(true);
+    }
+  }, [probabilityPanelMode]);
+
+  useEffect(() => {
+    if (missionActive) {
+      setShowProbabilityHeatmap(false);
+    }
+  }, [missionActive]);
 
   useEffect(() => {
     if (!hikerPlacementEditable) {
@@ -463,6 +504,14 @@ export default function App() {
     setDroneTrails({});
     setPmvHeatmap(null);
   }, []);
+
+  const handleConfirmLabelledRegions = useCallback(async () => {
+    await onConfirmLabelledRegions();
+  }, [onConfirmLabelledRegions]);
+
+  const onBackToLabelledRegions = useCallback(async () => {
+    await onReopenProbabilityGrid();
+  }, [onReopenProbabilityGrid]);
 
   const onResetMission = useCallback(() => {
     runningMissionIdRef.current = null;
@@ -548,6 +597,7 @@ export default function App() {
           selectedBounds={selectedBounds}
           gridShape={mission?.grid_shape}
           probabilityMapMode={probabilityMapMode}
+          probabilityMapReviewMode={probabilityMapReviewMode}
           missionActive={missionActive}
           validDrones={validDrones}
           targets={targets}
@@ -568,7 +618,10 @@ export default function App() {
           temporaryRegionBounds={temporaryRegionBounds}
           temporaryRegionCells={temporaryRegionCells}
           operatorLabelGrid={mission?.operator_label_grid}
+          searchableMask={mission?.searchable_mask}
           showLabelledRegions={showLabelledRegions}
+          probabilityGrid={mission?.probability_grid}
+          showProbabilityHeatmap={showProbabilityHeatmap}
         />
 
         <aside className="left-rail">
@@ -595,16 +648,21 @@ export default function App() {
         <aside className="right-rail">
           <NavigationPanel
             probabilityMapMode={probabilityMapMode}
+            probabilityMapReviewMode={probabilityMapReviewMode}
             topLeftLat={topLeftLat}
             topLeftLon={topLeftLon}
             bottomRightLat={bottomRightLat}
             bottomRightLon={bottomRightLon}
+            selectedBounds={selectedBounds}
+            gridShape={mission?.grid_shape}
             isValidBounds={isValidBounds}
             missionActive={missionActive}
+            missionStatus={missionStatus}
             searchAreaConfirmed={selectedBounds != null}
             temporaryRegionSelectedCellCount={temporaryRegionCells.length}
             temporaryRegionLabel={temporaryRegionLabel}
             showLabelledRegions={showLabelledRegions}
+            showProbabilityHeatmap={showProbabilityHeatmap}
             onTopLeftLatChange={onTopLeftLatChange}
             onTopLeftLonChange={onTopLeftLonChange}
             onBottomRightLatChange={onBottomRightLatChange}
@@ -612,10 +670,12 @@ export default function App() {
             onSetSearchArea={onSetSearchArea}
             onConfirmSearchArea={confirmSearchArea}
             onShowLabelledRegionsChange={setShowLabelledRegions}
+            onShowProbabilityHeatmapChange={setShowProbabilityHeatmap}
             onTemporaryRegionLabelChange={setTemporaryRegionLabel}
             onApplyTemporaryRegion={onApplyTemporaryRegion}
             onCancelTemporaryRegion={clearTemporaryRegionSelection}
-            onConfirmLabelledRegions={onConfirmLabelledRegions}
+            onConfirmLabelledRegions={handleConfirmLabelledRegions}
+            onBackToLabelledRegions={onBackToLabelledRegions}
           />
           <ActionsPanel
             selectedBounds={selectedBounds}

@@ -99,8 +99,25 @@ describe("App integration", () => {
             grid: [[33.55, -117.25], [33.55, -117.15], [33.45, -117.25], [33.45, -117.15]],
             grid_shape: [2, 2],
             probability_grid: [0.25, 0.25, 0.25, 0.25],
+            operator_label_grid: [[2, 2], [2, 2]],
             search_area_confirmed: true,
             probability_grid_confirmed: false
+          })
+        });
+      }
+      if (url.endsWith("/missions/m1/probability-grid/confirm")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m1",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.1, 0.2, 0.3, 0.4],
+            operator_label_grid: [[2, 2], [2, 2]],
+            searchable_mask: [[true, true], [true, true]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: true
           })
         });
       }
@@ -138,16 +155,27 @@ describe("App integration", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Labelled Regions" }));
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m1/probability-grid/confirm"))).toBe(true);
+    });
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(screen.getByRole("button", { name: "Start Mission" }));
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m1/start"))).toBe(true);
     });
 
-    const createMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions"));
-    expect(createMissionRequest).toBeTruthy();
-    if (!createMissionRequest) throw new Error("missing create mission request");
-    const init = createMissionRequest[1];
+    const startMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions/m1/start"));
+    expect(startMissionRequest).toBeTruthy();
+    if (!startMissionRequest) throw new Error("missing start mission request");
+    const init = startMissionRequest[1];
     expect(init).toBeTruthy();
     if (!init) throw new Error("missing create mission init");
     const body = JSON.parse(String(init.body));
@@ -171,7 +199,9 @@ describe("App integration", () => {
     expect(body.drones[0]).not.toHaveProperty("mode");
     expect(body.drones[0]).not.toHaveProperty("telemetry_source");
     expect(body.drones[0]).not.toHaveProperty("armed");
-    expect(body.bounds).toEqual({
+    const createMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions"));
+    expect(createMissionRequest).toBeTruthy();
+    expect(JSON.parse(String(createMissionRequest?.[1]?.body)).bounds).toEqual({
       min_lat: 33.45,
       max_lat: 33.55,
       min_lon: -117.25,
@@ -359,6 +389,132 @@ describe("App integration", () => {
     });
   });
 
+  it("reopens review back into labelled regions and requires reconfirmation before start", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/algorithms")) {
+        return Promise.resolve({ ok: true, json: async () => ({ algorithms: [] }) });
+      }
+      if (url.endsWith("/missions")) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m-review", status: "idle" }) });
+      }
+      if (url.endsWith("/missions/m-review/confirm-search-area")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m-review",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.25, 0.25, 0.25, 0.25],
+            operator_label_grid: [[2, 2], [2, 2]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: false
+          })
+        });
+      }
+      if (url.endsWith("/missions/m-review/probability-grid/confirm")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m-review",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.1, 0.2, 0.3, 0.4],
+            operator_label_grid: [[2, 3], [2, 2]],
+            searchable_mask: [[true, true], [true, true]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: true
+          })
+        });
+      }
+      if (url.endsWith("/missions/m-review/probability-grid/reopen")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m-review",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.1, 0.2, 0.3, 0.4],
+            operator_label_grid: [[2, 3], [2, 2]],
+            searchable_mask: [[true, true], [true, true]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: false
+          })
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Labelled Regions" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Back to Labelled Regions" })).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByRole("checkbox", { name: "Show probability heatmap" }) as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByRole("checkbox", { name: "Show labelled regions" }) as HTMLInputElement).checked).toBe(false);
+      expect(screen.getByText("Heatmap legend")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show labelled regions" }));
+
+    await waitFor(() => {
+      expect((screen.getByRole("checkbox", { name: "Show labelled regions" }) as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByRole("checkbox", { name: "Show probability heatmap" }) as HTMLInputElement).checked).toBe(true);
+      expect(screen.getByText("Region label legend")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show probability heatmap" }));
+
+    await waitFor(() => {
+      expect((screen.getByRole("checkbox", { name: "Show probability heatmap" }) as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByRole("checkbox", { name: "Show labelled regions" }) as HTMLInputElement).checked).toBe(true);
+      expect(screen.queryByText("Heatmap legend")).toBeNull();
+      expect(screen.getByText("Region label legend")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show probability heatmap" }));
+
+    await waitFor(() => {
+      expect((screen.getByRole("checkbox", { name: "Show probability heatmap" }) as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByRole("checkbox", { name: "Show labelled regions" }) as HTMLInputElement).checked).toBe(true);
+      expect(screen.getByText("Heatmap legend")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to Labelled Regions" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-review/probability-grid/reopen"))).toBe(true);
+      expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("checkbox", { name: "Show labelled regions" }) as HTMLInputElement).checked).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Labelled Regions" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/missions/m-review/probability-grid/confirm"))).toHaveLength(2);
+      expect(screen.getByRole("button", { name: "Back to Labelled Regions" })).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+
   it("sends manually placed hikers when starting a mission", async () => {
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
 
@@ -384,6 +540,37 @@ describe("App integration", () => {
           })
         });
       }
+      if (url.endsWith("/missions/m2/confirm-search-area")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m2",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.25, 0.25, 0.25, 0.25],
+            operator_label_grid: [[2, 2], [2, 2]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: false
+          })
+        });
+      }
+      if (url.endsWith("/missions/m2/probability-grid/confirm")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m2",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.1, 0.2, 0.3, 0.4],
+            operator_label_grid: [[2, 2], [2, 2]],
+            searchable_mask: [[true, true], [true, true]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: true
+          })
+        });
+      }
       return Promise.resolve({ ok: true, json: async () => ({ algorithms: [] }) });
     });
 
@@ -392,6 +579,14 @@ describe("App integration", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Labelled Regions" }));
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(screen.getByRole("button", { name: "Add Hiker" }));
     expect(screen.queryByRole("button", { name: "Moving" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
@@ -403,10 +598,10 @@ describe("App integration", () => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m2/start"))).toBe(true);
     });
 
-    const createMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions"));
-    expect(createMissionRequest).toBeTruthy();
-    if (!createMissionRequest) throw new Error("missing create mission request");
-    const body = JSON.parse(String(createMissionRequest[1]?.body));
+    const startMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions/m2/start"));
+    expect(startMissionRequest).toBeTruthy();
+    if (!startMissionRequest) throw new Error("missing start mission request");
+    const body = JSON.parse(String(startMissionRequest[1]?.body));
 
     expect(body.hikers).toEqual([
       {
@@ -433,6 +628,37 @@ describe("App integration", () => {
       if (url.endsWith("/missions")) {
         return Promise.resolve({ ok: true, json: async () => ({ id: "m-clear", status: "idle", progress: 0 }) });
       }
+      if (url.endsWith("/missions/m-clear/confirm-search-area")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m-clear",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.25, 0.25, 0.25, 0.25],
+            operator_label_grid: [[2, 2], [2, 2]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: false
+          })
+        });
+      }
+      if (url.endsWith("/missions/m-clear/probability-grid/confirm")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m-clear",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.1, 0.2, 0.3, 0.4],
+            operator_label_grid: [[2, 2], [2, 2]],
+            searchable_mask: [[true, true], [true, true]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: true
+          })
+        });
+      }
       if (url.endsWith("/missions/m-clear/start")) {
         return Promise.resolve({ ok: true, json: async () => ({ id: "m-clear", status: "searching", progress: 0, targets: [] }) });
       }
@@ -444,6 +670,14 @@ describe("App integration", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Labelled Regions" }));
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(screen.getByRole("button", { name: "Add Hiker" }));
     fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
     fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
@@ -456,10 +690,10 @@ describe("App integration", () => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-clear/start"))).toBe(true);
     });
 
-    const createMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions"));
-    expect(createMissionRequest).toBeTruthy();
-    if (!createMissionRequest) throw new Error("missing create mission request");
-    const body = JSON.parse(String(createMissionRequest[1]?.body));
+    const startMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions/m-clear/start"));
+    expect(startMissionRequest).toBeTruthy();
+    if (!startMissionRequest) throw new Error("missing start mission request");
+    const body = JSON.parse(String(startMissionRequest[1]?.body));
 
     expect(body.hikers).toEqual([
       {
@@ -491,6 +725,37 @@ describe("App integration", () => {
       if (url.endsWith("/missions/m-reset-1/start")) {
         return Promise.resolve({ ok: true, json: async () => ({ id: "m-reset-1", status: "searching", progress: 0, targets: [] }) });
       }
+      if (url.endsWith("/missions/m-reset-1/confirm-search-area")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m-reset-1",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.25, 0.25, 0.25, 0.25],
+            operator_label_grid: [[2, 2], [2, 2]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: false
+          })
+        });
+      }
+      if (url.endsWith("/missions/m-reset-1/probability-grid/confirm")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m-reset-1",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.1, 0.2, 0.3, 0.4],
+            operator_label_grid: [[2, 2], [2, 2]],
+            searchable_mask: [[true, true], [true, true]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: true
+          })
+        });
+      }
       if (url.endsWith("/missions/m-reset-1/stop")) {
         return Promise.resolve({ ok: true, json: async () => ({ id: "m-reset-1", status: "paused", progress: 0, targets: [] }) });
       }
@@ -500,6 +765,37 @@ describe("App integration", () => {
       if (url.endsWith("/missions/m-reset-2/start")) {
         return Promise.resolve({ ok: true, json: async () => ({ id: "m-reset-2", status: "searching", progress: 0, targets: [] }) });
       }
+      if (url.endsWith("/missions/m-reset-2/confirm-search-area")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m-reset-2",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.25, 0.25, 0.25, 0.25],
+            operator_label_grid: [[2, 2], [2, 2]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: false
+          })
+        });
+      }
+      if (url.endsWith("/missions/m-reset-2/probability-grid/confirm")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m-reset-2",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.1, 0.2, 0.3, 0.4],
+            operator_label_grid: [[2, 2], [2, 2]],
+            searchable_mask: [[true, true], [true, true]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: true
+          })
+        });
+      }
       return Promise.resolve({ ok: true, json: async () => ({ algorithms: [] }) });
     });
 
@@ -508,6 +804,14 @@ describe("App integration", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Labelled Regions" }));
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(screen.getByRole("button", { name: "Add Hiker" }));
     fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
     fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
@@ -530,6 +834,14 @@ describe("App integration", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Add Hiker" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Labelled Regions" }));
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(screen.getByRole("button", { name: "Place Hiker On Map" }));
     fireEvent.click(screen.getByRole("button", { name: "Start Mission" }));
 
@@ -537,8 +849,8 @@ describe("App integration", () => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-reset-2/start"))).toBe(true);
     });
 
-    const createMissionRequests = fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/missions") && init?.method === "POST");
-    const secondBody = JSON.parse(String(createMissionRequests[1][1]?.body));
+    const startMissionRequests = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/start"));
+    const secondBody = JSON.parse(String(startMissionRequests[1][1]?.body));
 
     expect(secondBody.hikers).toEqual([
       {

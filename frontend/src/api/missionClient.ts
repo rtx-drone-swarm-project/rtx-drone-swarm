@@ -35,6 +35,7 @@ export type MissionApiClient = {
     payload: { label: ProbabilityRegionLabel; rect_bounds: MissionCreateRequest["bounds"] }
   ) => Promise<ApplyProbabilityRegionResponse>;
   confirmProbabilityGrid: (missionId: string | number) => Promise<MissionRecord>;
+  reopenProbabilityGrid: (missionId: string | number) => Promise<MissionRecord>;
   startMission: (
     missionId: string | number,
     payload?: MissionStartRequest
@@ -83,6 +84,11 @@ export function createMissionClient(apiBase: string): MissionApiClient {
 
     confirmProbabilityGrid: (missionId) =>
       requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/probability-grid/confirm`, {
+        method: "POST"
+      }),
+
+    reopenProbabilityGrid: (missionId) =>
+      requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/probability-grid/reopen`, {
         method: "POST"
       }),
 

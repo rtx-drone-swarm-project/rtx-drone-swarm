@@ -62,4 +62,33 @@ describe("ActionsPanel", () => {
     const resetButton = screen.getByRole("button", { name: "Reset Mission" }) as HTMLButtonElement;
     expect(resetButton.disabled).toBe(true);
   });
+
+  it("disables start until the probability map is confirmed", () => {
+    renderPanel({
+      mission: {
+        id: "m1",
+        status: "idle",
+        search_area_confirmed: true,
+        probability_grid_confirmed: false,
+      },
+    });
+
+    const startButton = screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement;
+    expect(startButton.disabled).toBe(true);
+    expect(screen.getByText("Confirm the search area and probability map before starting the mission.")).toBeTruthy();
+  });
+
+  it("enables start after the probability map is confirmed", () => {
+    renderPanel({
+      mission: {
+        id: "m1",
+        status: "idle",
+        search_area_confirmed: true,
+        probability_grid_confirmed: true,
+      },
+    });
+
+    const startButton = screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement;
+    expect(startButton.disabled).toBe(false);
+  });
 });

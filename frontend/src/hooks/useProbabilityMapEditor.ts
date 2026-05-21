@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
   Bounds,
+  MissionRecord,
   MissionState,
   ProbabilityGridCell,
   ProbabilityRegionLabel,
@@ -102,17 +103,51 @@ export function useProbabilityMapEditor({
     temporaryRegionLabel,
   ]);
 
-  const onConfirmLabelledRegions = useCallback(async () => {
-    if (!mission?.id) return;
+  const onConfirmLabelledRegions = useCallback(async (): Promise<MissionRecord | null> => {
+    if (!mission?.id) return null;
 
     try {
       const confirmedMission = await apiClient.confirmProbabilityGrid(mission.id);
       clearTemporaryRegionSelection();
-      setMission(confirmedMission);
+      setMission((current) =>
+        current
+          ? {
+              ...current,
+              ...confirmedMission,
+              operator_label_grid: confirmedMission.operator_label_grid ?? current.operator_label_grid,
+            }
+          : confirmedMission
+      );
+      return confirmedMission;
     } catch (err) {
       console.warn(
         `Confirm labelled regions failed: ${err instanceof Error ? err.message : String(err)}`
       );
+      return null;
+    }
+  }, [apiClient, clearTemporaryRegionSelection, mission?.id, setMission]);
+
+  const onReopenProbabilityGrid = useCallback(async (): Promise<MissionRecord | null> => {
+    if (!mission?.id) return null;
+
+    try {
+      const reopenedMission = await apiClient.reopenProbabilityGrid(mission.id);
+      clearTemporaryRegionSelection();
+      setMission((current) =>
+        current
+          ? {
+              ...current,
+              ...reopenedMission,
+              operator_label_grid: reopenedMission.operator_label_grid ?? current.operator_label_grid,
+            }
+          : reopenedMission
+      );
+      return reopenedMission;
+    } catch (err) {
+      console.warn(
+        `Reopen probability grid failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return null;
     }
   }, [apiClient, clearTemporaryRegionSelection, mission?.id, setMission]);
 
@@ -126,5 +161,6 @@ export function useProbabilityMapEditor({
     onSelectTemporaryRegion,
     onApplyTemporaryRegion,
     onConfirmLabelledRegions,
+    onReopenProbabilityGrid,
   };
 }

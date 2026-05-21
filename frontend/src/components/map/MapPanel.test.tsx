@@ -1,6 +1,6 @@
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import MapPanel, { getGridCellBounds } from "./MapPanel";
+import MapPanel, { getGridCellBounds, getProbabilityHeatmapStats, isExcludedProbabilityCell } from "./MapPanel";
 
 const flyTo = vi.fn();
 const getCenter = vi.fn(() => ({ lat: 33.5, lng: -117.2 }));
@@ -72,6 +72,7 @@ const defaultProps = {
   selectedBounds: null,
   gridShape: undefined,
   probabilityMapMode: false,
+  probabilityMapReviewMode: false,
   missionActive: false,
   validDrones: [],
   targets: [],
@@ -89,7 +90,9 @@ const defaultProps = {
   temporaryRegionBounds: null,
   temporaryRegionCells: [],
   operatorLabelGrid: undefined,
-  showLabelledRegions: true
+  showLabelledRegions: true,
+  probabilityGrid: undefined,
+  showProbabilityHeatmap: false
 };
 
 function isPmvHeatmapRectangle(props: Record<string, unknown>) {
@@ -503,11 +506,159 @@ describe("MapPanel", () => {
     expect(appliedCellCalls).toHaveLength(0);
   });
 
+  it("renders excluded cells in gray and scales searchable positive cells from positive non-excluded values only", () => {
+    render(
+      <MapPanel
+        {...defaultProps}
+        probabilityMapMode
+        selectedBounds={{ min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 }}
+        gridShape={[2, 2]}
+        probabilityGrid={[0, 0.1, 0.3, 0.6]}
+        operatorLabelGrid={[
+          [5, 2],
+          [2, 2],
+        ]}
+        searchableMask={[
+          [false, true],
+          [true, true],
+        ]}
+        showLabelledRegions={false}
+        showProbabilityHeatmap
+      />
+    );
+
+    const heatmapCalls = mocks.rectangle.mock.calls
+      .map(([props]) => props)
+      .filter((props) => {
+        const fillColor = (props.pathOptions as { fillColor?: string } | undefined)?.fillColor;
+        return fillColor === "#bfdbfe" || fillColor === "#3b82f6" || fillColor === "#1e40af" || fillColor === "#1f2937";
+      });
+
+    expect(heatmapCalls).toHaveLength(4);
+    expect(heatmapCalls.map((props) => props.bounds)).toEqual(
+      expect.arrayContaining([
+        [[33.45, -117.25], [33.5, -117.2]],
+        [[33.45, -117.2], [33.5, -117.15]],
+        [[33.5, -117.25], [33.55, -117.2]],
+        [[33.5, -117.2], [33.55, -117.15]],
+      ])
+    );
+
+    const excludedCell = heatmapCalls.find((props) => props.bounds[0][1] === -117.25);
+    expect((excludedCell?.pathOptions as { fillColor?: string; fillOpacity?: number } | undefined)?.fillColor).toBe("#1f2937");
+    expect((excludedCell?.pathOptions as { fillOpacity?: number } | undefined)?.fillOpacity).toBe(0.5);
+
+    const searchableCells = heatmapCalls
+      .filter((props) => (props.pathOptions as { fillColor?: string } | undefined)?.fillColor !== "#1f2937")
+      .sort((a, b) => a.bounds[0][0] - b.bounds[0][0] || a.bounds[0][1] - b.bounds[0][1]);
+
+    expect(searchableCells).toHaveLength(3);
+    expect((searchableCells[0].pathOptions as { fillColor?: string; fillOpacity?: number }).fillColor).toBe("#bfdbfe");
+    expect((searchableCells[0].pathOptions as { fillOpacity?: number }).fillOpacity).toBeCloseTo(0.1);
+    expect((searchableCells[1].pathOptions as { fillColor?: string; fillOpacity?: number }).fillColor).toBe("#3b82f6");
+    expect((searchableCells[1].pathOptions as { fillOpacity?: number }).fillOpacity).toBeCloseTo(0.3);
+    expect((searchableCells[2].pathOptions as { fillColor?: string; fillOpacity?: number }).fillColor).toBe("#1e40af");
+    expect((searchableCells[2].pathOptions as { fillOpacity?: number }).fillOpacity).toBeCloseTo(0.6);
+  });
+
+  it("computes probability heatmap stats from searchable positive values only", () => {
+    expect(
+      getProbabilityHeatmapStats(
+        [0, 0.1, 0.3, 0.6],
+        2,
+        2,
+        [
+          [5, 2],
+          [2, 2],
+        ],
+        [
+          [false, true],
+          [true, true],
+        ]
+      )
+    ).toEqual({
+      minPositive: 0.1,
+      maxPositive: 0.6,
+      positiveCount: 3,
+      excludedCount: 1,
+    });
+  });
+
+  it("uses a readable midpoint opacity when all searchable positive probabilities are equal", () => {
+    render(
+      <MapPanel
+        {...defaultProps}
+        probabilityMapMode
+        selectedBounds={{ min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 }}
+        gridShape={[2, 2]}
+        probabilityGrid={[0, 0.25, 0.25, 0.25]}
+        showProbabilityHeatmap
+      />
+    );
+
+    const searchableCells = mocks.rectangle.mock.calls
+      .map(([props]) => props)
+      .filter((props) => (props.pathOptions as { fillColor?: string } | undefined)?.fillColor === "#3b82f6");
+
+    expect(searchableCells).toHaveLength(3);
+    searchableCells.forEach((props) => {
+      expect((props.pathOptions as { fillOpacity?: number }).fillOpacity).toBeCloseTo(0.35);
+    });
+  });
+
+  it("detects excluded cells from either labels or searchable mask", () => {
+    expect(
+      isExcludedProbabilityCell(
+        0,
+        0,
+        [
+          [5, 2],
+          [2, 2],
+        ],
+        undefined
+      )
+    ).toBe(true);
+
+    expect(
+      isExcludedProbabilityCell(
+        0,
+        1,
+        undefined,
+        [
+          [true, false],
+          [true, true],
+        ]
+      )
+    ).toBe(true);
+
+    expect(
+      isExcludedProbabilityCell(
+        1,
+        1,
+        [
+          [2, 2],
+          [2, 2],
+        ],
+        [
+          [true, true],
+          [true, true],
+        ]
+      )
+    ).toBe(false);
+  });
+
   it("disables Leaflet box zoom so shift-drag does not auto-zoom", () => {
     render(<MapPanel {...defaultProps} probabilityMapMode />);
 
     const mapContainerProps = mocks.mapContainer.mock.calls[0]?.[0];
     expect(mapContainerProps?.boxZoom).toBe(false);
+  });
+
+  it("disables probability-region shift-drag in review mode", () => {
+    render(<MapPanel {...defaultProps} probabilityMapMode probabilityMapReviewMode />);
+
+    expect(bboxDrawerMock.props).toHaveLength(2);
+    expect(bboxDrawerMock.props[1].enabled).toBe(false);
   });
 
   it("maps grid cells with row as latitude index and col as longitude index", () => {

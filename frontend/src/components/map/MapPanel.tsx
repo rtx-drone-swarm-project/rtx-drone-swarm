@@ -108,6 +108,7 @@ type MapPanelProps = {
   selectedBounds: Bounds | null;
   gridShape?: [number, number] | number[];
   probabilityMapMode: boolean;
+  probabilityMapReviewMode?: boolean;
   missionActive: boolean;
   validDrones: ValidDrone[];
   targets: Target[];
@@ -125,7 +126,10 @@ type MapPanelProps = {
   temporaryRegionBounds: Bounds | null;
   temporaryRegionCells: ProbabilityGridCell[];
   operatorLabelGrid?: number[][];
+  searchableMask?: boolean[][];
   showLabelledRegions: boolean;
+  probabilityGrid?: number[];
+  showProbabilityHeatmap: boolean;
   droneTrails?: Record<string, [number, number][]>;
   pmvHeatmap?: PmvHeatmapMessage | null;
   selectedAlgorithm?: AlgorithmOption;
@@ -173,6 +177,112 @@ function getAppliedRegionStyle(labelCode: number) {
   }
 
   return null;
+}
+
+type ProbabilityHeatmapStats = {
+  minPositive: number | null;
+  maxPositive: number | null;
+  positiveCount: number;
+  excludedCount: number;
+};
+
+const EXCLUDED_HEATMAP_STYLE = {
+  color: "#1f2937",
+  fillColor: "#1f2937",
+  fillOpacity: 0.5,
+  weight: 0,
+  opacity: 0,
+};
+
+const LOW_PROBABILITY_HEATMAP_COLOR = "#bfdbfe";
+const MEDIUM_PROBABILITY_HEATMAP_COLOR = "#3b82f6";
+const HIGH_PROBABILITY_HEATMAP_COLOR = "#1e40af";
+
+export function isExcludedProbabilityCell(
+  row: number,
+  col: number,
+  operatorLabelGrid?: number[][],
+  searchableMask?: boolean[][]
+) {
+  const labelCode = operatorLabelGrid?.[row]?.[col];
+  if (Number(labelCode) === PROBABILITY_REGION_CODE_BY_LABEL.excluded) {
+    return true;
+  }
+
+  const searchable = searchableMask?.[row]?.[col];
+  return searchable === false;
+}
+
+export function getProbabilityHeatmapStats(
+  probabilityGrid: number[] | null,
+  rows: number,
+  cols: number,
+  operatorLabelGrid?: number[][],
+  searchableMask?: boolean[][]
+): ProbabilityHeatmapStats {
+  if (!probabilityGrid || rows <= 0 || cols <= 0) {
+    return { minPositive: null, maxPositive: null, positiveCount: 0, excludedCount: 0 };
+  }
+
+  let minPositive = Number.POSITIVE_INFINITY;
+  let maxPositive = Number.NEGATIVE_INFINITY;
+  let positiveCount = 0;
+  let excludedCount = 0;
+
+  probabilityGrid.forEach((probability, flatIndex) => {
+    const row = Math.floor(flatIndex / cols);
+    const col = flatIndex % cols;
+    if (isExcludedProbabilityCell(row, col, operatorLabelGrid, searchableMask)) {
+      excludedCount += 1;
+      return;
+    }
+
+    const numericProbability = Number(probability);
+    if (!Number.isFinite(numericProbability) || numericProbability <= 0) {
+      return;
+    }
+
+    positiveCount += 1;
+    if (numericProbability < minPositive) {
+      minPositive = numericProbability;
+    }
+    if (numericProbability > maxPositive) {
+      maxPositive = numericProbability;
+    }
+  });
+
+  if (positiveCount === 0) {
+    return { minPositive: null, maxPositive: null, positiveCount: 0, excludedCount };
+  }
+
+  return { minPositive, maxPositive, positiveCount, excludedCount };
+}
+
+export function getProbabilityHeatmapStyle(probability: number, stats: ProbabilityHeatmapStats) {
+  if (!(probability > 0) || stats.minPositive == null || stats.maxPositive == null) {
+    return null;
+  }
+
+  const { minPositive, maxPositive } = stats;
+  const displayRatio =
+    maxPositive > minPositive
+      ? Math.max(0, Math.min(1, (probability - minPositive) / (maxPositive - minPositive)))
+      : 0.5;
+  const fillOpacity = 0.1 + (displayRatio * 0.5);
+  let fillColor = LOW_PROBABILITY_HEATMAP_COLOR;
+  if (displayRatio >= 0.72) {
+    fillColor = HIGH_PROBABILITY_HEATMAP_COLOR;
+  } else if (displayRatio >= 0.34) {
+    fillColor = MEDIUM_PROBABILITY_HEATMAP_COLOR;
+  }
+
+  return {
+    color: fillColor,
+    fillColor,
+    fillOpacity,
+    weight: 0,
+    opacity: 0,
+  };
 }
 
 export function getGridCellBounds(
@@ -236,6 +346,7 @@ export default function MapPanel({
   selectedBounds,
   gridShape,
   probabilityMapMode,
+  probabilityMapReviewMode = false,
   missionActive,
   validDrones,
   targets,
@@ -253,7 +364,10 @@ export default function MapPanel({
   temporaryRegionBounds,
   temporaryRegionCells,
   operatorLabelGrid,
+  searchableMask,
   showLabelledRegions,
+  probabilityGrid,
+  showProbabilityHeatmap,
   droneTrails,
   pmvHeatmap,
   selectedAlgorithm
@@ -265,6 +379,19 @@ export default function MapPanel({
   const rectBounds = selectedBounds ? boundsToLeaflet(selectedBounds) : null;
   const temporaryRectBounds = temporaryRegionBounds ? boundsToLeaflet(temporaryRegionBounds) : null;
   const runtimeTargetIds = new Set(targets.map((target) => String(target.id)));
+  const rows = Number(gridShape?.[0] ?? 0);
+  const cols = Number(gridShape?.[1] ?? 0);
+  const validProbabilityGrid =
+    Array.isArray(probabilityGrid) && rows > 0 && cols > 0 && probabilityGrid.length === rows * cols
+      ? probabilityGrid
+      : null;
+  const heatmapStats = getProbabilityHeatmapStats(
+    validProbabilityGrid,
+    rows,
+    cols,
+    operatorLabelGrid,
+    searchableMask
+  );
   const heatmapCells = useMemo(() => {
     if (!pmvActive || !pmvHeatmapVisible || !pmvHeatmap) return [];
     const { bounds, rows, cols, values, max_value: maxValue } = pmvHeatmap;
@@ -315,7 +442,7 @@ export default function MapPanel({
           onBoundsDrawn={onSelectArea}
         />
         <MapBBoxDrawer
-          enabled={probabilityMapMode}
+          enabled={probabilityMapMode && !probabilityMapReviewMode}
           onBoundsDrawn={onSelectTemporaryRegion}
           pathOptions={{ color: "#f59e0b", fillOpacity: 0.06, dashArray: "10 6", weight: 2 }}
         />
@@ -359,6 +486,39 @@ export default function MapPanel({
                 })
               : []
           )}
+
+        {probabilityMapMode &&
+          showProbabilityHeatmap &&
+          selectedBounds &&
+          validProbabilityGrid &&
+          validProbabilityGrid.map((probability, flatIndex) => {
+            const row = Math.floor(flatIndex / cols);
+            const col = flatIndex % cols;
+            const cellBounds = getGridCellBounds(selectedBounds, gridShape, [row, col]);
+            if (!cellBounds) return null;
+
+            if (isExcludedProbabilityCell(row, col, operatorLabelGrid, searchableMask)) {
+              return (
+                <Rectangle
+                  key={`probability-cell-excluded-${row}-${col}`}
+                  bounds={cellBounds}
+                  pathOptions={EXCLUDED_HEATMAP_STYLE}
+                />
+              );
+            }
+
+            const numericProbability = Number(probability);
+            const pathStyle = getProbabilityHeatmapStyle(numericProbability, heatmapStats);
+            if (!pathStyle) return null;
+
+            return (
+              <Rectangle
+                key={`probability-cell-${row}-${col}`}
+                bounds={cellBounds}
+                pathOptions={pathStyle}
+              />
+            );
+          })}
 
         {selectedBounds && temporaryRegionCells.map((cell) => {
           const cellBounds = getGridCellBounds(selectedBounds, gridShape, cell);
