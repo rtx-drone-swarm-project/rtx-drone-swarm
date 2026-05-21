@@ -16,20 +16,20 @@ type UseProbabilityMapEditorArgs = {
   apiClient: MissionApiClient;
   mission: MissionState;
   setMission: React.Dispatch<React.SetStateAction<MissionState>>;
+  probabilityRegionEditingEnabled: boolean;
 };
 
 export function useProbabilityMapEditor({
   apiClient,
   mission,
   setMission,
+  probabilityRegionEditingEnabled,
 }: UseProbabilityMapEditorArgs) {
   const [temporaryRegionBounds, setTemporaryRegionBounds] = useState<Bounds | null>(null);
   const [temporaryRegionCells, setTemporaryRegionCells] = useState<ProbabilityGridCell[]>(
     EMPTY_TEMPORARY_REGION_CELLS
   );
   const [temporaryRegionLabel, setTemporaryRegionLabel] = useState<ProbabilityRegionLabel | "">("");
-
-  const probabilityMapMode = mission?.search_area_confirmed === true;
 
   const clearTemporaryRegionSelection = useCallback(() => {
     setTemporaryRegionBounds(null);
@@ -38,14 +38,14 @@ export function useProbabilityMapEditor({
   }, []);
 
   useEffect(() => {
-    if (!probabilityMapMode) {
+    if (!probabilityRegionEditingEnabled) {
       clearTemporaryRegionSelection();
     }
-  }, [clearTemporaryRegionSelection, probabilityMapMode]);
+  }, [clearTemporaryRegionSelection, probabilityRegionEditingEnabled]);
 
   const onSelectTemporaryRegion = useCallback(
     async (bounds: Bounds) => {
-      if (!probabilityMapMode || !mission?.id) return;
+      if (!probabilityRegionEditingEnabled || !mission?.id) return;
 
       setTemporaryRegionBounds(bounds);
       setTemporaryRegionLabel("");
@@ -65,7 +65,7 @@ export function useProbabilityMapEditor({
         );
       }
     },
-    [apiClient, mission?.id, probabilityMapMode]
+    [apiClient, mission?.id, probabilityRegionEditingEnabled]
   );
 
   const onApplyTemporaryRegion = useCallback(async () => {
@@ -151,8 +151,30 @@ export function useProbabilityMapEditor({
     }
   }, [apiClient, clearTemporaryRegionSelection, mission?.id, setMission]);
 
+  const onResetProbabilityGrid = useCallback(async (): Promise<MissionRecord | null> => {
+    if (!mission?.id) return null;
+
+    try {
+      const resetMission = await apiClient.resetProbabilityGrid(mission.id);
+      clearTemporaryRegionSelection();
+      setMission((current) =>
+        current
+          ? {
+              ...current,
+              ...resetMission,
+            }
+          : resetMission
+      );
+      return resetMission;
+    } catch (err) {
+      console.warn(
+        `Reset probability grid failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return null;
+    }
+  }, [apiClient, clearTemporaryRegionSelection, mission?.id, setMission]);
+
   return {
-    probabilityMapMode,
     temporaryRegionBounds,
     temporaryRegionCells,
     temporaryRegionLabel,
@@ -162,5 +184,6 @@ export function useProbabilityMapEditor({
     onApplyTemporaryRegion,
     onConfirmLabelledRegions,
     onReopenProbabilityGrid,
+    onResetProbabilityGrid,
   };
 }

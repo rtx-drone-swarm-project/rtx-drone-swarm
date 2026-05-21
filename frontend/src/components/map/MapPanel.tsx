@@ -1,6 +1,6 @@
 import { MapContainer, Marker, Polyline, Rectangle, TileLayer } from "react-leaflet";
 import type { LeafletEvent, Marker as LeafletMarker } from "leaflet";
-import type { AlgorithmOption, Bounds, PlacedHiker, ProbabilityRegionLabel, ProbabilityGridCell, SelectedDrone, Target, ValidDrone } from "../../types/mission";
+import type { AlgorithmOption, Bounds, PlacedHiker, ProbabilityRegionLabel, ProbabilityGridCell, SelectedDrone, SetupStage, Target, ValidDrone } from "../../types/mission";
 import { PROBABILITY_REGION_CODE_BY_LABEL } from "../../types/mission";
 import type { PmvHeatmapMessage } from "../../types/ws";
 import { boundsToLeaflet } from "../../utils/geo";
@@ -106,9 +106,9 @@ type MapPanelProps = {
   defaultZoom: number;
   mapCenter: [number, number] | null;
   selectedBounds: Bounds | null;
+  missionBounds?: Bounds;
   gridShape?: [number, number] | number[];
-  probabilityMapMode: boolean;
-  probabilityMapReviewMode?: boolean;
+  setupStage: SetupStage;
   missionActive: boolean;
   validDrones: ValidDrone[];
   targets: Target[];
@@ -344,9 +344,9 @@ export default function MapPanel({
   defaultZoom,
   mapCenter,
   selectedBounds,
+  missionBounds,
   gridShape,
-  probabilityMapMode,
-  probabilityMapReviewMode = false,
+  setupStage,
   missionActive,
   validDrones,
   targets,
@@ -376,7 +376,11 @@ export default function MapPanel({
   const pmvActive = selectedAlgorithm === "pmv" && missionActive && !!pmvHeatmap;
   const [pmvHeatmapVisible, setPmvHeatmapVisible] = useState(true);
   const heatmapMissionKey = pmvHeatmap?.mission_id == null ? "" : String(pmvHeatmap.mission_id);
-  const rectBounds = selectedBounds ? boundsToLeaflet(selectedBounds) : null;
+  const searchAreaSelectionEnabled =
+    setupStage === "search_area" && !missionActive && !hikerPlacementMode;
+  const probabilityRegionSelectionEnabled = setupStage === "label_regions";
+  const overlayBounds = selectedBounds ?? missionBounds ?? null;
+  const rectBounds = overlayBounds ? boundsToLeaflet(overlayBounds) : null;
   const temporaryRectBounds = temporaryRegionBounds ? boundsToLeaflet(temporaryRegionBounds) : null;
   const runtimeTargetIds = new Set(targets.map((target) => String(target.id)));
   const rows = Number(gridShape?.[0] ?? 0);
@@ -438,11 +442,11 @@ export default function MapPanel({
         <MapControlStack drones={validDrones} />
         <MapClickSelector enabled={hikerPlacementMode && hikerPlacementEditable} onSelect={onPlaceHiker} />
         <MapBBoxDrawer
-          enabled={!probabilityMapMode && !missionActive && !hikerPlacementMode}
+          enabled={searchAreaSelectionEnabled}
           onBoundsDrawn={onSelectArea}
         />
         <MapBBoxDrawer
-          enabled={probabilityMapMode && !probabilityMapReviewMode}
+          enabled={probabilityRegionSelectionEnabled}
           onBoundsDrawn={onSelectTemporaryRegion}
           pathOptions={{ color: "#f59e0b", fillOpacity: 0.06, dashArray: "10 6", weight: 2 }}
         />
@@ -461,16 +465,15 @@ export default function MapPanel({
           />
         )}
 
-        {probabilityMapMode &&
-          showLabelledRegions &&
-          selectedBounds &&
+        {showLabelledRegions &&
+          overlayBounds &&
           Array.isArray(operatorLabelGrid) &&
           operatorLabelGrid.flatMap((labelRow, row) =>
             Array.isArray(labelRow)
               ? labelRow.map((labelCode, col) => {
                   const pathStyle = getAppliedRegionStyle(Number(labelCode));
                   if (!pathStyle) return null;
-                  const cellBounds = getGridCellBounds(selectedBounds, gridShape, [row, col]);
+                  const cellBounds = getGridCellBounds(overlayBounds, gridShape, [row, col]);
                   if (!cellBounds) return null;
                   return (
                     <Rectangle
@@ -487,14 +490,13 @@ export default function MapPanel({
               : []
           )}
 
-        {probabilityMapMode &&
-          showProbabilityHeatmap &&
-          selectedBounds &&
+        {showProbabilityHeatmap &&
+          overlayBounds &&
           validProbabilityGrid &&
           validProbabilityGrid.map((probability, flatIndex) => {
             const row = Math.floor(flatIndex / cols);
             const col = flatIndex % cols;
-            const cellBounds = getGridCellBounds(selectedBounds, gridShape, [row, col]);
+            const cellBounds = getGridCellBounds(overlayBounds, gridShape, [row, col]);
             if (!cellBounds) return null;
 
             if (isExcludedProbabilityCell(row, col, operatorLabelGrid, searchableMask)) {
@@ -520,8 +522,8 @@ export default function MapPanel({
             );
           })}
 
-        {selectedBounds && temporaryRegionCells.map((cell) => {
-          const cellBounds = getGridCellBounds(selectedBounds, gridShape, cell);
+        {overlayBounds && temporaryRegionCells.map((cell) => {
+          const cellBounds = getGridCellBounds(overlayBounds, gridShape, cell);
           if (!cellBounds) return null;
           return (
             <Rectangle

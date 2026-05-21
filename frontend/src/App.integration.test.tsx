@@ -116,6 +116,10 @@ describe("App integration", () => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-optional/start"))).toBe(true);
     });
 
+    const startMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions/m-optional/start"));
+    expect(startMissionRequest).toBeTruthy();
+    expect(JSON.parse(String(startMissionRequest?.[1]?.body))).not.toHaveProperty("hikers");
+
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/confirm-search-area"))).toBe(false);
   });
 
@@ -165,7 +169,22 @@ describe("App integration", () => {
         });
       }
       if (url.endsWith("/missions/m1/start")) {
-        return Promise.resolve({ ok: true, json: async () => ({ id: "m1", status: "running", progress: 0, targets: [] }) });
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m1",
+            status: "running",
+            progress: 0,
+            targets: [],
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.1, 0.2, 0.3, 0.4],
+            operator_label_grid: [[2, 2], [2, 2]],
+            searchable_mask: [[true, true], [true, true]],
+            search_area_confirmed: true,
+            probability_grid_confirmed: true
+          })
+        });
       }
       return Promise.resolve({ ok: true, json: async () => ({ algorithm: "sweep", coverage_pct: 0, targets_total: 2, targets_found: 2, found_at_seconds: [] }) });
     });
@@ -213,6 +232,9 @@ describe("App integration", () => {
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m1/start"))).toBe(true);
+      expect(screen.getByText("Mission Map")).toBeTruthy();
+      expect(screen.getByRole("checkbox", { name: "Show probability heatmap" })).toBeTruthy();
+      expect(screen.getByRole("checkbox", { name: "Show labelled regions" })).toBeTruthy();
     });
 
     const startMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions/m1/start"));
@@ -242,6 +264,7 @@ describe("App integration", () => {
     expect(body.drones[0]).not.toHaveProperty("mode");
     expect(body.drones[0]).not.toHaveProperty("telemetry_source");
     expect(body.drones[0]).not.toHaveProperty("armed");
+    expect(body).not.toHaveProperty("hikers");
     const createMissionRequest = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/missions"));
     expect(createMissionRequest).toBeTruthy();
     expect(JSON.parse(String(createMissionRequest?.[1]?.body)).bounds).toEqual({
@@ -502,13 +525,14 @@ describe("App integration", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
-      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.getByText("Finish or go back from probability-map setup before starting.")).toBeTruthy();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Confirm Labelled Regions" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Back to Labelled Regions" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
       expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
       expect((screen.getByRole("checkbox", { name: "Show probability heatmap" }) as HTMLInputElement).checked).toBe(true);
       expect((screen.getByRole("checkbox", { name: "Show labelled regions" }) as HTMLInputElement).checked).toBe(false);
@@ -540,20 +564,19 @@ describe("App integration", () => {
       expect(screen.getByText("Heatmap legend")).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Back to Labelled Regions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-review/probability-grid/reopen"))).toBe(true);
       expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
-      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
-      expect((screen.getByRole("checkbox", { name: "Show labelled regions" }) as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(true);
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Confirm Labelled Regions" }));
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/missions/m-review/probability-grid/confirm"))).toHaveLength(2);
-      expect(screen.getByRole("button", { name: "Back to Labelled Regions" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
       expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
     });
   });
