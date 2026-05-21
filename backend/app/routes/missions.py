@@ -249,20 +249,17 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
     if mission.status != "idle":
         raise HTTPException(status_code=400, detail="Only 'idle' missions can be started")
 
-    missing_setup_steps: list[str] = []
-    if not mission.search_area_confirmed:
-        missing_setup_steps.append("search area must be confirmed")
-    if mission.grid is None:
-        missing_setup_steps.append("search grid is not initialized")
-    if mission.probability_grid is None:
-        missing_setup_steps.append("probability grid is not initialized")
-    if not mission.probability_grid_confirmed:
-        missing_setup_steps.append("probability grid must be confirmed")
-    if missing_setup_steps:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Mission setup incomplete: {', '.join(missing_setup_steps)}",
+    try:
+        mission.bounds = ConfirmSearchAreaRequest(bounds=mission.bounds).bounds.model_dump()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Mission bounds are invalid: {exc}") from exc
+
+    if mission.grid is None or mission.grid_shape is None:
+        mission.grid, mission.grid_shape = build_search_grid(
+            mission.bounds,
+            target_cell_size_m=100.0,
         )
+    mission.search_area_confirmed = True
 
     mission.status = "searching"
     mission.elapsed_seconds = 0

@@ -35,9 +35,8 @@ export default function ActionsPanel({
 }: ActionsPanelProps) {
   const selectorDisabled = missionActive || missionLocked;
   const missionRunning = missionStatus === "searching" || missionStatus === "recalling";
-  const searchAreaConfirmed = mission?.search_area_confirmed === true;
   const probabilityGridConfirmed = mission?.probability_grid_confirmed === true;
-  const canStartMission = Boolean(selectedBounds) && !missionActive && !missionLocked && searchAreaConfirmed && probabilityGridConfirmed;
+  const canStartMission = Boolean(selectedBounds) && !missionActive && !missionLocked;
 
   return (
     <CollapsibleSection title="Actions">
@@ -69,8 +68,8 @@ export default function ActionsPanel({
       </button>
 
       {!selectedBounds && <div className="hint-text">Enter coordinates above and press "Set Search Area", or Shift-drag on the map to draw the search area.</div>}
-      {selectedBounds && (!searchAreaConfirmed || !probabilityGridConfirmed) && !missionActive && !missionLocked && (
-        <div className="hint-text warning-text">Confirm the search area and probability map before starting the mission.</div>
+      {selectedBounds && !probabilityGridConfirmed && !missionActive && !missionLocked && (
+        <div className="hint-text">Optional: configure a probability map before starting if you want weighted search behavior.</div>
       )}
 
       {missionLocked && (

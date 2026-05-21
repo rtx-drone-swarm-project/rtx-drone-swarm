@@ -128,9 +128,6 @@ export default function NavigationPanel({
 }: NavigationPanelProps) {
   if (probabilityMapMode) {
     if (probabilityMapReviewMode) {
-      const rows = Number(gridShape?.[0] ?? 0);
-      const cols = Number(gridShape?.[1] ?? 0);
-
       return (
         <CollapsibleSection title="Probability Map">
           {selectedBounds && (
@@ -145,13 +142,6 @@ export default function NavigationPanel({
                 <strong>{selectedBounds.min_lon.toFixed(6)}</strong>
                 <span>Max longitude</span>
                 <strong>{selectedBounds.max_lon.toFixed(6)}</strong>
-              </div>
-              <div className="review-title">Grid shape</div>
-              <div className="kv-grid">
-                <span>Rows</span>
-                <strong>{Number.isFinite(rows) ? rows : 0}</strong>
-                <span>Columns</span>
-                <strong>{Number.isFinite(cols) ? cols : 0}</strong>
               </div>
             </div>
           )}
@@ -309,7 +299,7 @@ export default function NavigationPanel({
         onClick={onConfirmSearchArea}
         disabled={!isValidBounds || !searchAreaConfirmed || missionActive}
       >
-        Confirm Search Area
+        Configure Probability Map
       </button>
     </CollapsibleSection>
   );

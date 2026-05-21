@@ -76,6 +76,49 @@ describe("App integration", () => {
     mocks.mapPanelProps = [];
   });
 
+  it("starts a mission without configuring a probability map", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/benchmark/runs")) {
+        return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
+      }
+      if (url.endsWith("/benchmark/scenarios")) {
+        return Promise.resolve({ ok: true, json: async () => ({ scenarios: [] }) });
+      }
+      if (url.endsWith("/missions") && init?.method === "POST") {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m-optional", status: "idle", progress: 0 }) });
+      }
+      if (url.endsWith("/missions/m-optional/start")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ id: "m-optional", status: "running", progress: 0, targets: [] })
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ algorithms: [] }) });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.getByText("Optional: configure a probability map before starting if you want weighted search behavior.")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Start Mission" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-optional/start"))).toBe(true);
+    });
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/confirm-search-area"))).toBe(false);
+  });
+
   it("sanitizes drone payloads during mission creation and supports mission completion flow", async () => {
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
 
@@ -155,7 +198,7 @@ describe("App integration", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure Probability Map" }));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
     });
@@ -309,7 +352,7 @@ describe("App integration", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure Probability Map" }));
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m1/confirm-search-area"))).toBe(true);
@@ -366,7 +409,7 @@ describe("App integration", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure Probability Map" }));
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
@@ -389,7 +432,7 @@ describe("App integration", () => {
     });
   });
 
-  it("reopens review back into labelled regions and requires reconfirmation before start", async () => {
+  it("reopens review back into labelled regions while keeping probability setup optional", async () => {
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
 
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -455,11 +498,11 @@ describe("App integration", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure Probability Map" }));
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
-      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Confirm Labelled Regions" }));
@@ -502,7 +545,7 @@ describe("App integration", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-review/probability-grid/reopen"))).toBe(true);
       expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
-      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement).disabled).toBe(false);
       expect((screen.getByRole("checkbox", { name: "Show labelled regions" }) as HTMLInputElement).checked).toBe(true);
     });
 
@@ -579,7 +622,7 @@ describe("App integration", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure Probability Map" }));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
     });
@@ -670,7 +713,7 @@ describe("App integration", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure Probability Map" }));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
     });
@@ -804,7 +847,7 @@ describe("App integration", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure Probability Map" }));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
     });
@@ -834,7 +877,7 @@ describe("App integration", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Add Hiker" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure Probability Map" }));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
     });

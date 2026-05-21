@@ -139,11 +139,7 @@ export default function useMissionActions({
 
   const startMission = async () => {
     if (missionLocked || !selectedBounds) {
-      console.warn("Start failed: search area must be confirmed before starting the mission");
-      return;
-    }
-    if (!mission?.id || mission.search_area_confirmed !== true || mission.probability_grid_confirmed !== true) {
-      console.warn("Start failed: search area and probability map must both be confirmed before starting the mission");
+      console.warn("Start failed: search area must be selected before starting the mission");
       return;
     }
 

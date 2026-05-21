@@ -63,7 +63,7 @@ describe("ActionsPanel", () => {
     expect(resetButton.disabled).toBe(true);
   });
 
-  it("disables start until the probability map is confirmed", () => {
+  it("enables start with only a selected search area", () => {
     renderPanel({
       mission: {
         id: "m1",
@@ -74,11 +74,11 @@ describe("ActionsPanel", () => {
     });
 
     const startButton = screen.getByRole("button", { name: "Start Mission" }) as HTMLButtonElement;
-    expect(startButton.disabled).toBe(true);
-    expect(screen.getByText("Confirm the search area and probability map before starting the mission.")).toBeTruthy();
+    expect(startButton.disabled).toBe(false);
+    expect(screen.getByText("Optional: configure a probability map before starting if you want weighted search behavior.")).toBeTruthy();
   });
 
-  it("enables start after the probability map is confirmed", () => {
+  it("keeps start enabled after the probability map is confirmed", () => {
     renderPanel({
       mission: {
         id: "m1",
