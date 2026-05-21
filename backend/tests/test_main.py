@@ -254,7 +254,7 @@ def test_start_mission():
     assert second_start_response.json() == {"detail": "Only 'idle' missions can be started"}
 
 
-def test_start_mission_requires_confirmed_search_area():
+def test_start_mission_works_without_probability_map_setup():
     mission_data = {
         "name": "Unconfirmed Setup Mission",
         "bounds": {
@@ -272,11 +272,15 @@ def test_start_mission_requires_confirmed_search_area():
     mission_id = create_response.json()["id"]
 
     start_response = client.post(f"/missions/{mission_id}/start")
-    assert start_response.status_code == 400
-    assert "search area must be confirmed" in start_response.json()["detail"]
+    assert start_response.status_code == 200
+    payload = start_response.json()
+    assert payload["status"] == "searching"
+    assert payload["search_area_confirmed"] is True
+    assert payload["probability_grid_confirmed"] is False
+    assert payload["grid_shape"] is not None
 
 
-def test_start_mission_requires_confirmed_probability_grid_after_search_area_confirmation():
+def test_start_mission_works_after_optional_search_area_confirmation_without_probability_confirmation():
     mission_data = {
         "name": "Partial Setup Mission",
         "bounds": {
@@ -300,8 +304,11 @@ def test_start_mission_requires_confirmed_probability_grid_after_search_area_con
     assert confirm_response.status_code == 200
 
     start_response = client.post(f"/missions/{mission_id}/start")
-    assert start_response.status_code == 400
-    assert "probability grid must be confirmed" in start_response.json()["detail"]
+    assert start_response.status_code == 200
+    payload = start_response.json()
+    assert payload["status"] == "searching"
+    assert payload["search_area_confirmed"] is True
+    assert payload["probability_grid_confirmed"] is False
 
 
 def test_start_mission_works_after_both_confirmations():

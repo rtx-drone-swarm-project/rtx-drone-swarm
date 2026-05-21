@@ -46,7 +46,7 @@ describe("NavigationPanel", () => {
     expect(screen.getByLabelText("Bottom-right latitude")).toBeTruthy();
     expect(screen.getByLabelText("Bottom-right longitude")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Set Search Area" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Confirm Search Area" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Configure Probability Map" })).toBeTruthy();
   });
 
   it("does not render the Pan to Drones button", () => {
@@ -73,7 +73,7 @@ describe("NavigationPanel", () => {
     const onConfirmSearchArea = vi.fn();
     renderPanel({ onConfirmSearchArea });
 
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Search Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure Probability Map" }));
     expect(onConfirmSearchArea).toHaveBeenCalledTimes(1);
   });
 
@@ -81,7 +81,7 @@ describe("NavigationPanel", () => {
     renderPanel({ missionActive: true });
     const btn = screen.getByRole("button", { name: "Set Search Area" }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
-    const confirmBtn = screen.getByRole("button", { name: "Confirm Search Area" }) as HTMLButtonElement;
+    const confirmBtn = screen.getByRole("button", { name: "Configure Probability Map" }) as HTMLButtonElement;
     expect(confirmBtn.disabled).toBe(true);
   });
 
