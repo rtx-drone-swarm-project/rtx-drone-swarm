@@ -335,18 +335,18 @@ test -f "$ARDUPILOT_PATH/Tools/autotest/sim_vehicle.py"
 ./scripts/launch_sitl.sh
 ```
 
-2. Start the backend:
+2. Start the backend (override `SITL_HOST` — `.env` defaults to `sitl` for Docker):
 
 ```bash
-PYTHONPATH=backend uvicorn app.main:app --host 0.0.0.0 --port 8000
+SITL_HOST=127.0.0.1 PYTHONPATH=backend uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-3. Start the frontend separately:
+3. Start the frontend separately (`VITE_API_PORT` must match the backend port):
 
 ```bash
 cd frontend
 npm install
-npm run dev
+VITE_API_PORT=8000 npm run dev
 ```
 
 4. Verify:
@@ -355,6 +355,16 @@ npm run dev
 curl http://localhost:8000/health
 curl http://localhost:8000/sitl/status
 ```
+
+**Host-only build check (no Docker):** from the repo root after the Ubuntu steps above:
+
+```bash
+python3 -m pip install -r requirements.txt -r backend/requirements.txt
+cd backend && pytest tests/ -q
+cd ../frontend && npm ci && npm test -- --run && npm run build
+```
+
+ArduPilot SITL must be built on the host (`./waf configure --board sitl && ./waf copter` in `$ARDUPILOT_PATH`) before `./scripts/launch_sitl.sh` will start vehicles.
 
 ### Docker Compose SITL + Docker backend
 
@@ -388,6 +398,8 @@ If SITL and the backend run on different machines, set `SITL_HOST` for the backe
 
 ## Troubleshooting
 
+- **After Docker Compose SITL, host `./scripts/launch_sitl.sh` or `./waf copter` fails** — the `sitl` service bind-mounts your host `ARDUPILOT_PATH` and `sim_vehicle.py` reconfigures/rebuilds SITL inside the container. That invalidates the host WAF cache (`invalid lock file`, `run "waf configure" first`). On the host: `cd "$ARDUPILOT_PATH" && rm -f .lock-waf_* && ./waf configure --board sitl && ./waf copter`, then retry. Expect a multi-minute rebuild. To avoid ping-ponging, use either Docker Compose or host-native SITL for a given work session, not both against the same checkout without rebuilding.
+- **Host backend shows `Temporary failure in name resolution` for `tcp://sitl:5760`** — `.env` sets `SITL_HOST=sitl` for Compose. For host-native runs, start the backend with `SITL_HOST=127.0.0.1` (see [Host SITL + host backend](#host-sitl--host-backend)).
 - If `launch_sitl.sh` says ArduPilot is missing, check `ARDUPILOT_PATH` in `.env` or clone ArduPilot locally first.
 - If the `sitl` service reports `./Tools/autotest/sim_vehicle.py: No such file or directory`, confirm `ARDUPILOT_PATH` points to the ArduPilot repo root and that `test -f "$ARDUPILOT_PATH/Tools/autotest/sim_vehicle.py"` succeeds on the host.
 - If native `launch_sitl.sh` reports `[Errno 2] No such file or directory: 'mavproxy.py'`, install MAVProxy in the Python environment used by ArduPilot: `python3 -m pip install MAVProxy`.

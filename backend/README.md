@@ -15,7 +15,7 @@ At runtime the flow looks like this:
 - `app/main.py` starts FastAPI, mounts routes, initializes benchmark storage, starts the SITL telemetry bridge, and launches idle telemetry broadcasting.
 - `app/routes/algorithms.py` exposes dynamically discovered search algorithms for frontend controls.
 - `app/routes/missions.py` creates missions, starts them, and triggers background dispatch plus `simulation_loop`.
-- `app/routes/benchmark.py` starts headless algorithm comparisons, reads persisted benchmark history, and exports trial rows as CSV.
+- `app/routes/benchmark.py` starts headless algorithm comparisons, reads persisted benchmark history, and exports trial rows as CSV plus Markdown reports.
 - `app/benchmark.py` runs paired algorithm scenarios without SITL commands or per-tick broadcasts.
 - `app/benchmark_db.py` owns the SQLite schema and query helpers for `backend/data/benchmarks.db`.
 - `app/sitl.py` maintains MAVLink TCP connections to SITL drones, tracks readiness and flight state, and sends direct dispatch or goto commands.
@@ -34,6 +34,7 @@ At runtime the flow looks like this:
 | `app/algorithms/__init__.py` | Dynamic algorithm discovery and registry used by missions, benchmarks, and UI metadata. |
 | `app/benchmark.py` | Headless paired-scenario benchmark runner for algorithm comparison. |
 | `app/benchmark_db.py` | SQLite schema, persistence helpers, aggregation, and CSV export. |
+| `app/benchmark_report.py` | Markdown Metrics report generation from persisted run/trial rows. |
 | `app/missions.py` | Mission-state helpers: sysid resolution, script result normalization, coverage-point assignment, SITL sync, and dispatch preflight shaping. |
 | `app/dispatch.py` | Dispatch execution helpers. Supports either direct in-process dispatch through `sitl_bridge` or the external `scripts/swarm_command.py` helper. |
 | `app/sitl.py` | `SITLTelemetryBridge`, telemetry cache, readiness polling, direct MAVLink dispatch flow, idle telemetry broadcasting, and frontend-facing SITL snapshots. |
@@ -74,12 +75,13 @@ At runtime the flow looks like this:
 | `GET /benchmark/scenarios` | Lists Metrics scenario profiles for the UI selector. |
 | `GET /benchmark/{run_id}` | Returns one run, raw trials, and aggregate metric summaries. |
 | `GET /benchmark/export?run_id=...` | Exports one benchmark run as CSV. Full local export requires explicit `?all_runs=true`. |
+| `GET /benchmark/{run_id}/report.md` | Exports a Markdown Metrics report generated from persisted trial rows. |
 
 ### WebSocket endpoint
 
 | Route | Purpose |
 |------|---------|
-| `WS /ws` | Pushes telemetry, mission progress, target-found events, and mission status updates to connected clients. |
+| `WS /ws` | Pushes telemetry, mission progress, target-found events, mission status, benchmark progress, and PMV heatmap updates to connected clients. |
 
 ## Key Functions
 
@@ -111,6 +113,8 @@ These are the functions worth reading first if you need to change behavior.
 
 - `app/simulation.py:simulation_loop`
   Main mission loop. Each tick syncs telemetry, computes centroids, re-arms drones if needed, pushes gotos, moves targets and simulated drones, recalculates progress from found targets, and broadcasts state.
+- `app/algorithms/pmv.py:build_pmv_heatmap_payload`
+  Samples PMV posterior state into the bounded 20×20 WebSocket heatmap payload used by the frontend overlay. It must remain independent of target locations.
 - `app/simulation.py:_build_centroid_map`
   Uses Lloyd relaxation to spread free drones across the search area.
 - `app/simulation.py:_update_targets_for_tick`
@@ -141,8 +145,10 @@ From the repo root, the simplest backend-only run path is:
 ```bash
 pip3 install -r requirements.txt
 pip3 install -r backend/requirements.txt
-PYTHONPATH=backend uvicorn app.main:app --host 0.0.0.0 --port 8000
+SITL_HOST=127.0.0.1 PYTHONPATH=backend uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+Use `SITL_HOST=127.0.0.1` when SITL runs on the same machine outside Docker. Root `.env` often sets `SITL_HOST=sitl` for Compose; that hostname does not resolve on the host.
 
 Quick checks:
 
@@ -152,6 +158,24 @@ curl http://localhost:8000/sitl/status
 ```
 
 If SITL is running and connected, `/sitl/status` should report `connected_count > 0`.
+
+## Headless Metrics (CLI / HTTP / Python)
+
+`app/benchmark_cli.py` is the headless entry point used by the May 2026 multi-scale runs and by CI smoke checks. Quick smoke (under a minute):
+
+```bash
+cd backend
+PYTHONPATH=. python -m app.benchmark_cli \
+  --algorithms pmv,sweep \
+  --iterations 5 \
+  --scenario-profile clustered_targets \
+  --min-lat 33.473 --max-lat 33.527 \
+  --min-lon -117.2324 --max-lon -117.1676 \
+  --drones 15 --targets 3 --timeout 600 \
+  --seed 1
+```
+
+Full reference — every CLI flag, all 9 scenario profiles, the iso-effort sweep template across 6/10/12 km bounds, the equivalent `POST /benchmark` body.
 
 ## Tests
 

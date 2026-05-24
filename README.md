@@ -110,8 +110,11 @@ When SITL is connected correctly, `/sitl/status` should report `connected_count 
 
 ## Operational Notes
 
+- **Docker and host-native SITL share your host ArduPilot checkout** — Compose bind-mounts `ARDUPILOT_PATH`. The `sitl` container runs `waf configure` + `waf copter` on that tree; switching back to `./scripts/launch_sitl.sh` on the host usually requires `rm -f .lock-waf_*` and a host `./waf configure --board sitl && ./waf copter` first. See [docs/SITL_QUICKSTART.md](docs/SITL_QUICKSTART.md#troubleshooting).
+- **Host-native backend** — if `.env` sets `SITL_HOST=sitl` (for Compose), override with `SITL_HOST=127.0.0.1` when running `uvicorn` on the host; see [Host SITL + host backend](docs/SITL_QUICKSTART.md#host-sitl--host-backend).
 - `scripts/launch_sitl.sh` remains the underlying SITL launcher, but Docker Compose now starts it in a dedicated `sitl` service.
-- Algorithm metrics history is stored locally in `backend/data/benchmarks.db`; the database file is gitignored and CSV export is available from the Metrics panel. The backend keeps `/benchmark` routes for compatibility.
+- Algorithm metrics history is stored locally in `backend/data/benchmarks.db`; the database file is gitignored, and CSV plus Markdown report exports are available from the Metrics panel. The backend keeps `/benchmark` routes for compatibility.
+- Run Metrics headless (CLI sweeps, scripted scenarios, multi-scale studies) using `python -m app.benchmark_cli`
 - `docker compose up --build` builds the backend, frontend, and SITL images.
 - Use `docker compose up -d --build` if you want the app stack to keep running in the background.
 - Compose auto-loads `.env` from the repo root; use `.env.example` as the template.

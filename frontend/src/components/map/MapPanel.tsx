@@ -1,6 +1,7 @@
 import { MapContainer, Marker, Polyline, Rectangle, TileLayer } from "react-leaflet";
 import type { LeafletEvent, Marker as LeafletMarker } from "leaflet";
 import type { AlgorithmOption, Bounds, PlacedHiker, SelectedDrone, Target, ValidDrone } from "../../types/mission";
+import type { PmvHeatmapMessage } from "../../types/ws";
 import { boundsToLeaflet } from "../../utils/geo";
 import MapBBoxDrawer from "./MapBBoxDrawer";
 import MapClickSelector from "./MapClickSelector";
@@ -8,7 +9,7 @@ import MapControlStack from "./MapControlStack";
 import MapRecenter from "./MapRecenter";
 import { makeCentroidIcon, makeDroneIcon, makePlacedHikerIcon, makeTargetCircleIcon } from "./icons";
 import L from "leaflet";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type InterpolatedDroneProps = {
   drone: ValidDrone;
@@ -118,6 +119,7 @@ type MapPanelProps = {
   onMoveHiker: (hikerId: string, lat: number, lon: number) => void;
   onSelectArea: (lat: number, lon: number, bounds: Bounds) => void;
   droneTrails?: Record<string, [number, number][]>;
+  pmvHeatmap?: PmvHeatmapMessage | null;
   selectedAlgorithm?: AlgorithmOption;
 };
 
@@ -127,6 +129,22 @@ const TRAIL_COLORS = ["#34d399", "#60a5fa", "#f472b6", "#fbbf24", "#a78bfa", "#2
 
 function trailColorForIndex(idx: number): string {
   return TRAIL_COLORS[idx % TRAIL_COLORS.length];
+}
+
+function heatmapColor(intensity: number): string {
+  const clamped = Math.max(0, Math.min(1, intensity));
+  if (clamped < 0.5) {
+    const t = clamped / 0.5;
+    const r = Math.round(37 + (250 - 37) * t);
+    const g = Math.round(99 + (204 - 99) * t);
+    const b = Math.round(235 + (21 - 235) * t);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+  const t = (clamped - 0.5) / 0.5;
+  const r = Math.round(250 + (220 - 250) * t);
+  const g = Math.round(204 + (38 - 204) * t);
+  const b = Math.round(21 + (38 - 21) * t);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 export default function MapPanel({
@@ -148,14 +166,52 @@ export default function MapPanel({
   onMoveHiker,
   onSelectArea,
   droneTrails,
+  pmvHeatmap,
   selectedAlgorithm
 }: MapPanelProps) {
   const sweepActive = selectedAlgorithm === "sweep" && missionActive;
+  const pmvActive = selectedAlgorithm === "pmv" && missionActive && !!pmvHeatmap;
+  const [pmvHeatmapVisible, setPmvHeatmapVisible] = useState(true);
+  const heatmapMissionKey = pmvHeatmap?.mission_id == null ? "" : String(pmvHeatmap.mission_id);
   const rectBounds = selectedBounds ? boundsToLeaflet(selectedBounds) : null;
   const runtimeTargetIds = new Set(targets.map((target) => String(target.id)));
+  const heatmapCells = useMemo(() => {
+    if (!pmvActive || !pmvHeatmapVisible || !pmvHeatmap) return [];
+    const { bounds, rows, cols, values, max_value: maxValue } = pmvHeatmap;
+    if (rows <= 0 || cols <= 0 || values.length !== rows * cols || maxValue <= 0) return [];
+    const latStep = (bounds.max_lat - bounds.min_lat) / rows;
+    const lonStep = (bounds.max_lon - bounds.min_lon) / cols;
+    return values.map((value, index) => {
+      const row = Math.floor(index / cols);
+      const col = index % cols;
+      const intensity = value / maxValue;
+      return {
+        key: `pmv-heat-${row}-${col}`,
+        bounds: [
+          [bounds.min_lat + row * latStep, bounds.min_lon + col * lonStep],
+          [bounds.min_lat + (row + 1) * latStep, bounds.min_lon + (col + 1) * lonStep]
+        ] as [[number, number], [number, number]],
+        intensity
+      };
+    });
+  }, [pmvActive, pmvHeatmap, pmvHeatmapVisible]);
+
+  useEffect(() => {
+    setPmvHeatmapVisible(true);
+  }, [heatmapMissionKey]);
 
   return (
     <div className={`map-wrap ${hikerPlacementMode ? "is-placing-hiker" : ""}`}>
+      {pmvActive && (
+        <label className="pmv-heatmap-toggle">
+          <input
+            type="checkbox"
+            checked={pmvHeatmapVisible}
+            onChange={(event) => setPmvHeatmapVisible(event.target.checked)}
+          />
+          <span>PMV heatmap</span>
+        </label>
+      )}
       <MapContainer center={defaultCenter} zoom={defaultZoom} zoomControl={false} className="leaflet-map">
         <MapRecenter center={mapCenter} />
         <TileLayer
@@ -179,6 +235,22 @@ export default function MapPanel({
             pathOptions={{ color: "#3b82f6", fillOpacity: 0.08, dashArray: "8 8", weight: 2 }}
           />
         )}
+
+        {heatmapCells.map((cell) => (
+          <Rectangle
+            key={cell.key}
+            bounds={cell.bounds}
+            interactive={false}
+            pathOptions={{
+              color: heatmapColor(cell.intensity),
+              fillColor: heatmapColor(cell.intensity),
+              fillOpacity: 0.08 + Math.min(0.42, cell.intensity * 0.42),
+              opacity: 0.18,
+              weight: 0,
+              className: "pmv-heatmap-cell"
+            }}
+          />
+        ))}
 
         {droneTrails &&
           validDrones.map((drone, idx) => {

@@ -26,8 +26,19 @@ logger = logging.getLogger(__name__)
 
 DETECTION_PROB = 0.9
 DIFFUSE_INTERVAL_S = 10
+# Baseline diffusion sigma (used as a floor at small bounds).
 DIFFUSE_SIGMA_DEG = DETECTION_RADIUS
+# At large bounds the fixed sigma is too small relative to how far a moving
+# hiker travels per diffusion step, so PMV's posterior cannot keep up. Scale
+# sigma with the bounds diagonal for moving profiles, with a stronger factor
+# for the long-extent corridor_route layout.
+DIFFUSE_SIGMA_FRACTION = 0.04
+DIFFUSE_SIGMA_FRACTION_CORRIDOR = 0.08
 LAMBDA_DEG = 5 * DETECTION_RADIUS
+TRAVEL_WEIGHT_FLOOR = 0.18
+GLOBAL_HOTSPOT_RATIO = 1.15
+GLOBAL_HOTSPOT_BOOST = 1.35
+GLOBAL_HOTSPOT_PEAK_FRACTION = 0.65
 EPS = 1e-12
 _SEED_LLOYD_ITERS = 8
 _MOVING_PROFILES = {
@@ -36,6 +47,8 @@ _MOVING_PROFILES = {
     "moving_edge_escape",
     "diverging_group",
 }
+DEFAULT_HEATMAP_ROWS = 20
+DEFAULT_HEATMAP_COLS = 20
 
 
 def _getm(mission, key: str, default=None):
@@ -49,6 +62,61 @@ def _setm(mission, key: str, value) -> None:
         mission[key] = value
     else:
         setattr(mission, key, value)
+
+
+def build_pmv_heatmap_payload(
+    mission,
+    *,
+    mission_id: str | None = None,
+    rows: int = DEFAULT_HEATMAP_ROWS,
+    cols: int = DEFAULT_HEATMAP_COLS,
+) -> dict | None:
+    """Return a bounded, coarse heatmap sampled from PMV posterior state."""
+    bounds = _getm(mission, "bounds", {})
+    grid = _getm(mission, "pmv_grid")
+    posterior = _getm(mission, "pmv_P")
+    if not bounds or grid is None or posterior is None or rows <= 0 or cols <= 0:
+        return None
+
+    min_lat = float(bounds["min_lat"])
+    max_lat = float(bounds["max_lat"])
+    min_lon = float(bounds["min_lon"])
+    max_lon = float(bounds["max_lon"])
+    lat_span = max(max_lat - min_lat, EPS)
+    lon_span = max(max_lon - min_lon, EPS)
+
+    grid_np = np.asarray(grid, dtype=float)
+    posterior_np = normalize_probability(np.asarray(posterior, dtype=float))
+    if len(grid_np) == 0 or len(grid_np) != len(posterior_np):
+        return None
+
+    heatmap = np.zeros((rows, cols), dtype=float)
+    lat_bins = np.floor(((grid_np[:, 0] - min_lat) / lat_span) * rows).astype(int)
+    lon_bins = np.floor(((grid_np[:, 1] - min_lon) / lon_span) * cols).astype(int)
+    lat_bins = np.clip(lat_bins, 0, rows - 1)
+    lon_bins = np.clip(lon_bins, 0, cols - 1)
+
+    for row_idx, col_idx, value in zip(lat_bins, lon_bins, posterior_np):
+        heatmap[int(row_idx), int(col_idx)] += float(value)
+
+    values = [round(float(value), 12) for value in heatmap.reshape(rows * cols)]
+    total_probability = float(sum(values))
+    return {
+        "type": "pmv_heatmap",
+        "mission_id": mission_id or str(_getm(mission, "id", "")),
+        "algorithm": "pmv",
+        "rows": rows,
+        "cols": cols,
+        "bounds": {
+            "min_lat": min_lat,
+            "max_lat": max_lat,
+            "min_lon": min_lon,
+            "max_lon": max_lon,
+        },
+        "values": values,
+        "max_value": round(max(values, default=0.0), 12),
+        "total_probability": round(total_probability, 12),
+    }
 
 
 class PMVSearchAlgorithm(BaseSearchAlgorithm):
@@ -99,6 +167,8 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
 
         profile = str(_getm(mission, "scenario_profile", "uniform_random") or "uniform_random")
         scenario_params = _getm(mission, "scenario_params", None)
+        # This is the Bayesian "belief map": one probability per dense-grid
+        # point, shaped by profile-level SAR clues and normalized to sum to 1.
         posterior = build_prior(bounds, dense_grid, profile, scenario_params)
 
         _setm(mission, "pmv_grid", dense_grid)
@@ -134,6 +204,7 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
         grid = np.asarray(grid, dtype=float)
         posterior = np.asarray(posterior, dtype=float)
         posterior = self._update_posterior(mission, grid, posterior)
+        global_hot_indices = self._global_hot_indices(posterior, len(free_drones))
 
         waypoints: Dict[str, Tuple[float, float]] = {}
         planned_points: list[tuple[float, float]] = []
@@ -145,22 +216,36 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
                 continue
 
             cell_mass = float(posterior[cell_indices].sum())
-            if cell_mass <= EPS:
+            candidate_indices = self._candidate_indices(
+                posterior,
+                cell_indices,
+                global_hot_indices,
+            )
+            if len(candidate_indices) == 0:
+                continue
+
+            if cell_mass <= EPS and len(global_hot_indices) == 0:
                 centroid = centroids.get(drone_id)
                 if centroid is not None:
                     waypoints[drone["id"]] = (float(centroid[0]), float(centroid[1]))
                     planned_points.append((float(centroid[0]), float(centroid[1])))
                 continue
 
-            candidate_points = grid[cell_indices]
+            candidate_points = grid[candidate_indices]
             pos = np.array([float(drone.get("lat", 0.0)), float(drone.get("lon", 0.0))])
-            travel_cost = np.linalg.norm(candidate_points - pos, axis=1)
-            travel_weight = np.exp(-travel_cost / max(LAMBDA_DEG, EPS))
+            travel_weight = self._travel_weights(candidate_points, pos, _getm(mission, "bounds", {}))
             overlap_weight = self._overlap_weights(candidate_points, planned_points)
-            scores = posterior[cell_indices] * overlap_weight * travel_weight
+            in_home_cell = np.isin(candidate_indices, cell_indices)
+            assist_boost = np.where(in_home_cell, 1.0, GLOBAL_HOTSPOT_BOOST)
+            probability_weight = posterior[candidate_indices] / max(float(posterior.max(initial=0.0)), EPS)
+            # Information-gain score: partitions are the default, but a clearly
+            # hotter global PMV region can pull nearby or under-used drones out
+            # of their fixed cell. The travel floor prevents large maps from
+            # making edge probability mathematically unreachable.
+            scores = probability_weight * overlap_weight * travel_weight * assist_boost
 
             if float(scores.max(initial=0.0)) <= EPS:
-                scores = posterior[cell_indices] * travel_weight
+                scores = probability_weight * travel_weight * assist_boost
             best_idx = int(np.argmax(scores))
             best_point = candidate_points[best_idx]
             waypoint = (float(best_point[0]), float(best_point[1]))
@@ -185,6 +270,8 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
         updated = posterior.copy()
         scanned = _scanned_indices(grid, _getm(mission, "drones", []))
         if len(scanned) > 0:
+            # A scanned cell is not impossible, just much less likely after a
+            # failed detection; renormalization redistributes belief elsewhere.
             updated[scanned] *= (1.0 - DETECTION_PROB)
             updated = normalize_probability(updated)
 
@@ -193,7 +280,10 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
         last_diffuse = int(_getm(mission, "pmv_last_diffuse_t", elapsed) or 0)
         if profile in _MOVING_PROFILES and elapsed - last_diffuse >= DIFFUSE_INTERVAL_S:
             bounds = _getm(mission, "bounds", {})
-            updated = _diffuse_probability(updated, grid, bounds, DIFFUSE_SIGMA_DEG)
+            # Moving-target profiles use a simple random-walk transition model:
+            # blur the posterior a little so probability can leak to neighbors.
+            sigma = _moving_profile_sigma(profile, bounds)
+            updated = _diffuse_probability(updated, grid, bounds, sigma)
             _setm(mission, "pmv_last_diffuse_t", elapsed)
 
         return normalize_probability(updated)
@@ -209,6 +299,73 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
         distances = np.linalg.norm(candidate_points[:, np.newaxis] - planned, axis=2)
         sensor_overlap = (distances <= DETECTION_RADIUS).any(axis=1).astype(float)
         return 1.0 - sensor_overlap
+
+    def _global_hot_indices(self, posterior: np.ndarray, free_drone_count: int) -> np.ndarray:
+        if len(posterior) == 0:
+            return np.array([], dtype=int)
+        peak = float(posterior.max(initial=0.0))
+        median = float(np.median(posterior))
+        if peak <= EPS or peak <= median * GLOBAL_HOTSPOT_RATIO:
+            return np.array([], dtype=int)
+
+        percentile_threshold = float(np.percentile(posterior, 90))
+        threshold = max(peak * GLOBAL_HOTSPOT_PEAK_FRACTION, percentile_threshold)
+        hot_indices = np.where(posterior >= threshold)[0]
+
+        min_count = min(len(posterior), max(free_drone_count * 6, 12))
+        if len(hot_indices) < min_count:
+            hot_indices = np.argpartition(posterior, -min_count)[-min_count:]
+        return np.asarray(sorted(set(int(idx) for idx in hot_indices)), dtype=int)
+
+    def _candidate_indices(
+        self,
+        posterior: np.ndarray,
+        cell_indices: np.ndarray,
+        global_hot_indices: np.ndarray,
+    ) -> np.ndarray:
+        if len(global_hot_indices) == 0:
+            return cell_indices
+
+        local_peak = float(posterior[cell_indices].max(initial=0.0)) if len(cell_indices) else 0.0
+        global_peak = float(posterior[global_hot_indices].max(initial=0.0))
+        if local_peak > EPS and global_peak < local_peak * GLOBAL_HOTSPOT_RATIO:
+            return cell_indices
+
+        combined = np.concatenate([cell_indices, global_hot_indices])
+        return np.asarray(sorted(set(int(idx) for idx in combined)), dtype=int)
+
+    def _travel_weights(
+        self,
+        candidate_points: np.ndarray,
+        drone_position: np.ndarray,
+        bounds: dict,
+    ) -> np.ndarray:
+        travel_cost = np.linalg.norm(candidate_points - drone_position, axis=1)
+        lat_span = float(bounds.get("max_lat", 0.0) - bounds.get("min_lat", 0.0))
+        lon_span = float(bounds.get("max_lon", 0.0) - bounds.get("min_lon", 0.0))
+        adaptive_lambda = max(LAMBDA_DEG, math.hypot(lat_span, lon_span) * 0.35)
+        return TRAVEL_WEIGHT_FLOOR + (1.0 - TRAVEL_WEIGHT_FLOOR) * np.exp(
+            -travel_cost / max(adaptive_lambda, EPS)
+        )
+
+
+def _moving_profile_sigma(profile: str, bounds: dict[str, float]) -> float:
+    """Bounds-aware diffusion sigma for moving-target profiles.
+
+    Fixed sigma works at 6 km bounds but is too small at 10–12 km, where a
+    hiker translates further per diffusion interval than the kernel can spread.
+    Scaling with the bounds diagonal keeps PMV's transition model proportional
+    to how far a target can plausibly move between updates.
+    """
+    lat_span = float(bounds.get("max_lat", 0.0) - bounds.get("min_lat", 0.0))
+    lon_span = float(bounds.get("max_lon", 0.0) - bounds.get("min_lon", 0.0))
+    diag = math.hypot(lat_span, lon_span)
+    fraction = (
+        DIFFUSE_SIGMA_FRACTION_CORRIDOR
+        if profile == "corridor_route"
+        else DIFFUSE_SIGMA_FRACTION
+    )
+    return max(DIFFUSE_SIGMA_DEG, diag * fraction)
 
 
 def _scanned_indices(grid: np.ndarray, drones: list[dict]) -> np.ndarray:

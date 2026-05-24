@@ -36,6 +36,7 @@ import type {
   MissionProgressMessage,
   MissionStatus,
   MissionStatusMessage,
+  PmvHeatmapMessage,
   TargetFoundMessage,
   TelemetryMessage
 } from "./types/ws";
@@ -85,6 +86,7 @@ export default function App() {
   const [completionElapsedSeconds, setCompletionElapsedSeconds] = useState<number>(0);
   const [completedMetrics, setCompletedMetrics] = useState<MissionMetrics | null>(null);
   const [benchmarkProgress, setBenchmarkProgress] = useState<BenchmarkProgressMessage | null>(null);
+  const [pmvHeatmap, setPmvHeatmap] = useState<PmvHeatmapMessage | null>(null);
   const [placedHikers, setPlacedHikers] = useState<PlacedHiker[]>([]);
   const [selectedHikerId, setSelectedHikerId] = useState<string | null>(null);
   const [isPlacingHiker, setIsPlacingHiker] = useState(false);
@@ -310,6 +312,7 @@ export default function App() {
         }
       } else {
         runningMissionIdRef.current = null;
+        setPmvHeatmap(null);
       }
     },
     [assignHikerLabels]
@@ -340,6 +343,12 @@ export default function App() {
     [assignHikerLabels]
   );
 
+  const onPmvHeatmap = useCallback((message: PmvHeatmapMessage) => {
+    if (message.algorithm !== "pmv") return;
+    if (!Array.isArray(message.values) || message.values.length !== message.rows * message.cols) return;
+    setPmvHeatmap(message);
+  }, []);
+
   useMissionSocket({
     apiPort,
     onConnectedChange: setWsConnected,
@@ -347,6 +356,7 @@ export default function App() {
     onMissionStatus,
     onMissionProgress,
     onTargetFound,
+    onPmvHeatmap,
     onBenchmarkProgress: setBenchmarkProgress
   });
 
@@ -359,6 +369,12 @@ export default function App() {
       setIsPlacingHiker(false);
     }
   }, [hikerPlacementEditable]);
+
+  useEffect(() => {
+    if (selectedAlgorithm !== "pmv" || !missionActive) {
+      setPmvHeatmap(null);
+    }
+  }, [missionActive, selectedAlgorithm]);
 
   const { startMission, stopMission, resetMissionLock, recallDrones } = useMissionActions({
     apiBase,
@@ -465,12 +481,14 @@ export default function App() {
     setSelectedAlgorithm(algorithm);
     runningMissionIdRef.current = null;
     setDroneTrails({});
+    setPmvHeatmap(null);
   }, []);
 
   const onResetMission = useCallback(() => {
     runningMissionIdRef.current = null;
     nextHikerNumberRef.current = 1;
     setDroneTrails({});
+    setPmvHeatmap(null);
     setPlacedHikers([]);
     setSelectedHikerId(null);
     setIsPlacingHiker(false);
@@ -560,6 +578,7 @@ export default function App() {
           onPlaceHiker={onPlaceHiker}
           onMoveHiker={onMoveHiker}
           droneTrails={droneTrails}
+          pmvHeatmap={pmvHeatmap}
           selectedAlgorithm={selectedAlgorithm}
           onSelectArea={onSelectArea}
         />

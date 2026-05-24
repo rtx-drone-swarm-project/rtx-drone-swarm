@@ -29,6 +29,7 @@ from app.sitl import sitl_bridge
 from app.ws import manager
 from app.algorithms import get_algorithm
 from app.algorithms.base import DETECTION_RADIUS
+from app.algorithms.pmv import build_pmv_heatmap_payload
 
 
 logger = logging.getLogger(__name__)
@@ -438,6 +439,18 @@ async def _broadcast_mission_tick(mission_id: str, mission: Mission) -> None:
         )
 
 
+async def _maybe_broadcast_pmv_heatmap(mission_id: str, mission: Mission) -> None:
+    """Broadcast a coarse PMV posterior heatmap for demo visualization."""
+    if mission.algorithm != "pmv" or getattr(mission, "_suppress_broadcasts", False):
+        return
+    elapsed = int(getattr(mission, "elapsed_seconds", 0) or 0)
+    if elapsed % 2 != 0:
+        return
+    payload = build_pmv_heatmap_payload(mission, mission_id=mission_id)
+    if payload is not None:
+        await manager.broadcast(payload)
+
+
 async def simulation_loop(mission_id: str):
     """Run the mission tick loop until the mission stops or reaches completion.
 
@@ -482,6 +495,7 @@ async def simulation_loop(mission_id: str):
             ]
 
             waypoints_map = await asyncio.to_thread(active_strategy.get_target_waypoints, mission, free_drones)
+            await _maybe_broadcast_pmv_heatmap(mission_id, mission)
 
             _send_live_drone_gotos(mission, live_drone_ids, waypoints_map)
             await _update_drones_for_tick(mission, live_drone_ids, waypoints_map)

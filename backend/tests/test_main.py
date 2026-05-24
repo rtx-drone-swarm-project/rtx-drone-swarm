@@ -1876,6 +1876,48 @@ def test_benchmark_run_routes_read_sqlite_rows(tmp_path, monkeypatch):
     assert "scenario_profile" in export_response.text
 
 
+def test_benchmark_report_markdown_route_includes_pmv_comparison(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+
+    monkeypatch.setattr(benchmark_db, "DB_PATH", tmp_path / "benchmarks.db")
+    request = {
+        "algorithms": ["sweep", "pmv"],
+        "iterations": 1,
+        "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+        "drone_count": 1,
+        "target_count": 1,
+        "timeout_seconds": 5,
+        "scenario_profile": "edge_targets",
+    }
+    benchmark_db.create_run("bench-report-test", request, total_trials=2)
+    benchmark_db.insert_trial(_benchmark_trial_row("bench-report-test", "sweep"))
+    pmv_row = _benchmark_trial_row("bench-report-test", "pmv")
+    pmv_row["coverage_pct"] = 90.0
+    pmv_row["first_find_seconds"] = 1.0
+    benchmark_db.insert_trial(pmv_row)
+    benchmark_db.finish_run("bench-report-test", "complete")
+
+    response = client.get("/benchmark/bench-report-test/report.md")
+
+    assert response.status_code == 200
+    assert "text/markdown" in response.headers["content-type"]
+    assert "# Metrics Report: bench-report-test" in response.text
+    assert "| `pmv` " in response.text
+    assert "`pmv` vs `sweep`" in response.text
+    assert "PMV benchmark priors are profile-based" in response.text
+
+
+def test_benchmark_report_markdown_route_404s_for_missing_run(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+
+    monkeypatch.setattr(benchmark_db, "DB_PATH", tmp_path / "benchmarks.db")
+
+    response = client.get("/benchmark/missing-report/report.md")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Benchmark run not found"
+
+
 def test_benchmark_get_run_uses_stored_summary_for_finished_runs(tmp_path, monkeypatch):
     import app.benchmark_db as benchmark_db
 

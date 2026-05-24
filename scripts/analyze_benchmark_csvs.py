@@ -16,8 +16,24 @@ from pathlib import Path
 from typing import Any
 
 
-ALGORITHM_ORDER = ["voronoi", "voronoi_aco", "vaco", "apf", "sweep", "pso"]
+ALGORITHM_ORDER = ["voronoi", "voronoi_aco", "vaco", "apf", "sweep", "pso", "pmv"]
 RAW_PREFIX = "raw_"
+
+STATIONARY_PROFILES = {
+    "uniform_random",
+    "clustered_targets",
+    "edge_targets",
+    "split_clusters",
+    "clustered_drones",
+}
+MOVING_PROFILES = {
+    "wandering_hikers",
+    "corridor_route",
+    "moving_edge_escape",
+    "diverging_group",
+}
+PAIRED_REFERENCE_ALGORITHM = "pmv"
+COVERAGE_MILESTONES = (50, 80, 95)
 
 
 def _read_rows(input_dir: Path) -> list[dict[str, str]]:
@@ -70,6 +86,34 @@ def _fmt(value: float | None, digits: int = 1, suffix: str = "") -> str:
     return f"{value:.{digits}f}{suffix}"
 
 
+def _milestone_reach_rate(rows: list[dict[str, str]], key: str) -> tuple[float | None, float | None]:
+    """Return (reach_rate_pct, mean_seconds_for_trials_that_reached) for a coverage milestone."""
+    total = len(rows)
+    if not total:
+        return None, None
+    reached: list[float] = []
+    for row in rows:
+        value = _float(row, key)
+        if value is None or value <= 0:
+            continue
+        reached.append(value)
+    reach_rate = 100.0 * len(reached) / total
+    return reach_rate, _mean(reached)
+
+
+def _drone_count(row: dict[str, str]) -> float:
+    value = _float(row, "drone_count")
+    return value or 0.0
+
+
+def _elapsed_or_timeout_seconds(row: dict[str, str]) -> float:
+    value = _float(row, "elapsed_seconds")
+    if value:
+        return value
+    timeout = _float(row, "timeout_seconds")
+    return timeout or 0.0
+
+
 def _group_rows(rows: list[dict[str, str]], *keys: str) -> dict[tuple[str, ...], list[dict[str, str]]]:
     grouped: dict[tuple[str, ...], list[dict[str, str]]] = defaultdict(list)
     for row in rows:
@@ -84,9 +128,13 @@ def _summarize(rows: list[dict[str, str]]) -> dict[str, float | int | None]:
     partial_rates: list[float] = []
     first_find: list[float] = []
     coverage: list[float] = []
+    redundant_coverage: list[float] = []
     distance: list[float] = []
     targets_found: list[float] = []
     coverage_efficiency: list[float] = []
+    drone_seconds_total: list[float] = []
+    search_effort_per_find: list[float] = []
+    distance_per_find: list[float] = []
 
     for row in rows:
         found = _float(row, "targets_found") or 0.0
@@ -100,6 +148,7 @@ def _summarize(rows: list[dict[str, str]]) -> dict[str, float | int | None]:
         for key, bucket in [
             ("first_find_seconds", first_find),
             ("coverage_pct", coverage),
+            ("redundant_coverage_pct", redundant_coverage),
             ("total_distance_traveled_m", distance),
             ("targets_found", targets_found),
             ("coverage_per_drone_second", coverage_efficiency),
@@ -108,7 +157,25 @@ def _summarize(rows: list[dict[str, str]]) -> dict[str, float | int | None]:
             if value is not None:
                 bucket.append(value)
 
-    return {
+        drones = _drone_count(row)
+        elapsed = _elapsed_or_timeout_seconds(row)
+        if drones > 0 and elapsed > 0:
+            ds_total = drones * elapsed
+            drone_seconds_total.append(ds_total)
+            # search_effort / distance per find use found = 0 as "effort spent for nothing".
+            denom = found if found and found > 0 else 1.0
+            search_effort_per_find.append(ds_total / denom)
+            row_distance = _float(row, "total_distance_traveled_m")
+            if row_distance is not None:
+                distance_per_find.append(row_distance / denom)
+
+    milestones: dict[str, float | None] = {}
+    for pct in COVERAGE_MILESTONES:
+        rate, mean_seconds = _milestone_reach_rate(rows, f"time_to_{pct}_coverage")
+        milestones[f"reach_{pct}_coverage_pct"] = rate
+        milestones[f"mean_time_to_{pct}_coverage"] = mean_seconds
+
+    summary: dict[str, float | int | None] = {
         "trials": total,
         "success_rate_pct": 100.0 * successes / total if total else None,
         "timeout_rate_pct": 100.0 * timeouts / total if total else None,
@@ -117,10 +184,16 @@ def _summarize(rows: list[dict[str, str]]) -> dict[str, float | int | None]:
         "median_first_find_seconds": _median(first_find),
         "p90_first_find_seconds": _percentile(first_find, 90),
         "mean_coverage_pct": _mean(coverage),
+        "mean_redundant_coverage_pct": _mean(redundant_coverage),
         "mean_distance_m": _mean(distance),
         "mean_targets_found": _mean(targets_found),
         "mean_coverage_per_drone_second": _mean(coverage_efficiency),
+        "mean_drone_seconds_total": _mean(drone_seconds_total),
+        "mean_search_effort_per_find": _mean(search_effort_per_find),
+        "mean_distance_per_find_m": _mean(distance_per_find),
     }
+    summary.update(milestones)
+    return summary
 
 
 def _ordered_algorithms(rows: list[dict[str, str]]) -> list[str]:
@@ -284,8 +357,14 @@ def _write_analysis(rows: list[dict[str, str]], input_dir: Path) -> None:
         lines.append(f"- Lowest mean distance: `{_rank(summary, 'mean_distance_m', False)}`.")
         lines.append("")
 
-    stationary = [row for row in rows if row.get("scenario_profile") in {"uniform_random", "clustered_targets", "edge_targets", "split_clusters", "clustered_drones"}]
-    moving = [row for row in rows if row.get("scenario_profile") in {"wandering_hikers", "corridor_route", "moving_edge_escape", "diverging_group"}]
+    stationary = [row for row in rows if row.get("scenario_profile") in STATIONARY_PROFILES]
+    moving = [row for row in rows if row.get("scenario_profile") in MOVING_PROFILES]
+
+    lines.extend(_effort_section(rows, algorithms))
+    lines.extend(_coverage_milestone_section(rows, algorithms))
+    lines.extend(_stationary_vs_moving_section(stationary, moving, algorithms))
+    lines.extend(_paired_section(rows, algorithms))
+
     lines.extend([
         "## Algorithm Notes",
         "",
@@ -322,10 +401,174 @@ def _write_analysis(rows: list[dict[str, str]], input_dir: Path) -> None:
         "",
         "- Results are paired by scenario seed inside each scenario CSV.",
         "- First-find averages ignore trials with no find; use success and timeout rates beside speed metrics.",
+        "- Coverage milestone reach % is the share of trials that crossed the milestone before timeout; trials that never reached it are excluded from the mean time, not counted as zero.",
+        "- `search_effort_per_find` and `distance_per_find_m` charge the full effort to trials that found nothing (denominator floored at 1 hiker), so high values indicate wasted effort, not missing data.",
         "- Generated SVG charts are in `graphs/`; per-algorithm CSV splits are in `splits/`.",
         "",
     ])
     (input_dir / "analysis.md").write_text("\n".join(lines))
+
+
+def _effort_section(rows: list[dict[str, str]], algorithms: list[str]) -> list[str]:
+    overall = {
+        key[0]: _summarize(group)
+        for key, group in _group_rows(rows, "algorithm").items()
+    }
+    lines = [
+        "## SAR Effort and Efficiency",
+        "",
+        "Coverage-per-drone-second is the cleanest cross-scale efficiency metric; effort/distance per find penalize trials that found nothing.",
+        "",
+        "| Algorithm | Cov %/drone-sec ×1k | Drone-seconds total | Effort per find (drone-sec) | Distance per find (m) | Redundant cov % |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for algorithm in algorithms:
+        values = overall.get(algorithm)
+        if not values:
+            continue
+        cps = values.get("mean_coverage_per_drone_second")
+        cps_scaled = cps * 1000 if cps is not None else None
+        lines.append(
+            f"| `{algorithm}` "
+            f"| {_fmt(cps_scaled, 3)} "
+            f"| {_fmt(values.get('mean_drone_seconds_total'), 0)} "
+            f"| {_fmt(values.get('mean_search_effort_per_find'), 0)} "
+            f"| {_fmt(values.get('mean_distance_per_find_m'), 0)} "
+            f"| {_fmt(values.get('mean_redundant_coverage_pct'), 1)} |"
+        )
+    lines.append("")
+    return lines
+
+
+def _coverage_milestone_section(rows: list[dict[str, str]], algorithms: list[str]) -> list[str]:
+    overall = {
+        key[0]: _summarize(group)
+        for key, group in _group_rows(rows, "algorithm").items()
+    }
+    lines = [
+        "## Coverage Milestone Reach Rates",
+        "",
+        "Reach % is the share of trials that crossed the milestone within the timeout. Mean time is computed only over trials that reached it (so an algorithm with low reach % and small mean time was lucky, not fast).",
+        "",
+        "| Algorithm | Reach 50% | Mean t→50% | Reach 80% | Mean t→80% | Reach 95% | Mean t→95% |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    for algorithm in algorithms:
+        values = overall.get(algorithm)
+        if not values:
+            continue
+        cells: list[str] = []
+        for pct in COVERAGE_MILESTONES:
+            reach = values.get(f"reach_{pct}_coverage_pct")
+            mean_t = values.get(f"mean_time_to_{pct}_coverage")
+            cells.append(_fmt(reach, 1, "%"))
+            if reach in (None, 0) or mean_t in (None, 0):
+                cells.append("did not reach")
+            else:
+                cells.append(_fmt(mean_t, 0, "s"))
+        lines.append(f"| `{algorithm}` | " + " | ".join(cells) + " |")
+    lines.append("")
+    return lines
+
+
+def _stationary_vs_moving_section(
+    stationary: list[dict[str, str]],
+    moving: list[dict[str, str]],
+    algorithms: list[str],
+) -> list[str]:
+    lines = [
+        "## Stationary vs Moving Profile Split",
+        "",
+        "Algorithms that win overall by being good only on moving profiles will look weak here; algorithms whose stationary value is competitive deserve to be the SAR default.",
+        "",
+        "| Algorithm | Stat Success % | Stat Coverage % | Stat Cov/drone-s ×1k | Moving Success % | Moving Coverage % | Moving Cov/drone-s ×1k |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    stat_groups = {
+        key[0]: _summarize(group)
+        for key, group in _group_rows(stationary, "algorithm").items()
+    }
+    move_groups = {
+        key[0]: _summarize(group)
+        for key, group in _group_rows(moving, "algorithm").items()
+    }
+    for algorithm in algorithms:
+        st = stat_groups.get(algorithm, {})
+        mv = move_groups.get(algorithm, {})
+        if not st and not mv:
+            continue
+        st_cps = st.get("mean_coverage_per_drone_second")
+        mv_cps = mv.get("mean_coverage_per_drone_second")
+        lines.append(
+            f"| `{algorithm}` "
+            f"| {_fmt(st.get('success_rate_pct'), 1)} "
+            f"| {_fmt(st.get('mean_coverage_pct'), 1)} "
+            f"| {_fmt(st_cps * 1000 if st_cps is not None else None, 3)} "
+            f"| {_fmt(mv.get('success_rate_pct'), 1)} "
+            f"| {_fmt(mv.get('mean_coverage_pct'), 1)} "
+            f"| {_fmt(mv_cps * 1000 if mv_cps is not None else None, 3)} |"
+        )
+    lines.append("")
+    return lines
+
+
+def _paired_section(rows: list[dict[str, str]], algorithms: list[str]) -> list[str]:
+    pair_key = ("scenario_profile", "scenario_seed", "iteration")
+    paired: dict[tuple[str, ...], dict[str, dict[str, str]]] = defaultdict(dict)
+    for row in rows:
+        key = tuple(row.get(k, "") for k in pair_key)
+        paired[key][row.get("algorithm", "")] = row
+
+    if PAIRED_REFERENCE_ALGORITHM not in {row.get("algorithm") for row in rows}:
+        return []
+
+    lines = [
+        f"## Paired Comparison vs `{PAIRED_REFERENCE_ALGORITHM}` (same seed/profile/iteration)",
+        "",
+        "Pairs where both algorithms ran on the exact same scenario instance. `pmv only` = pmv fully succeeded and the other did not; `other only` = the inverse; `both` = both fully succeeded; `neither` = both failed within timeout.",
+        "",
+        "| Algorithm | Paired trials | pmv only | other only | both | neither |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    for algorithm in algorithms:
+        if algorithm == PAIRED_REFERENCE_ALGORITHM:
+            continue
+        pmv_only = other_only = both = neither = 0
+        total = 0
+        for key, runs in paired.items():
+            ref = runs.get(PAIRED_REFERENCE_ALGORITHM)
+            other = runs.get(algorithm)
+            if ref is None or other is None:
+                continue
+            total += 1
+            ref_succ = _full_success(ref)
+            other_succ = _full_success(other)
+            if ref_succ and other_succ:
+                both += 1
+            elif ref_succ:
+                pmv_only += 1
+            elif other_succ:
+                other_only += 1
+            else:
+                neither += 1
+        if total == 0:
+            continue
+        lines.append(
+            f"| `{algorithm}` "
+            f"| {total} "
+            f"| {pmv_only} ({100*pmv_only/total:.1f}%) "
+            f"| {other_only} ({100*other_only/total:.1f}%) "
+            f"| {both} ({100*both/total:.1f}%) "
+            f"| {neither} ({100*neither/total:.1f}%) |"
+        )
+    lines.append("")
+    return lines
+
+
+def _full_success(row: dict[str, str]) -> bool:
+    found = _float(row, "targets_found") or 0.0
+    total = _float(row, "targets_total") or _float(row, "target_count") or 0.0
+    return bool(total) and found >= total
 
 
 def _summary_table(summary: dict[str, dict[str, Any]], algorithms: list[str]) -> list[str]:

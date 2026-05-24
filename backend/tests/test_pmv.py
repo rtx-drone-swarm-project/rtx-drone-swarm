@@ -7,7 +7,13 @@ import random
 import numpy as np
 
 from app.algorithms.base import DETECTION_RADIUS, build_dense_coverage_grid
-from app.algorithms.pmv import PMVSearchAlgorithm, _diffuse_probability
+from app.algorithms.pmv import (
+    DIFFUSE_SIGMA_DEG,
+    PMVSearchAlgorithm,
+    _diffuse_probability,
+    _moving_profile_sigma,
+    build_pmv_heatmap_payload,
+)
 from app.algorithms.priors import (
     BOUNDARY_BAND_DEG,
     CORRIDOR_HALFWIDTH_DEG,
@@ -128,6 +134,46 @@ def test_pmv_posterior_decays_after_scan():
     assert np.isclose(float(after.sum()), 1.0, atol=1e-6)
 
 
+def test_moving_profile_sigma_scales_with_bounds():
+    small = {"min_lat": 0.0, "max_lat": 0.02, "min_lon": 0.0, "max_lon": 0.02}
+    large = {"min_lat": 0.0, "max_lat": 0.10, "min_lon": 0.0, "max_lon": 0.10}
+
+    # Tiny bounds may fall to the floor; the floor itself must be respected.
+    assert _moving_profile_sigma("wandering_hikers", small) >= DIFFUSE_SIGMA_DEG
+    # On a 10 km-equivalent extent the moving sigma should grow well past the
+    # detection-radius floor; otherwise PMV cannot keep up with translating
+    # hikers and corridor_route collapses to 0% success.
+    assert _moving_profile_sigma("wandering_hikers", large) > DIFFUSE_SIGMA_DEG * 2
+    # corridor_route uses a stronger fraction because the corridor extends
+    # along the full diagonal of the bounds.
+    assert _moving_profile_sigma("corridor_route", large) > _moving_profile_sigma(
+        "wandering_hikers", large
+    )
+
+
+def test_pmv_corridor_diffusion_spreads_further_at_large_bounds():
+    """At 12 km-equivalent bounds the moving-profile diffusion must spread mass
+    well past one detection radius in a single step; otherwise PMV cannot
+    track a hiker translating along a long corridor."""
+    bounds = {"min_lat": 0.0, "max_lat": 0.108, "min_lon": 0.0, "max_lon": 0.108}
+    grid = build_dense_coverage_grid(bounds)
+    posterior = np.full(len(grid), 1e-9, dtype=float)
+    hot_idx = int(np.argmin(np.hypot(grid[:, 0] - 0.05, grid[:, 1] - 0.05)))
+    posterior[hot_idx] = 1.0
+    posterior /= posterior.sum()
+
+    sigma = _moving_profile_sigma("corridor_route", bounds)
+    diffused = _diffuse_probability(posterior, grid, bounds, sigma)
+
+    hot_pt = grid[hot_idx]
+    nearby_radius = DETECTION_RADIUS * 5
+    distances = np.hypot(grid[:, 0] - hot_pt[0], grid[:, 1] - hot_pt[1])
+    far_mask = distances > nearby_radius
+    # Without a bounds-aware sigma the probability barely leaves the seed cell;
+    # with the new fraction-of-diagonal sigma it must reach noticeably further.
+    assert float(diffused[far_mask].sum()) > 0.2
+
+
 def test_pmv_diffusion_spreads_mass():
     grid = build_dense_coverage_grid(_BOUNDS)
     posterior = np.full(len(grid), 1e-9, dtype=float)
@@ -158,6 +204,93 @@ def test_pmv_waypoint_selects_highest_score_cell():
     waypoints = algo.get_target_waypoints(mission, mission["drones"])
 
     assert waypoints["d1"] == (float(grid[hot_idx, 0]), float(grid[hot_idx, 1]))
+
+
+def test_pmv_global_hotspot_can_pull_drone_beyond_fixed_partition():
+    drones = [{"id": "d1", "lat": 0.002, "lon": 0.002, "status": "idle"}]
+    mission = _make_mission(drones)
+    algo = PMVSearchAlgorithm()
+    algo.initialize(mission)
+
+    grid = mission["pmv_grid"]
+    local_indices = np.where((grid[:, 0] <= 0.006) & (grid[:, 1] <= 0.006))[0]
+    hot_idx = int(np.argmin(np.hypot(grid[:, 0] - 0.04, grid[:, 1] - 0.04)))
+    assert hot_idx not in set(local_indices.tolist())
+
+    posterior = np.full(len(grid), 1e-9, dtype=float)
+    posterior[local_indices] = 0.01
+    posterior[hot_idx] = 1.0
+    posterior /= posterior.sum()
+    mission["pmv_drone_cells"] = {"d1": local_indices}
+    mission["pmv_P"] = posterior
+
+    waypoints = algo.get_target_waypoints(mission, mission["drones"])
+
+    assert waypoints["d1"] == (float(grid[hot_idx, 0]), float(grid[hot_idx, 1]))
+
+
+def test_pmv_uniform_probability_stays_inside_partition():
+    drones = [{"id": "d1", "lat": 0.002, "lon": 0.002, "status": "idle"}]
+    mission = _make_mission(drones)
+    algo = PMVSearchAlgorithm()
+    algo.initialize(mission)
+
+    grid = mission["pmv_grid"]
+    local_indices = np.where((grid[:, 0] <= 0.006) & (grid[:, 1] <= 0.006))[0]
+    mission["pmv_drone_cells"] = {"d1": local_indices}
+    mission["pmv_P"] = np.ones(len(grid), dtype=float) / len(grid)
+
+    waypoints = algo.get_target_waypoints(mission, mission["drones"])
+
+    assert waypoints["d1"] in {
+        (float(grid[idx, 0]), float(grid[idx, 1]))
+        for idx in local_indices
+    }
+
+
+def test_pmv_heatmap_payload_is_row_major_and_aligned_to_bounds():
+    mission = _make_mission([{"id": "d1", "lat": 0.0, "lon": 0.0, "status": "idle"}])
+    mission["pmv_grid"] = np.array(
+        [
+            [0.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+        ],
+        dtype=float,
+    )
+    mission["pmv_P"] = np.array([0.1, 0.2, 0.3, 0.4], dtype=float)
+    mission["bounds"] = {"min_lat": 0.0, "max_lat": 1.0, "min_lon": 0.0, "max_lon": 1.0}
+
+    payload = build_pmv_heatmap_payload(mission, mission_id="m1", rows=2, cols=2)
+
+    assert payload is not None
+    assert payload["type"] == "pmv_heatmap"
+    assert payload["mission_id"] == "m1"
+    assert payload["rows"] == 2
+    assert payload["cols"] == 2
+    assert payload["bounds"] == mission["bounds"]
+    assert payload["values"] == [0.1, 0.2, 0.3, 0.4]
+    assert payload["max_value"] == 0.4
+    assert payload["total_probability"] == 1.0
+
+
+def test_pmv_heatmap_payload_normalizes_probability_and_ignores_targets():
+    drones = [{"id": "d1", "lat": 0.02, "lon": 0.02, "status": "idle"}]
+    mission = _make_mission(drones)
+    algo = PMVSearchAlgorithm()
+    algo.initialize(mission)
+    mission["pmv_P"] = mission["pmv_P"] * 5.0
+
+    mission["targets"] = [{"id": "hidden", "lat": 0.0, "lon": 0.0}]
+    payload_a = build_pmv_heatmap_payload(mission, mission_id="m1", rows=20, cols=20)
+    mission["targets"] = [{"id": "hidden", "lat": 0.04, "lon": 0.04}]
+    payload_b = build_pmv_heatmap_payload(mission, mission_id="m1", rows=20, cols=20)
+
+    assert payload_a is not None
+    assert len(payload_a["values"]) == 400
+    assert np.isclose(payload_a["total_probability"], 1.0, atol=1e-9)
+    assert payload_a == payload_b
 
 
 def test_pmv_deterministic_under_seed():

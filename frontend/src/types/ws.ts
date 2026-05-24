@@ -7,6 +7,23 @@ export type TelemetryMessage = {
   drones?: TelemetryDrone[];
 };
 
+export type PmvHeatmapMessage = {
+  type: "pmv_heatmap";
+  mission_id?: EntityId;
+  algorithm?: "pmv" | string;
+  rows: number;
+  cols: number;
+  bounds: {
+    min_lat: number;
+    max_lat: number;
+    min_lon: number;
+    max_lon: number;
+  };
+  values: number[];
+  max_value: number;
+  total_probability: number;
+};
+
 export type MissionStatusMessage = {
   type: "mission_status";
   status: MissionStatus;
@@ -45,6 +62,7 @@ export type UnknownMessage = {
 
 export type WsMessage =
   | TelemetryMessage
+  | PmvHeatmapMessage
   | MissionStatusMessage
   | MissionProgressMessage
   | TargetFoundMessage
