@@ -159,6 +159,24 @@ curl http://localhost:8000/sitl/status
 
 If SITL is running and connected, `/sitl/status` should report `connected_count > 0`.
 
+## Headless Metrics (CLI / HTTP / Python)
+
+`app/benchmark_cli.py` is the headless entry point used by the May 2026 multi-scale runs and by CI smoke checks. Quick smoke (under a minute):
+
+```bash
+cd backend
+PYTHONPATH=. python -m app.benchmark_cli \
+  --algorithms pmv,sweep \
+  --iterations 5 \
+  --scenario-profile clustered_targets \
+  --min-lat 33.473 --max-lat 33.527 \
+  --min-lon -117.2324 --max-lon -117.1676 \
+  --drones 15 --targets 3 --timeout 600 \
+  --seed 1
+```
+
+Full reference — every CLI flag, all 9 scenario profiles, the iso-effort sweep template across 6/10/12 km bounds, the equivalent `POST /benchmark` body.
+
 ## Tests
 
 Run the backend test suite from the repo root:
