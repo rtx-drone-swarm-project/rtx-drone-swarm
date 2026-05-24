@@ -41,3 +41,11 @@ export function boundsToLeaflet(bounds: Bounds): [[number, number], [number, num
     [bounds.max_lat, bounds.max_lon]
   ];
 }
+
+export function estimateBoundsAreaKm2(bounds: Bounds): number {
+  const avgLat = (bounds.min_lat + bounds.max_lat) / 2;
+  const latKm = Math.abs(bounds.max_lat - bounds.min_lat) * 110.574;
+  const lonKm = Math.abs(bounds.max_lon - bounds.min_lon) * 111.32 * Math.max(0.2, Math.cos((avgLat * Math.PI) / 180));
+
+  return latKm * lonKm;
+}

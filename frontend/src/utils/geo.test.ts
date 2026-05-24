@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundsToLeaflet, fixedAreaBounds, kmToLatDelta, kmToLonDelta } from "./geo";
+import { boundsToLeaflet, estimateBoundsAreaKm2, fixedAreaBounds, kmToLatDelta, kmToLonDelta } from "./geo";
 
 describe("geo utilities", () => {
   it("converts km deltas for latitude and longitude", () => {
@@ -30,5 +30,12 @@ describe("geo utilities", () => {
       [33, -118],
       [34, -117]
     ]);
+  });
+
+  it("estimates bounded search area in square kilometers", () => {
+    const bounds = fixedAreaBounds(33.5, -117.2);
+
+    expect(estimateBoundsAreaKm2(bounds)).toBeGreaterThan(15);
+    expect(estimateBoundsAreaKm2(bounds)).toBeLessThan(17);
   });
 });

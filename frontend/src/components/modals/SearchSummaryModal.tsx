@@ -1,4 +1,4 @@
-import { algorithmDisplayLabel, type AlgorithmMetadata, type MissionMetrics, type Target } from "../../types/mission";
+import type { MissionMetrics, Target } from "../../types/mission";
 
 type SearchSummaryModalProps = {
   isOpen: boolean;
@@ -6,8 +6,6 @@ type SearchSummaryModalProps = {
   targets: Target[];
   getHikerLabel: (targetId: string | number) => string;
   onRecall: () => void;
-  algorithm?: string;
-  algorithmOptions: AlgorithmMetadata[];
   completionElapsedSeconds?: number;
   metrics?: MissionMetrics | null;
 };
@@ -18,12 +16,14 @@ export default function SearchSummaryModal({
   targets,
   getHikerLabel,
   onRecall,
-  algorithm,
-  algorithmOptions,
   completionElapsedSeconds,
   metrics
 }: SearchSummaryModalProps) {
   if (!isOpen || !targets.length) return null;
+
+  const durationSeconds = metrics?.completion_elapsed_seconds ?? completionElapsedSeconds;
+  const targetsFound = metrics?.targets_found ?? targets.length;
+  const targetsTotal = metrics?.targets_total ?? targets.length;
 
   return (
     <div className="modal-overlay" role="presentation" onClick={onClose}>
@@ -42,23 +42,17 @@ export default function SearchSummaryModal({
         </div>
 
         <div className="search-summary-body">
-          {(algorithm || completionElapsedSeconds != null || metrics) && (
+          {(durationSeconds != null || metrics) && (
             <div className="mission-metrics">
               <div className="kv-grid">
-                {algorithm && (
-                  <>
-                    <span>Algorithm</span>
-                    <strong>{algorithmDisplayLabel(algorithm, algorithmOptions)}</strong>
-                  </>
-                )}
-                {completionElapsedSeconds != null && completionElapsedSeconds > 0 && (
+                {durationSeconds != null && durationSeconds > 0 && (
                   <>
                     <span>Mission Duration</span>
-                    <strong>{completionElapsedSeconds}s</strong>
+                    <strong>{durationSeconds}s</strong>
                   </>
                 )}
                 <span>Hikers Found</span>
-                <strong>{targets.length}</strong>
+                <strong>{targetsFound}/{targetsTotal}</strong>
                 {metrics?.coverage_pct != null && (
                   <>
                     <span>Coverage</span>
@@ -71,10 +65,10 @@ export default function SearchSummaryModal({
                     <strong>{metrics.first_find_seconds}s</strong>
                   </>
                 )}
-                {metrics?.avg_find_seconds != null && (
+                {metrics?.last_find_seconds != null && (
                   <>
-                    <span>Avg Find</span>
-                    <strong>{metrics.avg_find_seconds}s</strong>
+                    <span>Last Find</span>
+                    <strong>{metrics.last_find_seconds}s</strong>
                   </>
                 )}
               </div>

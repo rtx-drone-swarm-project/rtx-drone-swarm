@@ -79,7 +79,32 @@ describe("App integration", () => {
       if (url.endsWith("/missions/m1/start")) {
         return Promise.resolve({ ok: true, json: async () => ({ id: "m1", status: "running", progress: 0, targets: [] }) });
       }
-      return Promise.resolve({ ok: true, json: async () => ({ algorithm: "sweep", coverage_pct: 0, targets_total: 2, targets_found: 2, found_at_seconds: [] }) });
+      if (url.endsWith("/missions/m1/metrics")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            algorithm: "sweep",
+            status: "search_complete",
+            elapsed_seconds: 82,
+            completion_elapsed_seconds: 82,
+            targets_total: 2,
+            targets_found: 2,
+            found_at_seconds: [30, 75],
+            first_find_seconds: 30,
+            last_find_seconds: 75,
+            avg_find_seconds: 52.5,
+            coverage_pct: 84.2,
+            coverage_rate_per_sec: 1.027
+          })
+        });
+      }
+      if (url.endsWith("/missions/m1/recall")) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: "m1", status: "recalling", progress: 100 }) });
+      }
+      if (url.endsWith("/missions/m1") && _init?.method === "DELETE") {
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ algorithms: [] }) });
     });
 
     vi.stubGlobal("fetch", fetchMock);
@@ -161,11 +186,19 @@ describe("App integration", () => {
       expect(screen.getAllByText("Hiker 1").length).toBeGreaterThan(0);
       expect(screen.getAllByText("Hiker 2").length).toBeGreaterThan(0);
     });
-    // await waitFor(() => {
-    //   expect(screen.getAllByText("Sweep (Voronoi + Lawnmower)").length).toBeGreaterThan(1);
-    // });
 
     const summaryDialog = screen.getByRole("dialog", { name: "Search summary" });
+    await waitFor(() => {
+      expect(within(summaryDialog).getByText("Hikers Found")).toBeTruthy();
+      expect(within(summaryDialog).getByText("2/2")).toBeTruthy();
+      expect(within(summaryDialog).getByText("Coverage")).toBeTruthy();
+      expect(within(summaryDialog).getByText("84.2%")).toBeTruthy();
+      expect(within(summaryDialog).getByText("First Find")).toBeTruthy();
+      expect(within(summaryDialog).getByText("30s")).toBeTruthy();
+      expect(within(summaryDialog).getByText("Last Find")).toBeTruthy();
+      expect(within(summaryDialog).getByText("75s")).toBeTruthy();
+    });
+
     fireEvent.click(within(summaryDialog).getByRole("button", { name: "Recall Drones" }));
 
     await waitFor(() => {
@@ -174,6 +207,25 @@ describe("App integration", () => {
         expect.objectContaining({ method: "POST" })
       );
     });
+
+    socket.sendMessage({
+      type: "mission_status",
+      mission_id: "m1",
+      status: "mission_complete",
+      progress: 100,
+      targets: [
+        { id: "t1", lat: 33.51, lon: -117.21, status: "found" },
+        { id: "t2", lat: 33.52, lon: -117.22, status: "found" }
+      ]
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset Mission" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url, init]) => String(url).endsWith("/missions/m1") && init?.method === "DELETE")).toBe(true);
+    });
+
+    expect(screen.queryByText("Coverage")).toBeNull();
   });
 
   it("keeps accumulating drone trails across repeated running status updates", async () => {
@@ -375,6 +427,8 @@ describe("App integration", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-reset-1/stop"))).toBe(true);
     });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m-reset-1/metrics"))).toBe(false);
+    expect(screen.queryByRole("dialog", { name: "Search summary" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Reset Mission" }));
 

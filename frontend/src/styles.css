@@ -208,7 +208,7 @@ body,
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .alert-chip > div {
@@ -221,6 +221,17 @@ body,
   font-size: 14px;
   line-height: 1;
   margin-top: 1px;
+}
+
+.operator-cue-icon {
+  min-width: 24px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: rgb(15 23 42 / 0.48);
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
 }
 
 .search-pulse-icon {
@@ -247,6 +258,9 @@ body,
   font-size: 11px;
   opacity: 0.75;
   margin-top: 1px;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .alert-chip.warning {
@@ -300,11 +314,27 @@ body,
   color: #f1f5f9;
 }
 
+.operator-status-grid > span,
+.operator-status-grid > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.operator-status-grid {
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+}
+
+.operator-status-grid > strong {
+  text-align: right;
+}
+
 .searching-label {
   display: inline-flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 1px;
-  white-space: nowrap;
+  max-width: 100%;
+  white-space: normal;
 }
 
 .searching-dots {
@@ -580,6 +610,14 @@ body,
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
+}
+
+.left-rail .benchmark-checks {
+  grid-template-columns: 1fr;
+}
+
+.left-rail .benchmark-input-grid {
+  grid-template-columns: 1fr;
 }
 
 .benchmark-check {
@@ -1202,5 +1240,54 @@ body,
 
   .control-layout {
     --map-control-offset-right: 280px;
+  }
+}
+
+@media (max-width: 720px) {
+  html,
+  body,
+  #root,
+  .control-page {
+    height: auto;
+    min-height: 100%;
+  }
+
+  .topbar {
+    padding: 10px 16px;
+    gap: 12px;
+  }
+
+  .control-layout {
+    position: static;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    --map-control-offset-right: 16px;
+  }
+
+  .map-wrap {
+    height: 55vh;
+    min-height: 360px;
+  }
+
+  .left-rail,
+  .right-rail {
+    position: static;
+    width: 100%;
+    overflow: visible;
+    padding: 12px 16px 0;
+    pointer-events: auto;
+  }
+
+  .right-rail {
+    padding-bottom: 16px;
+  }
+
+  .pmv-heatmap-toggle {
+    left: 16px;
+  }
+
+  .map-control-stack {
+    right: 16px;
   }
 }

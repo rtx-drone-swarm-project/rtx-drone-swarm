@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { createMissionClient } from "../api/missionClient";
-import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionState, PlacedHiker, Target, ValidDrone } from "../types/mission";
+import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionMetrics, MissionState, PlacedHiker, Target, ValidDrone } from "../types/mission";
 import type { MissionStatus } from "../types/ws";
 
 type UseMissionActionsArgs = {
@@ -21,6 +21,7 @@ type UseMissionActionsArgs = {
   setFoundHikers: (value: FoundHiker[]) => void;
   setSearchSummaryOpen: (value: boolean) => void;
   setCompletedTargets: (value: Target[]) => void;
+  setCompletedMetrics: (value: MissionMetrics | null) => void;
   setSummaryMissionId: (value: string | number | null) => void;
   setHikerLabelById: (value: Record<string, number>) => void;
 };
@@ -69,6 +70,7 @@ export default function useMissionActions({
   setFoundHikers,
   setSearchSummaryOpen,
   setCompletedTargets,
+  setCompletedMetrics,
   setSummaryMissionId,
   setHikerLabelById
 }: UseMissionActionsArgs) {
@@ -103,6 +105,7 @@ export default function useMissionActions({
     setFoundHikers([]);
     setSearchSummaryOpen(false);
     setCompletedTargets([]);
+    setCompletedMetrics(null);
     setSummaryMissionId(null);
     setHikerLabelById({});
 
@@ -146,6 +149,7 @@ export default function useMissionActions({
       setMission(stopped);
       setMissionStatus("paused");
       setProgress(0);
+      setSearchSummaryOpen(false);
     } catch (err) {
       console.warn(`Stop failed: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -162,6 +166,7 @@ export default function useMissionActions({
     setElapsedSeconds(0);
     setSearchSummaryOpen(false);
     setCompletedTargets([]);
+    setCompletedMetrics(null);
     setSummaryMissionId(null);
     setHikerLabelById({});
     if (missionId) {

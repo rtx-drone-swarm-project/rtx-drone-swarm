@@ -4,6 +4,7 @@ import type {
   BenchmarkRun,
   BenchmarkScenarioProfile,
   MissionCreateRequest,
+  MissionMetrics,
   MissionRecord
 } from "../types/mission";
 
@@ -19,6 +20,7 @@ export type MissionApiClient = {
   createMission: (payload: MissionCreateRequest) => Promise<MissionRecord>;
   startMission: (missionId: string | number, algorithm?: string) => Promise<MissionRecord>;
   stopMission: (missionId: string | number) => Promise<MissionRecord>;
+  getMissionMetrics: (missionId: string | number) => Promise<MissionMetrics>;
   deleteMission: (missionId: string | number) => Promise<void>;
   listAlgorithms: () => Promise<{ algorithms: AlgorithmMetadata[] }>;
   startBenchmark: (payload: BenchmarkRequestPayload) => Promise<BenchmarkRun>;
@@ -54,6 +56,9 @@ export function createMissionClient(apiBase: string): MissionApiClient {
       requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/stop`, {
         method: "POST"
       }),
+
+    getMissionMetrics: (missionId) =>
+      requestJson<MissionMetrics>(`${apiBase}/missions/${missionId}/metrics`),
 
     deleteMission: (missionId) =>
       requestJson<void>(`${apiBase}/missions/${missionId}`, {

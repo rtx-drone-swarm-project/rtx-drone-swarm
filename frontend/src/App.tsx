@@ -6,14 +6,13 @@ import MapPanel from "./components/map/MapPanel";
 import DroneModal from "./components/modals/DroneModal";
 import HikerModal from "./components/modals/HikerModal";
 import SearchSummaryModal from "./components/modals/SearchSummaryModal";
-import AlertsPanel from "./components/panels/AlertsPanel";
 import ActionsPanel from "./components/panels/ActionsPanel";
 import BenchmarkPanel from "./components/panels/BenchmarkPanel";
 import FoundHikersPanel from "./components/panels/FoundHikersPanel";
 import HikerSetupPanel from "./components/panels/HikerSetupPanel";
 import LegendPanel from "./components/panels/LegendPanel";
 import NavigationPanel from "./components/panels/NavigationPanel";
-import SwarmStatusPanel from "./components/panels/SwarmStatusPanel";
+import OperatorStatusPanel from "./components/panels/OperatorStatusPanel";
 import useMissionActions from "./hooks/useMissionActions";
 import useMissionSocket from "./hooks/useMissionSocket";
 import { DEFAULT_ALGORITHM_OPTIONS } from "./types/mission";
@@ -95,6 +94,7 @@ export default function App() {
   // which would recreate the callback every second and reconnect the WebSocket.
   const elapsedSecondsRef = useRef(elapsedSeconds);
   const runningMissionIdRef = useRef<string | null>(null);
+  const completedMetricsMissionIdRef = useRef<string | null>(null);
   const nextHikerNumberRef = useRef(1);
   useEffect(() => {
     elapsedSecondsRef.current = elapsedSeconds;
@@ -310,12 +310,30 @@ export default function App() {
           runningMissionIdRef.current = runningMissionId;
           setDroneTrails({});
         }
+        setCompletedMetrics(null);
+        completedMetricsMissionIdRef.current = null;
+      } else if (message.status === "search_complete") {
+        runningMissionIdRef.current = null;
+        setPmvHeatmap(null);
+        const missionId = message.mission_id;
+        const allTargetsFound = Array.isArray(message.targets) && message.targets.length > 0 && message.targets.every((target) => target.status === "found");
+        if (missionId != null && allTargetsFound) {
+          const metricsMissionId = String(missionId);
+          completedMetricsMissionIdRef.current = metricsMissionId;
+          apiClient.getMissionMetrics(missionId)
+            .then((metrics) => {
+              if (completedMetricsMissionIdRef.current === metricsMissionId) {
+                setCompletedMetrics(metrics);
+              }
+            })
+            .catch(() => undefined);
+        }
       } else {
         runningMissionIdRef.current = null;
         setPmvHeatmap(null);
       }
     },
-    [assignHikerLabels]
+    [apiClient, assignHikerLabels]
   );
 
   const onMissionProgress = useCallback((message: MissionProgressMessage) => {
@@ -394,6 +412,7 @@ export default function App() {
     setFoundHikers,
     setSearchSummaryOpen,
     setCompletedTargets,
+    setCompletedMetrics,
     setSummaryMissionId,
     setHikerLabelById
   });
@@ -486,12 +505,15 @@ export default function App() {
 
   const onResetMission = useCallback(() => {
     runningMissionIdRef.current = null;
+    completedMetricsMissionIdRef.current = null;
     nextHikerNumberRef.current = 1;
     setDroneTrails({});
     setPmvHeatmap(null);
     setPlacedHikers([]);
     setSelectedHikerId(null);
     setIsPlacingHiker(false);
+    setCompletedMetrics(null);
+    setCompletionElapsedSeconds(0);
     resetMissionLock();
   }, [resetMissionLock]);
 
@@ -553,8 +575,6 @@ export default function App() {
     setIsPlacingHiker(false);
   }, [hikerPlacementEditable]);
 
-  const lostHikerCount = targets.filter((target) => target.status !== "found").length;
-
   return (
     <div className="control-page">
       <TopBar progress={progress} />
@@ -584,21 +604,22 @@ export default function App() {
         />
 
         <aside className="left-rail">
-          <AlertsPanel
+          <OperatorStatusPanel
+            elapsedSeconds={elapsedSeconds}
+            droneCount={validDroneCount}
             missionComplete={missionComplete}
             missionStatus={missionStatus}
+            placedHikerCount={placedHikers.length}
+            progress={progress}
             selectedBounds={selectedBounds}
-            wsConnected={wsConnected}
-          />
-          <SwarmStatusPanel
-            elapsedSeconds={elapsedSeconds}
-            telemetryCount={telemetry.length}
-            validDroneCount={validDroneCount}
-            missionActive={missionActive}
-            missionStatus={missionStatus}
-            lostHikerCount={lostHikerCount}
+            targets={targets}
             telemetryMode={telemetryMode}
-            selectedAlgorithm={selectedAlgorithm}
+          />
+          <BenchmarkPanel
+            apiBase={apiBase}
+            selectedBounds={selectedBounds}
+            validDroneCount={validDroneCount}
+            progressMessage={benchmarkProgress}
             algorithmOptions={algorithmOptions}
           />
           <LegendPanel />
@@ -640,13 +661,6 @@ export default function App() {
             onRemoveHiker={onRemoveHiker}
             onClearHikers={onClearHikers}
           />
-          <BenchmarkPanel
-            apiBase={apiBase}
-            selectedBounds={selectedBounds}
-            validDroneCount={validDroneCount}
-            progressMessage={benchmarkProgress}
-            algorithmOptions={algorithmOptions}
-          />
           <FoundHikersPanel hikers={foundHikersSorted} getHikerLabel={getHikerLabel} />
         </aside>
       </main>
@@ -665,8 +679,6 @@ export default function App() {
         targets={completedTargetsSorted}
         getHikerLabel={getHikerLabel}
         onRecall={recallDrones}
-        algorithm={completedMetrics?.algorithm ?? mission?.algorithm ?? selectedAlgorithm}
-        algorithmOptions={algorithmOptions}
         completionElapsedSeconds={completionElapsedSeconds}
         metrics={completedMetrics}
       />
