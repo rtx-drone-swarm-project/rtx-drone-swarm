@@ -36,10 +36,16 @@ DIFFUSE_SIGMA_FRACTION = 0.04
 DIFFUSE_SIGMA_FRACTION_CORRIDOR = 0.08
 LAMBDA_DEG = 5 * DETECTION_RADIUS
 TRAVEL_WEIGHT_FLOOR = 0.18
-GLOBAL_HOTSPOT_RATIO = 1.15
+GLOBAL_HOTSPOT_RATIO = 1.05
 GLOBAL_HOTSPOT_BOOST = 1.35
-GLOBAL_HOTSPOT_PEAK_FRACTION = 0.65
+GLOBAL_HOTSPOT_PEAK_FRACTION = 0.55
 EPS = 1e-12
+# Depletion thresholds: when a drone's cell mass drops below these
+# fractions of the average cell mass, it progressively expands search.
+DEPLETION_GLOBAL_THRESHOLD = 0.3
+DEPLETION_BLEND_THRESHOLD = 0.7
+# Travel-weight multiplier for exhausted drones so they can reach far cells.
+EXHAUSTED_LAMBDA_MULTIPLIER = 3.0
 _SEED_LLOYD_ITERS = 8
 _MOVING_PROFILES = {
     "corridor_route",
@@ -209,31 +215,39 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
         waypoints: Dict[str, Tuple[float, float]] = {}
         planned_points: list[tuple[float, float]] = []
 
+        # Pre-compute grid-wide average probability per cell for depletion
+        # comparison.  A drone is "depleted" when its cells' average
+        # probability density is well below the grid-wide average, meaning
+        # those cells have been scanned and belief redistributed elsewhere.
+        grid_avg_prob = float(posterior.mean()) if len(posterior) > 0 else 0.0
+
         for drone in free_drones:
             drone_id = str(drone["id"])
             cell_indices = np.asarray(drone_cells.get(drone_id, []), dtype=int)
             if len(cell_indices) == 0:
                 continue
 
-            cell_mass = float(posterior[cell_indices].sum())
+            cell_avg_prob = float(posterior[cell_indices].mean())
+            depletion_ratio = cell_avg_prob / max(grid_avg_prob, EPS)
+
+            # Exhaustion-aware candidate selection: as a drone's local
+            # partition depletes, smoothly expand its search area from
+            # local-only → blended → full grid.
             candidate_indices = self._candidate_indices(
                 posterior,
                 cell_indices,
                 global_hot_indices,
+                depletion_ratio,
             )
             if len(candidate_indices) == 0:
                 continue
 
-            if cell_mass <= EPS and len(global_hot_indices) == 0:
-                centroid = centroids.get(drone_id)
-                if centroid is not None:
-                    waypoints[drone["id"]] = (float(centroid[0]), float(centroid[1]))
-                    planned_points.append((float(centroid[0]), float(centroid[1])))
-                continue
-
             candidate_points = grid[candidate_indices]
             pos = np.array([float(drone.get("lat", 0.0)), float(drone.get("lon", 0.0))])
-            travel_weight = self._travel_weights(candidate_points, pos, _getm(mission, "bounds", {}))
+            travel_weight = self._travel_weights(
+                candidate_points, pos, _getm(mission, "bounds", {}),
+                exhausted=(depletion_ratio < DEPLETION_GLOBAL_THRESHOLD),
+            )
             overlap_weight = self._overlap_weights(candidate_points, planned_points)
             in_home_cell = np.isin(candidate_indices, cell_indices)
             assist_boost = np.where(in_home_cell, 1.0, GLOBAL_HOTSPOT_BOOST)
@@ -305,14 +319,25 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
             return np.array([], dtype=int)
         peak = float(posterior.max(initial=0.0))
         median = float(np.median(posterior))
-        if peak <= EPS or peak <= median * GLOBAL_HOTSPOT_RATIO:
+        if peak <= EPS:
             return np.array([], dtype=int)
 
-        percentile_threshold = float(np.percentile(posterior, 90))
+        # Always provide a minimum set of global candidates so that
+        # exhausted drones have somewhere useful to go.  The old gate
+        # (peak <= median * 1.15) blocked this when the posterior was
+        # nearly uniform after heavy scanning, leaving drones stranded.
+        min_count = min(len(posterior), max(free_drone_count * 8, 16))
+
+        if peak <= median * GLOBAL_HOTSPOT_RATIO:
+            # Posterior is nearly flat — return the top-N cells by value
+            # so exhausted drones can still find the best remaining areas.
+            hot_indices = np.argpartition(posterior, -min_count)[-min_count:]
+            return np.asarray(sorted(set(int(idx) for idx in hot_indices)), dtype=int)
+
+        percentile_threshold = float(np.percentile(posterior, 85))
         threshold = max(peak * GLOBAL_HOTSPOT_PEAK_FRACTION, percentile_threshold)
         hot_indices = np.where(posterior >= threshold)[0]
 
-        min_count = min(len(posterior), max(free_drone_count * 6, 12))
         if len(hot_indices) < min_count:
             hot_indices = np.argpartition(posterior, -min_count)[-min_count:]
         return np.asarray(sorted(set(int(idx) for idx in hot_indices)), dtype=int)
@@ -322,7 +347,22 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
         posterior: np.ndarray,
         cell_indices: np.ndarray,
         global_hot_indices: np.ndarray,
+        depletion_ratio: float = 1.0,
     ) -> np.ndarray:
+        # Fully depleted partition: search the entire grid.
+        if depletion_ratio < DEPLETION_GLOBAL_THRESHOLD:
+            # Drone's cell is nearly empty — give it the full grid so it
+            # can assist any remaining hotspot anywhere in the search area.
+            return np.arange(len(posterior))
+
+        # Partially depleted: blend local cell with global hotspots.
+        if depletion_ratio < DEPLETION_BLEND_THRESHOLD:
+            if len(global_hot_indices) > 0:
+                combined = np.concatenate([cell_indices, global_hot_indices])
+                return np.asarray(sorted(set(int(idx) for idx in combined)), dtype=int)
+            return cell_indices
+
+        # Healthy partition: use original gating logic.
         if len(global_hot_indices) == 0:
             return cell_indices
 
@@ -339,11 +379,18 @@ class PMVSearchAlgorithm(BaseSearchAlgorithm):
         candidate_points: np.ndarray,
         drone_position: np.ndarray,
         bounds: dict,
+        *,
+        exhausted: bool = False,
     ) -> np.ndarray:
         travel_cost = np.linalg.norm(candidate_points - drone_position, axis=1)
         lat_span = float(bounds.get("max_lat", 0.0) - bounds.get("min_lat", 0.0))
         lon_span = float(bounds.get("max_lon", 0.0) - bounds.get("min_lon", 0.0))
         adaptive_lambda = max(LAMBDA_DEG, math.hypot(lat_span, lon_span) * 0.35)
+        # Exhausted drones get a much wider travel radius so they can
+        # actually reach distant hotspots instead of being trapped by
+        # the exponential distance penalty near their empty partition.
+        if exhausted:
+            adaptive_lambda *= EXHAUSTED_LAMBDA_MULTIPLIER
         return TRAVEL_WEIGHT_FLOOR + (1.0 - TRAVEL_WEIGHT_FLOOR) * np.exp(
             -travel_cost / max(adaptive_lambda, EPS)
         )
