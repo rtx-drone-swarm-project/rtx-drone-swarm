@@ -50,8 +50,8 @@ def build_benchmark_markdown_report(run: dict[str, Any]) -> str:
             f"| {_fmt(summary.get('partial_success_rate_pct'))} "
             f"| {_fmt(summary.get('mean_first_find_seconds'), 's')} "
             f"| {_fmt(summary.get('mean_coverage_pct'))} "
-            f"| {_fmt(summary.get('mean_targets_found'), digits=2)} "
-            f"| {_fmt(summary.get('mean_distance_m'), digits=1)} |"
+            f"| {_fmt(summary.get('mean_targets_found'), suffix='', digits=2)} "
+            f"| {_fmt(summary.get('mean_distance_m'), suffix='m', digits=1)} |"
         )
 
     lines.extend([
