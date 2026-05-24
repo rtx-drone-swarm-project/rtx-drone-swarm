@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Response
 from app.algorithms import list_algorithm_keys
 from app.benchmark import SCENARIO_PROFILES, list_scenario_profiles, make_run_id, run_benchmark_job, total_trials
 from app.benchmark_db import create_run, export_trials_csv, get_run, list_runs
+from app.benchmark_report import build_benchmark_markdown_report
 from app.models import BenchmarkRequest
 
 
@@ -93,6 +94,20 @@ async def export_benchmarks(run_id: str | None = None, all_runs: bool = False):
         content=csv_text,
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{run_id}/report.md")
+async def export_benchmark_report_markdown(run_id: str):
+    """Export a portable Markdown summary for one persisted benchmark run."""
+    run = get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Benchmark run not found")
+    report = build_benchmark_markdown_report(run)
+    return Response(
+        content=report,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="benchmark_{run_id}_report.md"'},
     )
 
 

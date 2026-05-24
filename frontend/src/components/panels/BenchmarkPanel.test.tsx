@@ -194,4 +194,37 @@ describe("BenchmarkPanel", () => {
     expect(await screen.findByText("vaco")).toBeTruthy();
     expect(screen.getByText("88.2 +/- 0.0%")).toBeTruthy();
   });
+
+  it("shows raw CSV and Markdown report export links for a loaded run", async () => {
+    clientMocks.listBenchmarkRuns.mockResolvedValue({
+      runs: [
+        {
+          run_id: "bench-report",
+          status: "complete",
+          total_trials: 2,
+          completed_trials: 2,
+          request: { scenario_profile: "uniform_random" },
+          summary: {}
+        }
+      ]
+    });
+    clientMocks.getBenchmarkRun.mockResolvedValue({
+      run_id: "bench-report",
+      status: "complete",
+      total_trials: 2,
+      completed_trials: 2,
+      request: { scenario_profile: "uniform_random" },
+      summary: {}
+    });
+
+    renderOpenPanel();
+
+    const history = await screen.findByLabelText("Metrics History");
+    fireEvent.change(history, { target: { value: "bench-report" } });
+
+    const csvLink = await screen.findByRole("link", { name: "Export Metrics CSV" });
+    const reportLink = screen.getByRole("link", { name: "Export Report Markdown" });
+    expect(csvLink.getAttribute("href")).toBe("http://localhost:8000/benchmark/export?run_id=bench-report");
+    expect(reportLink.getAttribute("href")).toBe("http://localhost:8000/benchmark/bench-report/report.md");
+  });
 });
