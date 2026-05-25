@@ -24,7 +24,7 @@ export type MissionApiClient = {
   createMission: (payload: MissionCreateRequest) => Promise<MissionRecord>;
   confirmSearchArea: (
     missionId: string | number,
-    payload: { bounds: MissionCreateRequest["bounds"]; grid_side?: number }
+    payload: { bounds: MissionCreateRequest["bounds"] }
   ) => Promise<MissionRecord>;
   previewProbabilityRegion: (
     missionId: string | number,

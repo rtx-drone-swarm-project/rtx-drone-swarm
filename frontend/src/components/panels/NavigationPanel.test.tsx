@@ -20,7 +20,6 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof NavigationPa
     temporaryRegionLabel: "" as const,
     showLabelledRegions: true,
     showProbabilityHeatmap: false,
-    hasCustomProbabilityLabels: false,
     probabilityMapAvailable: false,
     searchAreaEditingDisabled: false,
     onTopLeftLatChange: vi.fn(),

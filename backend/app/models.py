@@ -74,7 +74,6 @@ class ConfirmSearchAreaRequest(BaseModel):
     """Payload for confirming mission bounds and initializing grid-edit state."""
 
     bounds: Bounds
-    grid_side: Optional[int] = Field(default=None, gt=0)
 
 
 class PreviewProbabilityRegionRequest(BaseModel):

@@ -48,7 +48,6 @@ type NavigationPanelProps = {
   temporaryRegionLabel: ProbabilityRegionLabel | "";
   showLabelledRegions: boolean;
   showProbabilityHeatmap: boolean;
-  hasCustomProbabilityLabels: boolean;
   probabilityMapAvailable: boolean;
   searchAreaEditingDisabled: boolean;
   onTopLeftLatChange: (value: string) => void;
@@ -117,7 +116,6 @@ export default function NavigationPanel({
   temporaryRegionLabel,
   showLabelledRegions,
   showProbabilityHeatmap,
-  hasCustomProbabilityLabels,
   probabilityMapAvailable,
   searchAreaEditingDisabled,
   onTopLeftLatChange,
@@ -137,7 +135,7 @@ export default function NavigationPanel({
 }: NavigationPanelProps) {
   if (setupStage === "review_probability_map" || (setupStage === "active_mission" && probabilityMapAvailable)) {
     return (
-      <CollapsibleSection title= "Mission Map">
+      <CollapsibleSection title="Mission Map">
         {selectedBounds && (
           <div className="review-grid">
             <div className="review-title">Search area bounds</div>
@@ -186,7 +184,7 @@ export default function NavigationPanel({
           <button
             className="action-btn reset"
             onClick={onBackFromReview}
-            disabled={missionActive || missionStatus === "mission_completed"}
+            disabled={missionActive || missionStatus === "mission_complete"}
           >
           Back
           </button>
