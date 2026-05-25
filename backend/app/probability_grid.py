@@ -99,7 +99,7 @@ def smooth_probability_grid(
     searchable_mask: np.ndarray,
     iterations: int,
 ) -> np.ndarray:
-    """Smooth a score grid with local neighbor averaging while preserving exclusions."""
+    """Smooth a score grid with weighted local averaging while preserving exclusions."""
     if iterations < 0:
         raise ValueError("iterations must be non-negative")
 
@@ -109,34 +109,45 @@ def smooth_probability_grid(
     if scores.shape != searchable.shape:
         raise ValueError("score_grid and searchable_mask must have the same shape")
 
+    kernel = np.array(
+        [
+            [1.0, 2.0, 1.0],
+            [2.0, 4.0, 2.0],
+            [1.0, 2.0, 1.0],
+        ],
+        dtype=float,
+    )
+
     scores[~searchable] = 0.0
-    if iterations == 0:
-        return scores
 
     for _ in range(iterations):
         padded_scores = np.pad(scores, 1, mode="constant", constant_values=0.0)
         padded_mask = np.pad(searchable.astype(float), 1, mode="constant", constant_values=0.0)
 
-        neighbor_sum = np.zeros_like(scores, dtype=float)
-        neighbor_count = np.zeros_like(scores, dtype=float)
+        weighted_sum = np.zeros_like(scores, dtype=float)
+        weight_count = np.zeros_like(scores, dtype=float)
 
         for row_offset in range(3):
             for col_offset in range(3):
-                neighbor_sum += padded_scores[
-                    row_offset:row_offset + scores.shape[0],
-                    col_offset:col_offset + scores.shape[1],
+                weight = kernel[row_offset, col_offset]
+
+                weighted_sum += weight * padded_scores[
+                    row_offset : row_offset + scores.shape[0],
+                    col_offset : col_offset + scores.shape[1],
                 ]
-                neighbor_count += padded_mask[
-                    row_offset:row_offset + scores.shape[0],
-                    col_offset:col_offset + scores.shape[1],
+
+                weight_count += weight * padded_mask[
+                    row_offset : row_offset + scores.shape[0],
+                    col_offset : col_offset + scores.shape[1],
                 ]
 
         next_scores = np.zeros_like(scores, dtype=float)
-        active_cells = searchable & (neighbor_count > 0)
-        next_scores[active_cells] = neighbor_sum[active_cells] / neighbor_count[active_cells]
-        scores = next_scores
+        active_cells = searchable & (weight_count > 0)
+        next_scores[active_cells] = weighted_sum[active_cells] / weight_count[active_cells]
 
-    scores[~searchable] = 0.0
+        scores = next_scores
+        scores[~searchable] = 0.0
+
     return scores
 
 
