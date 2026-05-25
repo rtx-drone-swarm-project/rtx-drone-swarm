@@ -433,7 +433,13 @@ export default function MapPanel({
           <span>PMV heatmap</span>
         </label>
       )}
-      <MapContainer center={defaultCenter} zoom={defaultZoom} zoomControl={false} className="leaflet-map">
+      <MapContainer
+        center={defaultCenter}
+        zoom={defaultZoom}
+        zoomControl={false}
+        boxZoom={false}
+        className="leaflet-map"
+      >
         <MapRecenter center={mapCenter} />
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

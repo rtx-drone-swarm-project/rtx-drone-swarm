@@ -1,4 +1,5 @@
 import { act, render, screen, fireEvent } from "@testing-library/react";
+import { forwardRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MapPanel, { getGridCellBounds, getProbabilityHeatmapStats, isExcludedProbabilityCell } from "./MapPanel";
 
@@ -29,7 +30,10 @@ vi.mock("react-leaflet", () => ({
     return <div data-testid="map-container">{props.children}</div>;
   },
   TileLayer: () => null,
-  Marker: mocks.marker,
+  Marker: forwardRef((_props: Record<string, unknown>, _ref) => {
+    mocks.marker(_props);
+    return null;
+  }),
   Polyline: mocks.polyline,
   Rectangle: mocks.rectangle,
   useMap: () => ({
