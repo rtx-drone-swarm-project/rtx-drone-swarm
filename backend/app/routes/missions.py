@@ -5,12 +5,28 @@ import logging
 import random
 import uuid
 from typing import List, Optional
+import numpy as np
 
 from fastapi import APIRouter, HTTPException
 
 from app.dispatch import run_direct_dispatch, run_dispatch_script
-from app.models import DispatchTargetsRequest, MissionCreate, MissionStart, Mission
+from app.models import (
+    ApplyProbabilityRegionRequest,
+    ConfirmSearchAreaRequest,
+    DispatchTargetsRequest,
+    MissionCreate,
+    MissionStart,
+    Mission,
+    PreviewProbabilityRegionRequest,
+)
 from app.algorithms.base import build_dense_coverage_grid
+from app.probability_grid import (
+    REGION_LABEL_CODES,
+    build_probability_grid,
+    create_operator_label_grid,
+    create_searchable_mask,
+    rectangle_bounds_to_grid_mask,
+)
 from app.missions import (
     _assign_start_area_targets,
     _build_start_dispatch_assignments,
@@ -23,12 +39,138 @@ from app.missions import (
 )
 from app.settings import DEFAULT_DISPATCH_HOST, DEFAULT_DISPATCH_TIMEOUT_SECONDS
 from app.simulation import simulation_loop
-from app.algorithms.base import build_search_grid
+from app.algorithms.grid import build_search_grid
 from app.ws import manager
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _build_manual_hiker_targets(hikers: List[dict]) -> List[dict]:
+    """Convert mission hikers into mission target payloads without changing movement."""
+    targets = []
+    for hiker in hikers:
+        targets.append(
+            {
+                "id": hiker["id"],
+                "lat": hiker["lat"],
+                "lon": hiker["lon"],
+                "status": "found" if hiker.get("found") else "wandering",
+                "assigned_drone_id": None,
+                "movement": hiker.get("movement", "moving"),
+            }
+        )
+    return targets
+
+
+def _sample_probability_weighted_targets(mission: Mission, count: int) -> Optional[List[dict]]:
+    """Sample stationary targets from the confirmed mission probability grid."""
+    grid = np.asarray(mission.grid) if mission.grid is not None else None
+    probability_grid = np.asarray(mission.probability_grid, dtype=float) if mission.probability_grid is not None else None
+
+    if grid is None or probability_grid is None:
+        logger.warning("Mission %s probability sampling skipped: grid or probability grid missing", mission.id)
+        return None
+
+    if grid.ndim != 2 or grid.shape[1] != 2:
+        logger.warning("Mission %s probability sampling skipped: mission.grid has invalid shape %s", mission.id, grid.shape)
+        return None
+
+    if probability_grid.ndim != 1 or len(probability_grid) != len(grid):
+        logger.warning(
+            "Mission %s probability sampling skipped: probability grid length %s does not match grid length %s",
+            mission.id,
+            len(probability_grid),
+            len(grid),
+        )
+        return None
+
+    if not np.all(np.isfinite(probability_grid)):
+        logger.warning("Mission %s probability sampling skipped: probability grid contains non-finite values", mission.id)
+        return None
+
+    positive_mask = probability_grid > 0
+    if not np.any(positive_mask):
+        logger.warning("Mission %s probability sampling skipped: probability grid has no positive cells", mission.id)
+        return None
+
+    candidate_indices = np.flatnonzero(positive_mask)
+    candidate_weights = probability_grid[candidate_indices]
+    weight_sum = float(candidate_weights.sum())
+    if not np.isfinite(weight_sum) or weight_sum <= 0:
+        logger.warning("Mission %s probability sampling skipped: probability weights are invalid", mission.id)
+        return None
+
+    normalized_weights = candidate_weights / weight_sum
+    sampled_indices = np.random.choice(candidate_indices, size=count, replace=True, p=normalized_weights)
+
+    targets = []
+    for flat_index in sampled_indices.tolist():
+        cell_bounds = _flat_grid_index_to_cell_bounds(int(flat_index), mission.bounds, mission.grid_shape)
+        if cell_bounds is None:
+            logger.warning("Mission %s probability sampling skipped: invalid cell bounds for index %s", mission.id, flat_index)
+            return None
+
+        lat = random.uniform(cell_bounds["min_lat"], cell_bounds["max_lat"])
+        lon = random.uniform(cell_bounds["min_lon"], cell_bounds["max_lon"])
+        lat = min(mission.bounds["max_lat"], max(mission.bounds["min_lat"], lat))
+        lon = min(mission.bounds["max_lon"], max(mission.bounds["min_lon"], lon))
+        targets.append(
+            {
+                "id": f"tgt-{uuid.uuid4().hex[:8]}",
+                "lat": float(lat),
+                "lon": float(lon),
+                "status": "wandering",
+                "assigned_drone_id": None,
+                "movement": "stationary",
+            }
+        )
+    return targets
+
+
+def _flat_grid_index_to_cell_bounds(index: int, bounds: dict, grid_shape: tuple[int, int] | list[int] | None) -> Optional[dict]:
+    """Convert a flat probability-grid index into the corresponding geographic cell bounds."""
+    if grid_shape is None or len(grid_shape) != 2:
+        return None
+
+    rows = int(grid_shape[0])
+    cols = int(grid_shape[1])
+    if rows <= 0 or cols <= 0:
+        return None
+
+    if index < 0 or index >= rows * cols:
+        return None
+
+    row = index // cols
+    col = index % cols
+
+    lat_step = (bounds["max_lat"] - bounds["min_lat"]) / rows
+    lon_step = (bounds["max_lon"] - bounds["min_lon"]) / cols
+
+    return {
+        "min_lat": bounds["min_lat"] + row * lat_step,
+        "max_lat": bounds["min_lat"] + (row + 1) * lat_step,
+        "min_lon": bounds["min_lon"] + col * lon_step,
+        "max_lon": bounds["min_lon"] + (col + 1) * lon_step,
+    }
+
+
+def _build_uniform_targets(bounds: dict, count: int) -> List[dict]:
+    """Generate default uniformly distributed moving targets within mission bounds."""
+    targets = []
+    for _ in range(count):
+        targets.append(
+            {
+                "id": f"tgt-{uuid.uuid4().hex[:8]}",
+                "lat": random.uniform(bounds["min_lat"], bounds["max_lat"]),
+                "lon": random.uniform(bounds["min_lon"], bounds["max_lon"]),
+                "status": "wandering",
+                "assigned_drone_id": None,
+                "movement": "moving",
+            }
+        )
+    return targets
 
 
 @router.post("/missions")
@@ -46,6 +188,171 @@ def get_mission(mission_id: str):
     if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
     return mission_db[mission_id].to_dict()
+
+
+@router.post("/missions/{mission_id}/confirm-search-area")
+def confirm_search_area(mission_id: str, request: ConfirmSearchAreaRequest):
+    """Confirm mission bounds and initialize search-grid/probability-grid state."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    mission.bounds = request.bounds.model_dump()
+    mission.grid, mission.grid_shape = build_search_grid(
+        mission.bounds,
+        target_cell_size_m=100.0,
+    )
+
+    rows, cols = mission.grid_shape
+    mission.operator_label_grid = create_operator_label_grid(rows, cols)
+    mission.searchable_mask = create_searchable_mask(rows, cols)
+
+    probability_grid_2d, searchable_mask = build_probability_grid(
+        grid_shape=mission.grid_shape,
+        operator_label_grid=mission.operator_label_grid,
+        searchable_mask=mission.searchable_mask,
+        smoothing_iterations=mission.probability_grid_config.get("smoothing_passes", 1),
+    )
+
+    mission.searchable_mask = searchable_mask
+    mission.probability_grid = probability_grid_2d.ravel()
+    mission.search_area_confirmed = True
+    mission.probability_grid_confirmed = False
+
+    return mission.to_dict()
+
+
+@router.post("/missions/{mission_id}/probability-grid/preview-region")
+def preview_probability_region(mission_id: str, request: PreviewProbabilityRegionRequest):
+    """Preview which discrete probability-grid cells a drawn rectangle would affect."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    if not mission.search_area_confirmed or mission.grid is None or mission.grid_shape is None:
+        raise HTTPException(status_code=400, detail="Search area must be confirmed before previewing regions")
+
+    mask = rectangle_bounds_to_grid_mask(
+        search_grid=mission.grid,
+        grid_shape=mission.grid_shape,
+        rect_bounds=request.rect_bounds.model_dump(),
+    )
+    rows, cols = np.where(mask)
+    cells = [[int(row), int(col)] for row, col in zip(rows.tolist(), cols.tolist())]
+    return {
+        "cells": cells,
+        "count": len(cells),
+    }
+
+
+@router.post("/missions/{mission_id}/probability-grid/apply-region")
+def apply_probability_region(mission_id: str, request: ApplyProbabilityRegionRequest):
+    """Apply an operator-selected label to the cells covered by a drawn rectangle."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    if not mission.search_area_confirmed or mission.grid is None or mission.grid_shape is None:
+        raise HTTPException(status_code=400, detail="Search area must be confirmed before applying regions")
+    if mission.operator_label_grid is None:
+        raise HTTPException(status_code=400, detail="Operator label grid is not initialized")
+
+    mask = rectangle_bounds_to_grid_mask(
+        search_grid=mission.grid,
+        grid_shape=mission.grid_shape,
+        rect_bounds=request.rect_bounds.model_dump(),
+    )
+    label_code = REGION_LABEL_CODES[request.label]
+    mission.operator_label_grid = np.asarray(mission.operator_label_grid, dtype=np.uint8).copy()
+    mission.operator_label_grid[mask] = label_code
+
+    probability_grid_2d, searchable_mask = build_probability_grid(
+        grid_shape=tuple(mission.grid_shape),
+        operator_label_grid=mission.operator_label_grid,
+        searchable_mask=None,
+        smoothing_iterations=mission.probability_grid_config.get("smoothing_passes", 1),
+    )
+    mission.searchable_mask = searchable_mask
+    mission.probability_grid = probability_grid_2d.ravel()
+    mission.probability_grid_confirmed = False
+
+    rows, cols = np.where(mask)
+    cells = [[int(row), int(col)] for row, col in zip(rows.tolist(), cols.tolist())]
+    return {
+        "operator_label_grid": mission.operator_label_grid.tolist(),
+        "probability_grid": mission.probability_grid.tolist(),
+        "cells": cells,
+        "count": len(cells),
+    }
+
+
+@router.post("/missions/{mission_id}/probability-grid/confirm")
+def confirm_probability_grid(mission_id: str):
+    """Finalize the current operator labels into the mission's probability grid."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    if not mission.search_area_confirmed or mission.grid_shape is None:
+        raise HTTPException(status_code=400, detail="Search area must be confirmed before confirming probability grid")
+    if mission.operator_label_grid is None:
+        raise HTTPException(status_code=400, detail="Operator label grid is not initialized")
+
+    probability_grid_2d, searchable_mask = build_probability_grid(
+        grid_shape=mission.grid_shape,
+        operator_label_grid=mission.operator_label_grid,
+        searchable_mask=mission.searchable_mask,
+        smoothing_iterations=mission.probability_grid_config.get("smoothing_passes", 1),
+    )
+    if not np.any(searchable_mask):
+        raise HTTPException(status_code=400, detail="Probability grid confirmation failed: no searchable cells remain")
+
+    mission.searchable_mask = searchable_mask
+    mission.probability_grid = probability_grid_2d.ravel()
+    mission.probability_grid_confirmed = True
+    return mission.to_dict()
+
+
+@router.post("/missions/{mission_id}/probability-grid/reopen")
+def reopen_probability_grid(mission_id: str):
+    """Return a confirmed probability map to editable label-review mode."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    if not mission.search_area_confirmed:
+        raise HTTPException(status_code=400, detail="Search area must be confirmed before reopening probability grid")
+    if mission.operator_label_grid is None:
+        raise HTTPException(status_code=400, detail="Operator label grid is not initialized")
+
+    mission.probability_grid_confirmed = False
+    return mission.to_dict()
+
+
+@router.post("/missions/{mission_id}/probability-grid/reset")
+def reset_probability_grid(mission_id: str):
+    """Discard probability-map setup while preserving the mission and search area."""
+    if mission_id not in mission_db:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    mission = mission_db[mission_id]
+    if not mission.search_area_confirmed or mission.grid_shape is None:
+        raise HTTPException(status_code=400, detail="Search area must be confirmed before resetting probability grid")
+
+    rows, cols = mission.grid_shape
+    mission.operator_label_grid = create_operator_label_grid(rows, cols)
+    mission.searchable_mask = create_searchable_mask(rows, cols)
+    probability_grid_2d, searchable_mask = build_probability_grid(
+        grid_shape=mission.grid_shape,
+        operator_label_grid=mission.operator_label_grid,
+        searchable_mask=mission.searchable_mask,
+        smoothing_iterations=mission.probability_grid_config.get("smoothing_passes", 1),
+    )
+    mission.searchable_mask = searchable_mask
+    mission.probability_grid = probability_grid_2d.ravel()
+    mission.probability_grid_confirmed = False
+
+    return mission.to_dict()
 
 
 async def _background_dispatch(mission: Mission, mission_id: str, assignments: List[dict]) -> None:
@@ -94,6 +401,18 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
     if mission.status != "idle":
         raise HTTPException(status_code=400, detail="Only 'idle' missions can be started")
 
+    try:
+        mission.bounds = ConfirmSearchAreaRequest(bounds=mission.bounds).bounds.model_dump()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Mission bounds are invalid: {exc}") from exc
+
+    if mission.grid is None or mission.grid_shape is None:
+        mission.grid, mission.grid_shape = build_search_grid(
+            mission.bounds,
+            target_cell_size_m=100.0,
+        )
+    mission.search_area_confirmed = True
+
     mission.status = "searching"
     mission.elapsed_seconds = 0
 
@@ -110,31 +429,18 @@ async def start_mission(mission_id: str, start_data: Optional[MissionStart] = No
 
     targets = []
     if mission.hikers:
-        for hiker in mission.hikers:
-            targets.append(
-                {
-                    "id": hiker["id"],
-                    "lat": hiker["lat"],
-                    "lon": hiker["lon"],
-                    "status": "found" if hiker.get("found") else "wandering",
-                    "assigned_drone_id": None,
-                    "movement": hiker.get("movement", "moving"),
-                }
-            )
+        targets = _build_manual_hiker_targets(mission.hikers)
     else:
-        for _ in range(random.randint(2, 3)):
-            targets.append(
-                {
-                    "id": f"tgt-{uuid.uuid4().hex[:8]}",
-                    "lat": random.uniform(bounds["min_lat"], bounds["max_lat"]),
-                    "lon": random.uniform(bounds["min_lon"], bounds["max_lon"]),
-                    "status": "wandering",
-                    "assigned_drone_id": None,
-                    "movement": "moving",
-                }
-            )
+        generated_target_count = random.randint(2, 3)
+        if mission.probability_grid_confirmed:
+            probability_targets = _sample_probability_weighted_targets(mission, generated_target_count)
+            if probability_targets is not None:
+                targets = probability_targets
+            else:
+                targets = _build_uniform_targets(bounds, generated_target_count)
+        else:
+            targets = _build_uniform_targets(bounds, generated_target_count)
     mission.targets = targets
-    mission.grid = build_search_grid(bounds, n=15)
     mission._dense_coverage_grid = build_dense_coverage_grid(bounds)
     mission._dense_grid_size = len(mission._dense_coverage_grid)
 

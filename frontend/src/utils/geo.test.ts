@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundsToLeaflet, fixedAreaBounds, kmToLatDelta, kmToLonDelta } from "./geo";
+import { boundsToLeaflet, boundsToSearchAreaCorners, draggedCornersToSearchArea, kmToLatDelta, kmToLonDelta, searchAreaCornersToBounds } from "./geo";
 
 describe("geo utilities", () => {
   it("converts km deltas for latitude and longitude", () => {
@@ -7,15 +7,45 @@ describe("geo utilities", () => {
     expect(kmToLonDelta(5, 33.5)).toBeGreaterThan(0);
   });
 
-  it("produces fixed bounds around a center", () => {
-    const centerLat = 33.5;
-    const centerLon = -117.2;
-    const bounds = fixedAreaBounds(centerLat, centerLon);
+  it("normalizes dragged corners into top-left and bottom-right corners", () => {
+    expect(draggedCornersToSearchArea(33.45, -117.15, 33.55, -117.25)).toEqual({
+      topLeftLat: 33.55,
+      topLeftLon: -117.25,
+      bottomRightLat: 33.45,
+      bottomRightLon: -117.15
+    });
+  });
 
-    expect(bounds.min_lat).toBeLessThan(centerLat);
-    expect(bounds.max_lat).toBeGreaterThan(centerLat);
-    expect(bounds.min_lon).toBeLessThan(centerLon);
-    expect(bounds.max_lon).toBeGreaterThan(centerLon);
+  it("converts search-area corners into backend bounds", () => {
+    expect(
+      searchAreaCornersToBounds({
+        topLeftLat: 33.55,
+        topLeftLon: -117.25,
+        bottomRightLat: 33.45,
+        bottomRightLon: -117.15
+      })
+    ).toEqual({
+      min_lat: 33.45,
+      max_lat: 33.55,
+      min_lon: -117.25,
+      max_lon: -117.15
+    });
+  });
+
+  it("converts backend bounds back into panel corners", () => {
+    expect(
+      boundsToSearchAreaCorners({
+        min_lat: 33.45,
+        max_lat: 33.55,
+        min_lon: -117.25,
+        max_lon: -117.15
+      })
+    ).toEqual({
+      topLeftLat: 33.55,
+      topLeftLon: -117.25,
+      bottomRightLat: 33.45,
+      bottomRightLon: -117.15
+    });
   });
 
   it("maps bounds to leaflet rectangle tuple", () => {

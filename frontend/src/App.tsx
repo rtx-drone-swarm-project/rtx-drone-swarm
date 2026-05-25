@@ -27,6 +27,7 @@ import type {
   MissionState,
   PlacedHiker,
   SelectedDrone,
+  SetupStage,
   Target,
   TelemetryDrone,
   ValidDrone
@@ -40,15 +41,11 @@ import type {
   TargetFoundMessage,
   TelemetryMessage
 } from "./types/ws";
-import { customAreaBounds } from "./utils/geo";
-import { parseCoordinate } from "./utils/validate";
+import { useProbabilityMapEditor } from "./hooks/useProbabilityMapEditor";
+import { useSearchAreaSetup } from "./hooks/useSearchAreaSetup";
 
 const DEFAULT_CENTER: [number, number] = [33.5, -117.2];
 const DEFAULT_ZOOM = 13;
-
-function isPointInsideBounds(lat: number, lon: number, bounds: Bounds) {
-  return lat >= bounds.min_lat && lat <= bounds.max_lat && lon >= bounds.min_lon && lon <= bounds.max_lon;
-}
 
 function clampPointToBounds(lat: number, lon: number, bounds: Bounds): [number, number] {
   return [
@@ -70,12 +67,8 @@ export default function App() {
   const [targets, setTargets] = useState<Target[]>([]);
   const [foundHikers, setFoundHikers] = useState<FoundHiker[]>([]);
   const [missionLocked, setMissionLocked] = useState(false);
-  const [lat, setLat] = useState(DEFAULT_CENTER[0].toFixed(6));
-  const [lon, setLon] = useState(DEFAULT_CENTER[1].toFixed(6));
-  const [isValidCoord, setIsValidCoord] = useState(true);
   const [mapCenter, setMapCenter] = useState<[number, number] | null>(DEFAULT_CENTER);
   const [mapAutocentered, setMapAutocentered] = useState(false);
-  const [selectedBounds, setSelectedBounds] = useState<Bounds | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [selectedDrone, setSelectedDrone] = useState<SelectedDrone>(null);
   const [searchSummaryOpen, setSearchSummaryOpen] = useState(false);
@@ -90,6 +83,9 @@ export default function App() {
   const [placedHikers, setPlacedHikers] = useState<PlacedHiker[]>([]);
   const [selectedHikerId, setSelectedHikerId] = useState<string | null>(null);
   const [isPlacingHiker, setIsPlacingHiker] = useState(false);
+  const [setupStage, setSetupStage] = useState<SetupStage>("search_area");
+  const [showLabelledRegions, setShowLabelledRegions] = useState(false);
+  const [showProbabilityHeatmap, setShowProbabilityHeatmap] = useState(false);
 
   // Ref so onMissionStatus can read current elapsed without it being a dep,
   // which would recreate the callback every second and reconnect the WebSocket.
@@ -104,6 +100,46 @@ export default function App() {
   const [droneTrails, setDroneTrails] = useState<Record<string, [number, number][]>>({});
   const TRAIL_MAX_POINTS = 120;
   const [hikerLabelById, setHikerLabelById] = useState<Record<string, number>>({});
+
+  const {
+    temporaryRegionBounds,
+    temporaryRegionCells,
+    temporaryRegionLabel,
+    setTemporaryRegionLabel,
+    clearTemporaryRegionSelection,
+    onSelectTemporaryRegion,
+    onApplyTemporaryRegion,
+    onConfirmLabelledRegions,
+    onReopenProbabilityGrid,
+    onResetProbabilityGrid,
+  } = useProbabilityMapEditor({
+    apiClient,
+    mission,
+    setMission,
+    probabilityRegionEditingEnabled: setupStage === "label_regions",
+  });
+
+  const {
+    selectedBounds,
+    topLeftLat,
+    topLeftLon,
+    bottomRightLat,
+    bottomRightLon,
+    isValidBounds,
+    isPointInsideBounds,
+    setIsValidBounds,
+    onTopLeftLatChange,
+    onTopLeftLonChange,
+    onBottomRightLatChange,
+    onBottomRightLonChange,
+    onSelectArea,
+    onSetSearchArea,
+  } = useSearchAreaSetup({
+    clearTemporaryRegionSelection,
+    setMapCenter,
+    setPlacedHikers,
+    setIsPlacingHiker,
+  });
 
   const telemetryMode = useMemo(() => {
     const sources = telemetry
@@ -167,6 +203,36 @@ export default function App() {
   );
 
   const validDroneCount = validDrones.length;
+
+  const {
+    confirmSearchArea,
+    startMission,
+    stopMission,
+    resetMissionLock,
+    recallDrones,
+  } = useMissionActions({
+    apiBase,
+    missionLocked,
+    selectedBounds,
+    selectedAlgorithm,
+    placedHikers,
+    validDrones,
+    validDroneCount,
+    mission,
+    setMission,
+    setMissionStatus,
+    setProgress,
+    setTargets,
+    setElapsedSeconds,
+    setMissionLocked,
+    setFoundHikers,
+    setSearchSummaryOpen,
+    setCompletedTargets,
+    setSummaryMissionId,
+    setHikerLabelById,
+    setIsValidBounds,
+    clearTemporaryRegionSelection,
+  })
 
   useEffect(() => {
     let cancelled = false;
@@ -371,32 +437,19 @@ export default function App() {
   }, [hikerPlacementEditable]);
 
   useEffect(() => {
+    if (missionActive && setupStage !== "active_mission") {
+      setSetupStage("active_mission");
+      setShowProbabilityHeatmap(false);
+      setShowLabelledRegions(false);
+      clearTemporaryRegionSelection();
+    }
+  }, [clearTemporaryRegionSelection, missionActive, setupStage]);
+
+  useEffect(() => {
     if (selectedAlgorithm !== "pmv" || !missionActive) {
       setPmvHeatmap(null);
     }
   }, [missionActive, selectedAlgorithm]);
-
-  const { startMission, stopMission, resetMissionLock, recallDrones } = useMissionActions({
-    apiBase,
-    missionLocked,
-    selectedBounds,
-    selectedAlgorithm,
-    placedHikers,
-    validDrones,
-    validDroneCount,
-    mission,
-    setMission,
-    setMissionStatus,
-    setProgress,
-    setTargets,
-    setElapsedSeconds,
-    setMissionLocked,
-    setFoundHikers,
-    setSearchSummaryOpen,
-    setCompletedTargets,
-    setSummaryMissionId,
-    setHikerLabelById
-  });
 
   useEffect(() => {
     if (!mission || !targets.length) return;
@@ -422,67 +475,120 @@ export default function App() {
     });
   }, [assignHikerLabels, targets]);
 
-  const applyNavigation = useCallback((nextLat: string, nextLon: string) => {
-    const latValue = parseCoordinate(nextLat, -90, 90);
-    const lonValue = parseCoordinate(nextLon, -180, 180);
-    if (latValue == null || lonValue == null) {
-      setIsValidCoord(false);
-      return;
-    }
-    setIsValidCoord(true);
-    setMapCenter([latValue, lonValue]);
-  }, []);
-
-  const onLatitudeChange = useCallback(
-    (nextLat: string) => {
-      setLat(nextLat);
-      applyNavigation(nextLat, lon);
-    },
-    [applyNavigation, lon]
-  );
-
-  const onLongitudeChange = useCallback(
-    (nextLon: string) => {
-      setLon(nextLon);
-      applyNavigation(lat, nextLon);
-    },
-    [applyNavigation, lat]
-  );
-
-  const onSelectArea = useCallback(
-    (selectedLat: number, selectedLon: number, bounds: Bounds) => {
-      setSelectedBounds(bounds);
-      setLat(selectedLat.toFixed(6));
-      setLon(selectedLon.toFixed(6));
-      setMapCenter([selectedLat, selectedLon]);
-      setIsValidCoord(true);
-      setPlacedHikers((prev) => prev.filter((hiker) => isPointInsideBounds(hiker.lat, hiker.lon, bounds)));
-      setIsPlacingHiker(false);
-    },
-    []
-  );
-
-  const onSetSearchArea = useCallback((sideKm: number) => {
-    const latValue = parseCoordinate(lat, -90, 90);
-    const lonValue = parseCoordinate(lon, -180, 180);
-    if (latValue == null || lonValue == null) {
-      setIsValidCoord(false);
-      return;
-    }
-    setIsValidCoord(true);
-    const bounds = customAreaBounds(latValue, lonValue, sideKm / 2);
-    setSelectedBounds(bounds);
-    setMapCenter([latValue, lonValue]);
-    setPlacedHikers((prev) => prev.filter((hiker) => isPointInsideBounds(hiker.lat, hiker.lon, bounds)));
-    setIsPlacingHiker(false);
-  }, [lat, lon]);
-
   const onAlgorithmChange = useCallback((algorithm: AlgorithmOption) => {
     setSelectedAlgorithm(algorithm);
     runningMissionIdRef.current = null;
     setDroneTrails({});
     setPmvHeatmap(null);
   }, []);
+
+  const configureProbabilityMap = useCallback(async () => {
+    if (!selectedBounds) {
+      setIsValidBounds(false);
+      return;
+    }
+
+    const confirmedMission = await confirmSearchArea();
+    if (!confirmedMission) return;
+
+    clearTemporaryRegionSelection();
+    setSetupStage("label_regions");
+    setShowLabelledRegions(true);
+    setShowProbabilityHeatmap(false);
+  }, [clearTemporaryRegionSelection, confirmSearchArea, selectedBounds, setIsValidBounds]);
+
+  const backFromLabelRegions = useCallback(async () => {
+    if (mission?.id) {
+      await onResetProbabilityGrid();
+    } else {
+      setMission((current) =>
+        current
+          ? {
+              ...current,
+              probability_grid_confirmed: false,
+            }
+          : current
+      );
+    }
+
+    clearTemporaryRegionSelection();
+    setSetupStage("search_area");
+    setShowLabelledRegions(false);
+    setShowProbabilityHeatmap(false);
+  }, [clearTemporaryRegionSelection, mission?.id, onResetProbabilityGrid, setMission]);
+
+  const handleConfirmLabelledRegions = useCallback(async () => {
+    const confirmedMission = await onConfirmLabelledRegions();
+    if (!confirmedMission) return;
+
+    clearTemporaryRegionSelection();
+    setSetupStage("review_probability_map");
+    setShowProbabilityHeatmap(true);
+    setShowLabelledRegions(false);
+  }, [clearTemporaryRegionSelection, onConfirmLabelledRegions]);
+
+  const backFromReview = useCallback(async () => {
+    if (mission?.id) {
+      await onReopenProbabilityGrid();
+    } else {
+      setMission((current) =>
+        current
+          ? {
+              ...current,
+              probability_grid_confirmed: false,
+            }
+          : current
+      );
+    }
+
+    clearTemporaryRegionSelection();
+    setSetupStage("label_regions");
+    setShowProbabilityHeatmap(false);
+    setShowLabelledRegions(true);
+  }, [clearTemporaryRegionSelection, mission?.id, onReopenProbabilityGrid, setMission]);
+
+  const handleStartMission = useCallback(async () => {
+    if (setupStage === "label_regions") {
+      return;
+    }
+
+    if (setupStage === "review_probability_map" && mission?.probability_grid_confirmed !== true) {
+      return;
+    }
+
+    const startedMission = await startMission();
+    if (!startedMission) return;
+
+    clearTemporaryRegionSelection();
+    setSetupStage("active_mission");
+    setShowProbabilityHeatmap(false);
+    setShowLabelledRegions(false);
+  }, [clearTemporaryRegionSelection, mission?.probability_grid_confirmed, setupStage, startMission]);
+
+  const probabilityMapAvailable = mission?.probability_grid_confirmed === true;
+
+  const probabilityMapConfigured = setupStage !== "search_area" || mission?.probability_grid_confirmed === true;
+
+  const canStartMission = useMemo(() => {
+    if (!selectedBounds || missionActive || missionLocked) return false;
+    if (setupStage === "label_regions") return false;
+    if (setupStage === "review_probability_map") {
+      return mission?.probability_grid_confirmed === true;
+    }
+    return true;
+  }, [mission?.probability_grid_confirmed, missionActive, missionLocked, selectedBounds, setupStage]);
+
+  const startMissionHelperText = useMemo(() => {
+    if (setupStage === "label_regions") {
+      return "Finish or go back from probability-map setup before starting.";
+    }
+    if (selectedBounds && !missionActive && !missionLocked && !probabilityMapConfigured) {
+      return "Optional: configure a probability map before starting if you want weighted search behavior.";
+    }
+    return null;
+  }, [missionActive, missionLocked, probabilityMapConfigured, selectedBounds, setupStage]);
+
+  const searchAreaEditingDisabled = setupStage === "active_mission";
 
   const onResetMission = useCallback(() => {
     runningMissionIdRef.current = null;
@@ -492,8 +598,12 @@ export default function App() {
     setPlacedHikers([]);
     setSelectedHikerId(null);
     setIsPlacingHiker(false);
+    clearTemporaryRegionSelection();
+    setSetupStage("search_area");
+    setShowLabelledRegions(false);
+    setShowProbabilityHeatmap(false);
     resetMissionLock();
-  }, [resetMissionLock]);
+  }, [clearTemporaryRegionSelection, resetMissionLock]);
 
   const onAddHiker = useCallback(() => {
     if (!selectedBounds || !hikerPlacementEditable) return;
@@ -565,6 +675,9 @@ export default function App() {
           defaultZoom={DEFAULT_ZOOM}
           mapCenter={mapCenter}
           selectedBounds={selectedBounds}
+          missionBounds={mission?.bounds}
+          gridShape={mission?.grid_shape}
+          setupStage={setupStage}
           missionActive={missionActive}
           validDrones={validDrones}
           targets={targets}
@@ -581,6 +694,14 @@ export default function App() {
           pmvHeatmap={pmvHeatmap}
           selectedAlgorithm={selectedAlgorithm}
           onSelectArea={onSelectArea}
+          onSelectTemporaryRegion={onSelectTemporaryRegion}
+          temporaryRegionBounds={temporaryRegionBounds}
+          temporaryRegionCells={temporaryRegionCells}
+          operatorLabelGrid={mission?.operator_label_grid}
+          searchableMask={mission?.searchable_mask}
+          showLabelledRegions={showLabelledRegions}
+          probabilityGrid={mission?.probability_grid}
+          showProbabilityHeatmap={showProbabilityHeatmap}
         />
 
         <aside className="left-rail">
@@ -606,13 +727,38 @@ export default function App() {
 
         <aside className="right-rail">
           <NavigationPanel
-            lat={lat}
-            lon={lon}
-            isValidCoord={isValidCoord}
+            setupStage={setupStage}
+            topLeftLat={topLeftLat}
+            topLeftLon={topLeftLon}
+            bottomRightLat={bottomRightLat}
+            bottomRightLon={bottomRightLon}
+            selectedBounds={selectedBounds}
+            gridShape={mission?.grid_shape}
+            isValidBounds={isValidBounds}
             missionActive={missionActive}
-            onLatitudeChange={onLatitudeChange}
-            onLongitudeChange={onLongitudeChange}
+            missionLocked={missionLocked}
+            missionStatus={missionStatus}
+            searchAreaConfirmed={selectedBounds != null}
+            temporaryRegionSelectedCellCount={temporaryRegionCells.length}
+            temporaryRegionLabel={temporaryRegionLabel}
+            showLabelledRegions={showLabelledRegions}
+            showProbabilityHeatmap={showProbabilityHeatmap}
+            probabilityMapAvailable={probabilityMapAvailable}
+            searchAreaEditingDisabled={searchAreaEditingDisabled}
+            onTopLeftLatChange={onTopLeftLatChange}
+            onTopLeftLonChange={onTopLeftLonChange}
+            onBottomRightLatChange={onBottomRightLatChange}
+            onBottomRightLonChange={onBottomRightLonChange}
             onSetSearchArea={onSetSearchArea}
+            onConfigureProbabilityMap={configureProbabilityMap}
+            onShowLabelledRegionsChange={setShowLabelledRegions}
+            onShowProbabilityHeatmapChange={setShowProbabilityHeatmap}
+            onTemporaryRegionLabelChange={setTemporaryRegionLabel}
+            onApplyTemporaryRegion={onApplyTemporaryRegion}
+            onCancelTemporaryRegion={clearTemporaryRegionSelection}
+            onBackFromLabelRegions={backFromLabelRegions}
+            onConfirmLabelledRegions={handleConfirmLabelledRegions}
+            onBackFromReview={backFromReview}
           />
           <ActionsPanel
             selectedBounds={selectedBounds}
@@ -621,10 +767,13 @@ export default function App() {
             missionLocked={missionLocked}
             validDroneCount={validDroneCount}
             mission={mission}
+            setupStage={setupStage}
+            canStartMission={canStartMission}
+            startMissionHelperText={startMissionHelperText}
             selectedAlgorithm={selectedAlgorithm}
             algorithmOptions={algorithmOptions}
             onAlgorithmChange={onAlgorithmChange}
-            onStartMission={startMission}
+            onStartMission={handleStartMission}
             onStopMission={stopMission}
             onRecallDrones={recallDrones}
             onResetMission={onResetMission}
