@@ -6,10 +6,11 @@ import type {
   BenchmarkRun,
   BenchmarkScenarioProfile,
   MissionCreateRequest,
-  MissionStartRequest,
+  MissionMetrics,
   MissionRecord,
+  MissionStartRequest,
   PreviewProbabilityRegionResponse,
-  ProbabilityRegionLabel
+  ProbabilityRegionLabel,
 } from "../types/mission";
 
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
@@ -42,6 +43,7 @@ export type MissionApiClient = {
     payload?: MissionStartRequest | AlgorithmOption
   ) => Promise<MissionRecord>;
   stopMission: (missionId: string | number) => Promise<MissionRecord>;
+  getMissionMetrics: (missionId: string | number) => Promise<MissionMetrics>;
   deleteMission: (missionId: string | number) => Promise<void>;
   listAlgorithms: () => Promise<{ algorithms: AlgorithmMetadata[] }>;
   startBenchmark: (payload: BenchmarkRequestPayload) => Promise<BenchmarkRun>;
@@ -119,6 +121,9 @@ export function createMissionClient(apiBase: string): MissionApiClient {
       requestJson<MissionRecord>(`${apiBase}/missions/${missionId}/stop`, {
         method: "POST"
       }),
+
+    getMissionMetrics: (missionId) =>
+      requestJson<MissionMetrics>(`${apiBase}/missions/${missionId}/metrics`),
 
     deleteMission: (missionId) =>
       requestJson<void>(`${apiBase}/missions/${missionId}`, {

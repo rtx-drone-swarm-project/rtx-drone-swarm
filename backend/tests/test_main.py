@@ -1245,6 +1245,115 @@ def test_stop_mission():
     assert second_stop_response.json() == {"detail": "Drones are not in motion"}
 
 
+def test_stop_mission_holds_live_sitl_drones_at_current_position():
+    mission_id = "stop-holds-live-sitl"
+    mission = create_test_mission(
+        id=mission_id,
+        drones=[Drone(id="drone1", sysid=7, lat=34.5, lon=-117.5, alt=12.0)],
+    )
+    mission.status = "searching"
+    mission.progress = 25.0
+    mission_db[mission_id] = mission
+
+    original_sync = missions_routes._sync_mission_drones_with_sitl
+    original_send_goto = sitl_bridge.send_goto
+    sent = []
+
+    def fake_sync(synced_mission):
+        synced_mission.drones[0]["lat"] = 34.501
+        synced_mission.drones[0]["lon"] = -117.501
+        synced_mission.drones[0]["alt"] = 18.0
+        return {"drone1"}
+
+    missions_routes._sync_mission_drones_with_sitl = fake_sync
+    sitl_bridge.send_goto = lambda sysid, lat, lon, alt: sent.append((sysid, lat, lon, alt))
+
+    try:
+        response = client.post(f"/missions/{mission_id}/stop")
+    finally:
+        missions_routes._sync_mission_drones_with_sitl = original_sync
+        sitl_bridge.send_goto = original_send_goto
+        mission_db.pop(mission_id, None)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "paused"
+    assert sent == [(7, 34.501, -117.501, 18.0)]
+
+
+def test_delete_active_mission_holds_live_sitl_drones_before_resetting_state():
+    mission_id = "delete-holds-live-sitl"
+    mission = create_test_mission(
+        id=mission_id,
+        drones=[Drone(id="drone1", sysid=9, lat=34.5, lon=-117.5, alt=14.0)],
+    )
+    mission.status = "paused"
+    mission_db[mission_id] = mission
+
+    original_sync = missions_routes._sync_mission_drones_with_sitl
+    original_send_goto = sitl_bridge.send_goto
+    sent = []
+
+    def fake_sync(synced_mission):
+        synced_mission.drones[0]["lat"] = 34.502
+        synced_mission.drones[0]["lon"] = -117.502
+        synced_mission.drones[0]["alt"] = 16.0
+        return {"drone1"}
+
+    missions_routes._sync_mission_drones_with_sitl = fake_sync
+    sitl_bridge.send_goto = lambda sysid, lat, lon, alt: sent.append((sysid, lat, lon, alt))
+
+    try:
+        response = client.delete(f"/missions/{mission_id}")
+    finally:
+        missions_routes._sync_mission_drones_with_sitl = original_sync
+        sitl_bridge.send_goto = original_send_goto
+        mission_db.pop(mission_id, None)
+
+    assert response.status_code == 200
+    assert sent == [(9, 34.502, -117.502, 16.0)]
+
+
+def test_paused_mission_reholds_after_late_background_dispatch():
+    mission = create_test_mission(
+        id="late-dispatch-hold",
+        drones=[Drone(id="drone1", sysid=11, lat=34.5, lon=-117.5, alt=14.0)],
+    )
+    mission.status = "paused"
+
+    original_run_direct_dispatch = missions_routes.run_direct_dispatch
+    original_sync = missions_routes._sync_mission_drones_with_sitl
+    original_send_goto = sitl_bridge.send_goto
+    sent = []
+
+    async def fake_run_direct_dispatch(_assignments):
+        return [{"drone_id": "drone1", "sysid": 11, "success": True, "message": "late dispatch"}]
+
+    def fake_sync(synced_mission):
+        synced_mission.drones[0]["lat"] = 34.503
+        synced_mission.drones[0]["lon"] = -117.503
+        synced_mission.drones[0]["alt"] = 19.0
+        return {"drone1"}
+
+    missions_routes.run_direct_dispatch = fake_run_direct_dispatch
+    missions_routes._sync_mission_drones_with_sitl = fake_sync
+    sitl_bridge.send_goto = lambda sysid, lat, lon, alt: sent.append((sysid, lat, lon, alt))
+
+    try:
+        asyncio.run(
+            missions_routes._background_dispatch(
+                mission,
+                "late-dispatch-hold",
+                [{"drone_id": "drone1", "sysid": 11, "lat": 34.7, "lon": -117.7, "alt": 20.0}],
+            )
+        )
+    finally:
+        missions_routes.run_direct_dispatch = original_run_direct_dispatch
+        missions_routes._sync_mission_drones_with_sitl = original_sync
+        sitl_bridge.send_goto = original_send_goto
+
+    assert sent == [(11, 34.503, -117.503, 19.0)]
+
+
 def test_simulation_progress_only_advances_when_targets_are_found():
     mission_id = "sim-progress-from-found-targets"
     mission = create_test_mission(

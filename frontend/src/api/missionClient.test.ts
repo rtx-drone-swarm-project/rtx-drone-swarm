@@ -94,6 +94,31 @@ describe("missionClient", () => {
     expect(callInit.body).toBeUndefined();
   });
 
+  it("reads mission metrics from the mission metrics endpoint", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          algorithm: "pmv",
+          elapsed_seconds: 120,
+          targets_total: 3,
+          targets_found: 3,
+          found_at_seconds: [20, 45, 80],
+          first_find_seconds: 20,
+          last_find_seconds: 80,
+          coverage_pct: 76.5,
+          coverage_rate_per_sec: 0.638
+        })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMissionClient("http://localhost:8000");
+    const metrics = await client.getMissionMetrics("m1");
+
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:8000/missions/m1/metrics", undefined);
+    expect(metrics.coverage_pct).toBe(76.5);
+  });
+
   it("throws backend response text on error", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, text: async () => "bad request" });
     vi.stubGlobal("fetch", fetchMock);

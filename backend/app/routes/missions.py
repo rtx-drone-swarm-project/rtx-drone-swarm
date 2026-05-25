@@ -38,7 +38,7 @@ from app.missions import (
     mission_db,
 )
 from app.settings import DEFAULT_DISPATCH_HOST, DEFAULT_DISPATCH_TIMEOUT_SECONDS
-from app.simulation import simulation_loop
+from app.simulation import _send_live_drone_hold_position, simulation_loop
 from app.algorithms.grid import build_search_grid
 from app.ws import manager
 
@@ -370,7 +370,11 @@ async def _background_dispatch(mission: Mission, mission_id: str, assignments: L
             )
             for assignment in assignments
         ]
-        
+
+    if mission.status == "paused":
+        live_drone_ids = _sync_mission_drones_with_sitl(mission)
+        _send_live_drone_hold_position(mission, live_drone_ids)
+
     success_count = sum(1 for row in results if row.get("success"))
     logger.info(
         "_background_dispatch mission %s: %d/%d drones dispatched successfully",
@@ -508,7 +512,8 @@ async def stop_mission(mission_id: str):
     if mission.status in ["idle", "search_complete", "paused", "mission_complete"]:
         raise HTTPException(status_code=400, detail="Drones are not in motion")
 
-    _sync_mission_drones_with_sitl(mission)
+    live_drone_ids = _sync_mission_drones_with_sitl(mission)
+    _send_live_drone_hold_position(mission, live_drone_ids)
     mission.status = "paused"
 
     await manager.broadcast(
@@ -564,6 +569,9 @@ async def delete_mission(mission_id: str):
     if mission_id not in mission_db:
         raise HTTPException(status_code=404, detail="Mission not found")
     mission = mission_db.pop(mission_id)
+    if mission.status in {"searching", "search_complete", "paused", "recalling"}:
+        live_drone_ids = _sync_mission_drones_with_sitl(mission)
+        _send_live_drone_hold_position(mission, live_drone_ids)
     mission.status = "idle"
 
     await manager.broadcast(
