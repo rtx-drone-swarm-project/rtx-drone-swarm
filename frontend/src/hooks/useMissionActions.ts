@@ -1,6 +1,18 @@
 import { useMemo } from "react";
 import { createMissionClient } from "../api/missionClient";
-import type { AlgorithmOption, Bounds, FoundHiker, MissionDroneInput, MissionMetrics, MissionState, PlacedHiker, Target, ValidDrone } from "../types/mission";
+import type {
+  AlgorithmOption,
+  Bounds,
+  FoundHiker,
+  MissionDroneInput,
+  MissionHikerInput,
+  MissionMetrics,
+  MissionRecord,
+  MissionState,
+  PlacedHiker,
+  Target,
+  ValidDrone,
+} from "../types/mission";
 import type { MissionStatus } from "../types/ws";
 
 type UseMissionActionsArgs = {
@@ -24,6 +36,8 @@ type UseMissionActionsArgs = {
   setCompletedMetrics: (value: MissionMetrics | null) => void;
   setSummaryMissionId: (value: string | number | null) => void;
   setHikerLabelById: (value: Record<string, number>) => void;
+  setIsValidBounds: (value: boolean) => void;
+  clearTemporaryRegionSelection: () => void;
 };
 
 function isFiniteNumber(value: unknown): value is number {
@@ -52,6 +66,48 @@ function toMissionDroneInput(drone: ValidDrone): MissionDroneInput {
   return payload;
 }
 
+function toMissionHikerInput(hiker: PlacedHiker): MissionHikerInput {
+  const payload: MissionHikerInput = {
+    id: hiker.id,
+    lat: hiker.lat,
+    lon: hiker.lon,
+    found: false,
+  };
+
+  if (hiker.movement) payload.movement = hiker.movement;
+
+  return payload;
+}
+
+function boundsEqual(left: Bounds | undefined, right: Bounds): boolean {
+  return (
+    left?.min_lat === right.min_lat &&
+    left?.max_lat === right.max_lat &&
+    left?.min_lon === right.min_lon &&
+    left?.max_lon === right.max_lon
+  );
+}
+
+function buildMissionDrones(
+  validDrones: ValidDrone[],
+  validDroneCount: number,
+  bounds: Bounds
+): MissionDroneInput[] {
+  if (validDroneCount > 0) {
+    return validDrones.map(toMissionDroneInput);
+  }
+
+  return Array.from({ length: 15 }).map((_, i) =>
+    toMissionDroneInput({
+      id: `mock-drone-${i}`,
+      lat: bounds.min_lat + Math.random() * (bounds.max_lat - bounds.min_lat),
+      lon: bounds.min_lon + Math.random() * (bounds.max_lon - bounds.min_lon),
+      alt: 100,
+      heading: Math.random() * 360,
+    })
+  );
+}
+
 export default function useMissionActions({
   apiBase,
   missionLocked,
@@ -72,31 +128,56 @@ export default function useMissionActions({
   setCompletedTargets,
   setCompletedMetrics,
   setSummaryMissionId,
-  setHikerLabelById
+  setHikerLabelById,
+  setIsValidBounds,
+  clearTemporaryRegionSelection,
 }: UseMissionActionsArgs) {
   const missionClient = useMemo(() => createMissionClient(apiBase), [apiBase]);
 
-  const startMission = async () => {
-    if (missionLocked) {
-      return;
+  const ensureMission = async (
+    bounds: Bounds,
+    missionDrones?: MissionDroneInput[],
+    missionHikers?: MissionHikerInput[]
+  ): Promise<MissionRecord> => {
+    if (mission?.id && boundsEqual(mission.bounds, bounds)) {
+      return mission;
     }
 
+    const createdMission = await missionClient.createMission({
+      name: `SAR-${new Date().toISOString()}`,
+      bounds,
+      ...(missionDrones ? { drones: missionDrones } : {}),
+      ...(missionHikers && missionHikers.length > 0 ? { hikers: missionHikers } : {}),
+      algorithm: selectedAlgorithm,
+    });
+    setMission(createdMission);
+    return createdMission;
+  };
+
+  const confirmSearchArea = async (): Promise<MissionRecord | null> => {
     if (!selectedBounds) {
-      return;
+      setIsValidBounds(false);
+      return null;
     }
 
-    let missionDrones: MissionDroneInput[] = validDrones.map(toMissionDroneInput);
+    try {
+      const missionRecord = await ensureMission(selectedBounds);
+      const confirmedMission = await missionClient.confirmSearchArea(missionRecord.id, {
+        bounds: selectedBounds
+      });
+      clearTemporaryRegionSelection();
+      setMission(confirmedMission);
+      return confirmedMission;
+    } catch (err) {
+      console.warn(`Confirm search area failed: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+  };
 
-    if (validDroneCount === 0) {
-      missionDrones = Array.from({ length: 15 }).map((_, i) =>
-        toMissionDroneInput({
-          id: `mock-drone-${i}`,
-          lat: selectedBounds.min_lat + Math.random() * (selectedBounds.max_lat - selectedBounds.min_lat),
-          lon: selectedBounds.min_lon + Math.random() * (selectedBounds.max_lon - selectedBounds.min_lon),
-          alt: 100,
-          heading: Math.random() * 360
-        })
-      );
+  const startMission = async (): Promise<MissionRecord | null> => {
+    if (missionLocked || !selectedBounds) {
+      console.warn("Start failed: search area must be selected before starting the mission");
+      return null;
     }
 
     setMissionStatus("searching");
@@ -109,33 +190,26 @@ export default function useMissionActions({
     setSummaryMissionId(null);
     setHikerLabelById({});
 
+    const missionDrones: MissionDroneInput[] = buildMissionDrones(validDrones, validDroneCount, selectedBounds);
+    const missionHikers: MissionHikerInput[] = placedHikers.map(toMissionHikerInput);
     try {
-      const placedHikerPayload = placedHikers.map((hiker) => ({
-        id: hiker.id,
-        lat: hiker.lat,
-        lon: hiker.lon,
-        found: false,
-        movement: hiker.movement
-      }));
+      const missionRecord = await ensureMission(selectedBounds, missionDrones, missionHikers);
 
-      const created = await missionClient.createMission({
-        name: `SAR-${new Date().toISOString()}`,
-        bounds: selectedBounds,
+      const payload = {
         drones: missionDrones,
+        ...(missionHikers.length > 0 ? { hikers: missionHikers } : {}),
         algorithm: selectedAlgorithm,
-        ...(placedHikerPayload.length ? { hikers: placedHikerPayload } : {})
-      });
-
-      setMission(created);
-
-      const started = await missionClient.startMission(created.id, selectedAlgorithm);
+      };
+      const started = await missionClient.startMission(missionRecord.id, payload);
       setMission(started);
       setMissionStatus("searching");
       setProgress(started.progress ?? 0);
       if (Array.isArray(started.targets)) setTargets(started.targets);
+      return started;
     } catch (err) {
       setMissionStatus("idle");
       console.warn(`Start failed: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
     }
   };
 
@@ -184,6 +258,7 @@ export default function useMissionActions({
   };
 
   return {
+    confirmSearchArea,
     startMission,
     stopMission,
     resetMissionLock,

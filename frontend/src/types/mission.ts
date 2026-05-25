@@ -123,6 +123,13 @@ export type Bounds = {
   max_lon: number;
 };
 
+export type SearchAreaCorners = {
+  topLeftLat: number;
+  topLeftLon: number;
+  bottomRightLat: number;
+  bottomRightLon: number;
+};
+
 export type TelemetryDrone = {
   id: EntityId;
   sysid?: number | null;
@@ -164,6 +171,60 @@ export type MissionRecord = {
   progress?: number;
   targets?: Target[];
   algorithm?: string;
+  bounds?: Bounds;
+  grid?: Array<[number, number]>;
+  grid_shape?: [number, number] | number[];
+  probability_grid?: number[];
+  operator_label_grid?: number[][];
+  searchable_mask?: boolean[][];
+  search_area_confirmed?: boolean;
+  probability_grid_confirmed?: boolean;
+};
+
+export type SetupStage =
+  | "search_area"
+  | "label_regions"
+  | "review_probability_map"
+  | "active_mission";
+
+export type ProbabilityRegionLabel =
+  | "very_unlikely"
+  | "unlikely"
+  | "normal"
+  | "likely"
+  | "very_likely"
+  | "excluded";
+
+export type ProbabilityGridCell = [number, number];
+
+export const PROBABILITY_REGION_LABELS = [
+  "very_unlikely",
+  "unlikely",
+  "normal",
+  "likely",
+  "very_likely",
+  "excluded",
+] as const;
+
+export const PROBABILITY_REGION_CODE_BY_LABEL: Record<ProbabilityRegionLabel, number> = {
+  very_unlikely: 0,
+  unlikely: 1,
+  normal: 2,
+  likely: 3,
+  very_likely: 4,
+  excluded: 5,
+};
+
+export type PreviewProbabilityRegionResponse = {
+  cells: ProbabilityGridCell[];
+  count: number;
+};
+
+export type ApplyProbabilityRegionResponse = {
+  operator_label_grid: number[][];
+  probability_grid: number[];
+  cells: ProbabilityGridCell[];
+  count: number;
 };
 
 export type MissionMetrics = {
@@ -217,17 +278,26 @@ export type MissionDroneInput = {
   role?: string | null;
 };
 
+export type MissionHikerInput = {
+  id: string;
+  lat: number;
+  lon: number;
+  found: boolean;
+  movement?: HikerMovement;
+};
+
 export type MissionCreateRequest = {
   name: string;
   bounds: Bounds;
-  drones: MissionDroneInput[];
+  drones?: MissionDroneInput[];
+  hikers?: MissionHikerInput[];
   /** Must match backend-discovered algorithm keys; echoed on the mission until start overrides. */
   algorithm?: AlgorithmOption;
-  hikers?: Array<{
-    id: string;
-    lat: number;
-    lon: number;
-    found: boolean;
-    movement?: HikerMovement;
-  }>;
+};
+
+export type MissionStartRequest = {
+  drones: MissionDroneInput[];
+  hikers?: MissionHikerInput[];
+  /** Must match backend-discovered algorithm keys. */
+  algorithm?: AlgorithmOption;
 };

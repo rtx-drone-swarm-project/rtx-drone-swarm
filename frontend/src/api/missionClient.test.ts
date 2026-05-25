@@ -197,4 +197,81 @@ describe("missionClient", () => {
     expect(payload.algorithms[0].key).toBe("voronoi_aco");
     expect(fetchMock).toHaveBeenCalledWith("http://localhost:8000/algorithms", undefined);
   });
+
+  it("previews and applies probability regions with expected payloads", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ cells: [[0, 1]], count: 1 }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          operator_label_grid: [[2, 3]],
+          probability_grid: [0.4, 0.6],
+          cells: [[0, 1]],
+          count: 1
+        })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMissionClient("http://localhost:8000");
+
+    await client.previewProbabilityRegion("m1", {
+      rect_bounds: { min_lat: 1, max_lat: 2, min_lon: 3, max_lon: 4 }
+    });
+    await client.applyProbabilityRegion("m1", {
+      label: "likely",
+      rect_bounds: { min_lat: 1, max_lat: 2, min_lon: 3, max_lon: 4 }
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8000/missions/m1/probability-grid/preview-region",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          rect_bounds: { min_lat: 1, max_lat: 2, min_lon: 3, max_lon: 4 }
+        })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8000/missions/m1/probability-grid/apply-region",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          label: "likely",
+          rect_bounds: { min_lat: 1, max_lat: 2, min_lon: 3, max_lon: 4 }
+        })
+      })
+    );
+  });
+
+  it("confirms, reopens, and resets the probability grid with expected requests", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", probability_grid_confirmed: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", probability_grid_confirmed: false }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "m1", probability_grid_confirmed: false }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMissionClient("http://localhost:8000");
+
+    await client.confirmProbabilityGrid("m1");
+    await client.reopenProbabilityGrid("m1");
+    await client.resetProbabilityGrid("m1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8000/missions/m1/probability-grid/confirm",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8000/missions/m1/probability-grid/reopen",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://localhost:8000/missions/m1/probability-grid/reset",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
 });

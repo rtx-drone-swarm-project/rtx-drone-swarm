@@ -94,6 +94,30 @@ describe("MapBBoxDrawer", () => {
     });
   });
 
+  it("emits the same normalized bounds when dragged in reverse", () => {
+    const onBoundsDrawn = vi.fn();
+    render(<MapBBoxDrawer enabled={true} onBoundsDrawn={onBoundsDrawn} />);
+
+    act(() => {
+      eventHandlers.mousedown?.({ latlng: { lat: 33.55, lng: -117.15 }, originalEvent: { shiftKey: true } });
+    });
+
+    act(() => {
+      eventHandlers.mousemove?.({ latlng: { lat: 33.5, lng: -117.2 } });
+    });
+
+    act(() => {
+      eventHandlers.mouseup?.({ latlng: { lat: 33.5, lng: -117.2 } });
+    });
+
+    expect(onBoundsDrawn).toHaveBeenCalledWith({
+      min_lat: 33.5,
+      max_lat: 33.55,
+      min_lon: -117.2,
+      max_lon: -117.15
+    });
+  });
+
   it("does not emit bounds for a tiny shift-drag", () => {
     const onBoundsDrawn = vi.fn();
     render(<MapBBoxDrawer enabled={true} onBoundsDrawn={onBoundsDrawn} />);

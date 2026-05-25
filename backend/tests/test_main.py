@@ -21,6 +21,7 @@ from app.algorithms.boustrophedon import (
 from app.voronoi import lloyd_step
 from app.algorithms.voronoi import VoronoiCoverage
 from app.algorithms.base import build_search_grid
+from app.algorithms.grid import choose_grid_shape
 from app.settings import _positive_float_env
 import app.main as main_module
 import app.missions as missions_app
@@ -59,6 +60,13 @@ def create_test_mission(
     mission = Mission(id, mission_data)
 
     return mission
+
+
+def confirm_test_mission_setup(mission_id: str, bounds: dict) -> None:
+    payload = {"bounds": bounds}
+
+    response = client.post(f"/missions/{mission_id}/confirm-search-area", json=payload)
+    assert response.status_code == 200
 
 def test_read_main():
     response = client.get("/health")
@@ -140,6 +148,42 @@ def test_create_mission():
     assert data["hikers"] == [{**mission_data["hikers"][0], "movement": "moving"}]
 
 
+def test_create_mission_rejects_invalid_rectangular_bounds():
+    mission_data = {
+        "name": "Invalid Bounds Mission",
+        "bounds": {
+            "min_lat": 35.0,
+            "max_lat": 34.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.5, "lon": -117.5}
+        ],
+    }
+
+    response = client.post("/missions", json=mission_data)
+    assert response.status_code == 422
+
+
+def test_create_mission_rejects_out_of_range_bounds():
+    mission_data = {
+        "name": "Out Of Range Bounds Mission",
+        "bounds": {
+            "min_lat": -91.0,
+            "max_lat": 34.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.5, "lon": -117.5}
+        ],
+    }
+
+    response = client.post("/missions", json=mission_data)
+    assert response.status_code == 422
+
+
 def test_get_mission_returns_stored_bounds():
     mission_data = {
         "name": "Mission Lookup Test",
@@ -186,6 +230,8 @@ def test_start_mission():
     assert create_response.status_code == 200
     mission_id = create_response.json()["id"]
 
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
     start_response = client.post(f"/missions/{mission_id}/start")
     assert start_response.status_code == 200
     start_data = start_response.json()
@@ -203,6 +249,98 @@ def test_start_mission():
     second_start_response = client.post(f"/missions/{mission_id}/start")
     assert second_start_response.status_code == 400
     assert second_start_response.json() == {"detail": "Only 'idle' missions can be started"}
+
+
+def test_start_mission_works_without_probability_map_setup():
+    mission_data = {
+        "name": "Unconfirmed Setup Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 35.0,
+            "min_lon": -118.0,
+            "max_lon": -117.0
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.5, "lon": -117.5}
+        ]
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    start_response = client.post(f"/missions/{mission_id}/start")
+    assert start_response.status_code == 200
+    payload = start_response.json()
+    assert payload["status"] == "searching"
+    assert payload["search_area_confirmed"] is True
+    assert payload["probability_grid_confirmed"] is False
+    assert payload["grid_shape"] is not None
+
+
+def test_start_mission_works_after_optional_search_area_confirmation_without_probability_confirmation():
+    mission_data = {
+        "name": "Partial Setup Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.05, "lon": -118.05}
+        ],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    confirm_response = client.post(
+        f"/missions/{mission_id}/confirm-search-area",
+        json={"bounds": mission_data["bounds"]},
+    )
+    assert confirm_response.status_code == 200
+
+    start_response = client.post(f"/missions/{mission_id}/start")
+    assert start_response.status_code == 200
+    payload = start_response.json()
+    assert payload["status"] == "searching"
+    assert payload["search_area_confirmed"] is True
+    assert payload["probability_grid_confirmed"] is False
+
+
+def test_start_mission_works_after_both_confirmations():
+    mission_data = {
+        "name": "Fully Confirmed Setup Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.05, "lon": -118.05}
+        ],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    confirm_response = client.post(
+        f"/missions/{mission_id}/confirm-search-area",
+        json={"bounds": mission_data["bounds"]},
+    )
+    assert confirm_response.status_code == 200
+
+    probability_confirm_response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
+    assert probability_confirm_response.status_code == 200
+
+    start_response = client.post(f"/missions/{mission_id}/start")
+    assert start_response.status_code == 200
+    payload = start_response.json()
+    assert payload["status"] == "searching"
+    expected_rows, expected_cols = choose_grid_shape(mission_data["bounds"], target_cell_size_m=100.0)
+    assert payload["grid_shape"] == [expected_rows, expected_cols]
+    assert len(payload["grid"]) == expected_rows * expected_cols
 
 
 def test_start_mission_uses_supplied_hikers():
@@ -226,6 +364,8 @@ def test_start_mission_uses_supplied_hikers():
     assert create_response.status_code == 200
     mission_id = create_response.json()["id"]
 
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
     start_response = client.post(f"/missions/{mission_id}/start")
     assert start_response.status_code == 200
     targets = start_response.json()["targets"]
@@ -248,6 +388,767 @@ def test_start_mission_uses_supplied_hikers():
             "movement": "moving",
         },
     ]
+
+
+def test_start_mission_prefers_manual_hikers_over_confirmed_probability_map():
+    mission_data = {
+        "name": "Manual Hikers Override Probability Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+    probability_confirm_response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
+    assert probability_confirm_response.status_code == 200
+
+    manual_hikers = [
+        {"id": "manual-1", "lat": 34.01, "lon": -118.01, "found": False, "movement": "stationary"},
+        {"id": "manual-2", "lat": 34.02, "lon": -118.02, "found": False, "movement": "moving"},
+    ]
+    start_response = client.post(
+        f"/missions/{mission_id}/start",
+        json={"hikers": manual_hikers},
+    )
+    assert start_response.status_code == 200
+    assert start_response.json()["targets"] == [
+        {
+            "id": "manual-1",
+            "lat": 34.01,
+            "lon": -118.01,
+            "status": "wandering",
+            "assigned_drone_id": None,
+            "movement": "stationary",
+        },
+        {
+            "id": "manual-2",
+            "lat": 34.02,
+            "lon": -118.02,
+            "status": "wandering",
+            "assigned_drone_id": None,
+            "movement": "moving",
+        },
+    ]
+
+
+def test_start_mission_samples_stationary_targets_from_confirmed_probability_grid(monkeypatch):
+    mission_data = {
+        "name": "Probability Sample Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
+    probability_confirm_response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
+    assert probability_confirm_response.status_code == 200
+
+    mission = mission_db[mission_id]
+    target_flat_index = mission.grid_shape[1] + 2
+    mission.probability_grid = np.zeros(len(mission.grid), dtype=float)
+    mission.probability_grid[target_flat_index] = 1.0
+
+    monkeypatch.setattr(missions_routes.random, "randint", lambda _a, _b: 2)
+    expected_cell_bounds = missions_routes._flat_grid_index_to_cell_bounds(
+        target_flat_index,
+        mission.bounds,
+        mission.grid_shape,
+    )
+    assert expected_cell_bounds is not None
+    lat_1 = expected_cell_bounds["min_lat"] + (expected_cell_bounds["max_lat"] - expected_cell_bounds["min_lat"]) * 0.25
+    lon_1 = expected_cell_bounds["min_lon"] + (expected_cell_bounds["max_lon"] - expected_cell_bounds["min_lon"]) * 0.25
+    lat_2 = expected_cell_bounds["min_lat"] + (expected_cell_bounds["max_lat"] - expected_cell_bounds["min_lat"]) * 0.75
+    lon_2 = expected_cell_bounds["min_lon"] + (expected_cell_bounds["max_lon"] - expected_cell_bounds["min_lon"]) * 0.75
+    sampled_values = iter([lat_1, lon_1, lat_2, lon_2])
+    monkeypatch.setattr(missions_routes.random, "uniform", lambda _a, _b: next(sampled_values))
+
+    start_response = client.post(f"/missions/{mission_id}/start")
+    assert start_response.status_code == 200
+    targets = start_response.json()["targets"]
+
+    assert len(targets) == 2
+    assert targets[0]["lat"] == lat_1
+    assert targets[0]["lon"] == lon_1
+    assert targets[1]["lat"] == lat_2
+    assert targets[1]["lon"] == lon_2
+    assert targets[0]["lat"] != targets[1]["lat"]
+    assert targets[0]["lon"] != targets[1]["lon"]
+    for target in targets:
+        assert expected_cell_bounds["min_lat"] <= target["lat"] <= expected_cell_bounds["max_lat"]
+        assert expected_cell_bounds["min_lon"] <= target["lon"] <= expected_cell_bounds["max_lon"]
+        assert mission.bounds["min_lat"] <= target["lat"] <= mission.bounds["max_lat"]
+        assert mission.bounds["min_lon"] <= target["lon"] <= mission.bounds["max_lon"]
+        assert target["movement"] == "stationary"
+        assert target["status"] == "wandering"
+
+
+def test_start_mission_ignores_unconfirmed_probability_grid_and_falls_back_to_uniform(monkeypatch):
+    mission_data = {
+        "name": "Unconfirmed Probability Fallback Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
+    mission = mission_db[mission_id]
+    mission.probability_grid = np.array([0.0, 0.0, 1.0, 0.0], dtype=float)
+    mission.probability_grid_confirmed = False
+
+    monkeypatch.setattr(missions_routes.random, "randint", lambda _a, _b: 2)
+    uniform_values = iter([34.011, -118.011, 34.022, -118.022])
+    monkeypatch.setattr(missions_routes.random, "uniform", lambda _a, _b: next(uniform_values))
+
+    start_response = client.post(f"/missions/{mission_id}/start")
+    assert start_response.status_code == 200
+    targets = start_response.json()["targets"]
+
+    assert targets == [
+        {
+            "id": targets[0]["id"],
+            "lat": 34.011,
+            "lon": -118.011,
+            "status": "wandering",
+            "assigned_drone_id": None,
+            "movement": "moving",
+        },
+        {
+            "id": targets[1]["id"],
+            "lat": 34.022,
+            "lon": -118.022,
+            "status": "wandering",
+            "assigned_drone_id": None,
+            "movement": "moving",
+        },
+    ]
+
+
+def test_flat_grid_index_to_cell_bounds_returns_expected_first_cell_bounds():
+    bounds = {
+        "min_lat": 34.0,
+        "max_lat": 35.0,
+        "min_lon": -118.0,
+        "max_lon": -117.0,
+    }
+    cell_bounds = missions_routes._flat_grid_index_to_cell_bounds(0, bounds, (10, 10))
+    assert cell_bounds == {
+        "min_lat": 34.0,
+        "max_lat": 34.1,
+        "min_lon": -118.0,
+        "max_lon": -117.9,
+    }
+
+
+def test_confirm_search_area_initializes_grid_and_probability_state():
+    mission_data = {
+        "name": "Confirm Search Area Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.05, "lon": -118.05}
+        ],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    confirm_response = client.post(
+        f"/missions/{mission_id}/confirm-search-area",
+        json={"bounds": mission_data["bounds"]},
+    )
+
+    assert confirm_response.status_code == 200
+    payload = confirm_response.json()
+    expected_rows, expected_cols = choose_grid_shape(mission_data["bounds"], target_cell_size_m=100.0)
+    assert payload["grid_shape"] == [expected_rows, expected_cols]
+    assert len(payload["grid"]) == expected_rows * expected_cols
+    assert len(payload["grid"][0]) == 2
+    assert len(payload["probability_grid"]) == expected_rows * expected_cols
+    assert np.isclose(sum(payload["probability_grid"]), 1.0)
+    assert payload["search_area_confirmed"] is True
+    assert payload["probability_grid_confirmed"] is False
+    assert len(payload["operator_label_grid"]) == expected_rows
+    assert len(payload["operator_label_grid"][0]) == expected_cols
+    assert len(payload["searchable_mask"]) == expected_rows
+    assert len(payload["searchable_mask"][0]) == expected_cols
+
+
+def test_confirm_search_area_uses_target_cell_size():
+    mission_data = {
+        "name": "Default Grid Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.05, "lon": -118.05}
+        ],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    confirm_response = client.post(
+        f"/missions/{mission_id}/confirm-search-area",
+        json={"bounds": mission_data["bounds"]},
+    )
+
+    assert confirm_response.status_code == 200
+    payload = confirm_response.json()
+    expected_rows, expected_cols = choose_grid_shape(mission_data["bounds"], target_cell_size_m=100.0)
+    assert payload["grid_shape"] == [expected_rows, expected_cols]
+
+def test_preview_probability_region_returns_cells_for_valid_rectangle():
+    mission_data = {
+        "name": "Preview Region Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.05, "lon": -118.05}
+        ],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    confirm_response = client.post(
+        f"/missions/{mission_id}/confirm-search-area",
+        json={"bounds": mission_data["bounds"]},
+    )
+    assert confirm_response.status_code == 200
+
+    preview_response = client.post(
+        f"/missions/{mission_id}/probability-grid/preview-region",
+        json={
+            "rect_bounds": {
+                "min_lat": 34.07,
+                "max_lat": 34.1,
+                "min_lon": -118.1,
+                "max_lon": -118.04,
+            }
+        },
+    )
+
+    assert preview_response.status_code == 200
+    payload = preview_response.json()
+    assert payload["count"] > 0
+    assert len(payload["cells"]) == payload["count"]
+    assert all(len(cell) == 2 for cell in payload["cells"])
+
+
+def test_preview_probability_region_does_not_modify_operator_label_grid():
+    mission_data = {
+        "name": "Preview Non-Mutating Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.05, "lon": -118.05}
+        ],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    confirm_response = client.post(
+        f"/missions/{mission_id}/confirm-search-area",
+        json={"bounds": mission_data["bounds"]},
+    )
+    assert confirm_response.status_code == 200
+
+    before = mission_db[mission_id].operator_label_grid.copy()
+
+    preview_response = client.post(
+        f"/missions/{mission_id}/probability-grid/preview-region",
+        json={
+            "rect_bounds": {
+                "min_lat": 34.02,
+                "max_lat": 34.08,
+                "min_lon": -118.08,
+                "max_lon": -118.02,
+            }
+        },
+    )
+
+    assert preview_response.status_code == 200
+    after = mission_db[mission_id].operator_label_grid
+    assert np.array_equal(before, after)
+
+
+def test_preview_probability_region_returns_400_if_search_area_is_not_confirmed():
+    mission_data = {
+        "name": "Unconfirmed Preview Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [
+            {"id": "drone1", "lat": 34.05, "lon": -118.05}
+        ],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    assert create_response.status_code == 200
+    mission_id = create_response.json()["id"]
+
+    preview_response = client.post(
+        f"/missions/{mission_id}/probability-grid/preview-region",
+        json={
+            "rect_bounds": {
+                "min_lat": 34.02,
+                "max_lat": 34.08,
+                "min_lon": -118.08,
+                "max_lon": -118.02,
+            }
+        },
+    )
+
+    assert preview_response.status_code == 400
+    assert preview_response.json() == {
+        "detail": "Search area must be confirmed before previewing regions"
+    }
+
+
+def test_apply_probability_region_changes_selected_cells_to_likely_code():
+    mission_data = {
+        "name": "Apply Likely Region Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
+    response = client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={
+            "label": "likely",
+            "rect_bounds": {
+                "min_lat": 34.07,
+                "max_lat": 34.1,
+                "min_lon": -118.1,
+                "max_lon": -118.04,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] > 0
+    for row, col in payload["cells"]:
+        assert payload["operator_label_grid"][row][col] == missions_routes.REGION_LABEL_CODES["likely"]
+
+
+def test_apply_probability_region_normal_over_existing_likely_resets_cells():
+    mission_data = {
+        "name": "Reset Region Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
+    rect_bounds = {
+        "min_lat": 34.07,
+        "max_lat": 34.1,
+        "min_lon": -118.1,
+        "max_lon": -118.04,
+    }
+    first_response = client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={"label": "likely", "rect_bounds": rect_bounds},
+    )
+    assert first_response.status_code == 200
+
+    second_response = client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={"label": "normal", "rect_bounds": rect_bounds},
+    )
+    assert second_response.status_code == 200
+    payload = second_response.json()
+    for row, col in payload["cells"]:
+        assert payload["operator_label_grid"][row][col] == missions_routes.REGION_LABEL_CODES["normal"]
+
+
+def test_apply_probability_region_excluded_makes_selected_cells_probability_zero():
+    mission_data = {
+        "name": "Exclude Region Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
+    response = client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={
+            "label": "excluded",
+            "rect_bounds": {
+                "min_lat": 34.07,
+                "max_lat": 34.1,
+                "min_lon": -118.1,
+                "max_lon": -118.04,
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    grid_width = mission_db[mission_id].grid_shape[1]
+    for row, col in payload["cells"]:
+        flat_index = row * grid_width + col
+        assert payload["probability_grid"][flat_index] == 0.0
+
+
+def test_apply_probability_region_overlapping_apply_overwrites_old_labels():
+    mission_data = {
+        "name": "Overlapping Apply Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
+    client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={
+            "label": "likely",
+            "rect_bounds": {
+                "min_lat": 34.05,
+                "max_lat": 34.1,
+                "min_lon": -118.1,
+                "max_lon": -118.02,
+            },
+        },
+    )
+    second_response = client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={
+            "label": "unlikely",
+            "rect_bounds": {
+                "min_lat": 34.07,
+                "max_lat": 34.1,
+                "min_lon": -118.08,
+                "max_lon": -118.0,
+            },
+        },
+    )
+    assert second_response.status_code == 200
+    payload = second_response.json()
+    for row, col in payload["cells"]:
+        assert payload["operator_label_grid"][row][col] == missions_routes.REGION_LABEL_CODES["unlikely"]
+
+
+def test_apply_probability_region_keeps_probability_grid_normalized_unless_all_excluded():
+    mission_data = {
+        "name": "Normalized Apply Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
+    response = client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={
+            "label": "likely",
+            "rect_bounds": {
+                "min_lat": 34.07,
+                "max_lat": 34.1,
+                "min_lon": -118.1,
+                "max_lon": -118.04,
+            },
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert np.isclose(sum(payload["probability_grid"]), 1.0)
+
+    all_excluded_response = client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={
+            "label": "excluded",
+            "rect_bounds": mission_data["bounds"],
+        },
+    )
+    assert all_excluded_response.status_code == 200
+    all_excluded_payload = all_excluded_response.json()
+    assert np.isclose(sum(all_excluded_payload["probability_grid"]), 0.0)
+
+
+def test_confirm_probability_grid_works_after_search_area_confirmation():
+    mission_data = {
+        "name": "Confirm Probability Grid Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+
+    confirm_response = client.post(
+        f"/missions/{mission_id}/confirm-search-area",
+        json={"bounds": mission_data["bounds"]},
+    )
+    assert confirm_response.status_code == 200
+
+    response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == mission_id
+    assert payload["probability_grid"] is not None
+
+
+def test_confirm_probability_grid_sets_probability_grid_confirmed_true():
+    mission_data = {
+        "name": "Confirm Probability Grid Flag Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+    mission_db[mission_id].probability_grid_confirmed = False
+
+    response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
+    assert response.status_code == 200
+    assert response.json()["probability_grid_confirmed"] is True
+
+
+def test_reopen_probability_grid_sets_probability_grid_confirmed_false_and_keeps_labels():
+    mission_data = {
+        "name": "Reopen Probability Grid Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
+    apply_response = client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={
+            "label": "likely",
+            "rect_bounds": {
+                "min_lat": 34.07,
+                "max_lat": 34.1,
+                "min_lon": -118.1,
+                "max_lon": -118.04,
+            },
+        },
+    )
+    assert apply_response.status_code == 200
+    expected_labels = mission_db[mission_id].operator_label_grid.tolist()
+
+    confirm_response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
+    assert confirm_response.status_code == 200
+    assert confirm_response.json()["probability_grid_confirmed"] is True
+
+    reopen_response = client.post(f"/missions/{mission_id}/probability-grid/reopen")
+    assert reopen_response.status_code == 200
+    payload = reopen_response.json()
+    assert payload["probability_grid_confirmed"] is False
+    assert payload["operator_label_grid"] == expected_labels
+    assert payload["probability_grid"] is not None
+
+
+def test_reopen_probability_grid_rejects_when_search_area_not_confirmed():
+    mission_data = {
+        "name": "Reopen Without Search Area Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+
+    reopen_response = client.post(f"/missions/{mission_id}/probability-grid/reopen")
+    assert reopen_response.status_code == 400
+    assert reopen_response.json() == {
+        "detail": "Search area must be confirmed before reopening probability grid"
+    }
+
+
+def test_reset_probability_grid_clears_labels_and_keeps_search_area():
+    mission_data = {
+        "name": "Reset Probability Grid Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
+    apply_response = client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={
+            "label": "likely",
+            "rect_bounds": mission_data["bounds"],
+        },
+    )
+    assert apply_response.status_code == 200
+
+    reset_response = client.post(f"/missions/{mission_id}/probability-grid/reset")
+    assert reset_response.status_code == 200
+    payload = reset_response.json()
+
+    assert payload["search_area_confirmed"] is True
+    assert payload["probability_grid_confirmed"] is False
+    expected_rows, expected_cols = choose_grid_shape(mission_data["bounds"], target_cell_size_m=100.0)
+    assert payload["grid_shape"] == [expected_rows, expected_cols]
+    assert payload["operator_label_grid"] == [[2] * expected_cols for _ in range(expected_rows)]
+    assert payload["probability_grid"] is not None
+
+
+def test_confirm_probability_grid_rejects_if_all_cells_are_excluded():
+    mission_data = {
+        "name": "Reject All Excluded Probability Grid Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
+    apply_response = client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={
+            "label": "excluded",
+            "rect_bounds": mission_data["bounds"],
+        },
+    )
+    assert apply_response.status_code == 200
+
+    confirm_response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
+    assert confirm_response.status_code == 400
+    assert confirm_response.json() == {
+        "detail": "Probability grid confirmation failed: no searchable cells remain"
+    }
+
+
+def test_confirmed_probability_grid_sums_to_one():
+    mission_data = {
+        "name": "Confirmed Probability Sum Mission",
+        "bounds": {
+            "min_lat": 34.0,
+            "max_lat": 34.1,
+            "min_lon": -118.1,
+            "max_lon": -118.0,
+        },
+        "drones": [{"id": "drone1", "lat": 34.05, "lon": -118.05}],
+    }
+    create_response = client.post("/missions", json=mission_data)
+    mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
+    apply_response = client.post(
+        f"/missions/{mission_id}/probability-grid/apply-region",
+        json={
+            "label": "likely",
+            "rect_bounds": {
+                "min_lat": 34.07,
+                "max_lat": 34.1,
+                "min_lon": -118.1,
+                "max_lon": -118.04,
+            },
+        },
+    )
+    assert apply_response.status_code == 200
+
+    confirm_response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
+    assert confirm_response.status_code == 200
+    payload = confirm_response.json()
+    assert np.isclose(sum(payload["probability_grid"]), 1.0)
 
 
 def test_stationary_targets_do_not_wander():
@@ -323,6 +1224,7 @@ def test_stop_mission():
     mission_id = create_response.json()["id"]
 
     # Start the mission first
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
     start_response = client.post(f"/missions/{mission_id}/start")
     assert start_response.status_code == 200
 
@@ -501,6 +1403,7 @@ def test_start_mission_runs_dispatch_bridge_when_targets_present():
         assert create_response.status_code == 200
         mission_id = create_response.json()["id"]
 
+        confirm_test_mission_setup(mission_id, mission_data["bounds"])
         start_response = client.post(f"/missions/{mission_id}/start")
         assert start_response.status_code == 200
         payload = start_response.json()
@@ -933,6 +1836,7 @@ def test_start_mission_stores_algorithm_from_body():
     assert create_response.status_code == 200
     mission_id = create_response.json()["id"]
 
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
     start_response = client.post(f"/missions/{mission_id}/start", json={"algorithm": "apf"})
     assert start_response.status_code == 200
     assert start_response.json()["algorithm"] == "apf"
@@ -948,6 +1852,7 @@ def test_start_mission_defaults_algorithm_to_voronoi_when_no_body():
     assert create_response.status_code == 200
     mission_id = create_response.json()["id"]
 
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
     start_response = client.post(f"/missions/{mission_id}/start")
     assert start_response.status_code == 200
     assert start_response.json()["algorithm"] == "voronoi"
@@ -963,6 +1868,7 @@ def test_metrics_endpoint_returns_algorithm_and_structure():
     assert create_response.status_code == 200
     mission_id = create_response.json()["id"]
 
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
     client.post(f"/missions/{mission_id}/start", json={"algorithm": "apf"})
 
     response = client.get(f"/missions/{mission_id}/metrics")
@@ -1616,6 +2522,7 @@ def test_metrics_endpoint_includes_coverage_and_find_time_fields():
     }
     create_response = client.post("/missions", json=mission_data)
     mission_id = create_response.json()["id"]
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
     client.post(f"/missions/{mission_id}/start", json={"algorithm": "sweep"})
 
     response = client.get(f"/missions/{mission_id}/metrics")

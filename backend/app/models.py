@@ -2,7 +2,7 @@
 
 from typing import Optional, List, Literal, Dict, Tuple, Set
 from dataclasses import dataclass
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import numpy as np
 
 class Bounds(BaseModel):
@@ -12,6 +12,18 @@ class Bounds(BaseModel):
     max_lat: float
     min_lon: float
     max_lon: float
+
+    @model_validator(mode="after")
+    def validate_rectangular_bounds(self):
+        if not -90 <= self.min_lat <= 90 or not -90 <= self.max_lat <= 90:
+            raise ValueError("Latitude must be between -90 and 90")
+        if not -180 <= self.min_lon <= 180 or not -180 <= self.max_lon <= 180:
+            raise ValueError("Longitude must be between -180 and 180")
+        if self.min_lat >= self.max_lat:
+            raise ValueError("min_lat must be less than max_lat")
+        if self.min_lon >= self.max_lon:
+            raise ValueError("min_lon must be less than max_lon")
+        return self
 
 class Drone(BaseModel):
     """Mission-facing drone state used in REST payloads and WebSocket updates."""
@@ -46,7 +58,7 @@ class MissionCreate(BaseModel):
 
     name: str
     bounds: Bounds
-    drones: List[Drone]
+    drones: Optional[List[Drone]] = None
     hikers: Optional[List[Hiker]] = None
     algorithm: Optional[str] = "voronoi"
 
@@ -56,6 +68,32 @@ class MissionStart(BaseModel):
     drones: Optional[List[Drone]] = None
     algorithm: Optional[str] = None
     hikers: Optional[List[Hiker]] = None
+
+
+class ConfirmSearchAreaRequest(BaseModel):
+    """Payload for confirming mission bounds and initializing grid-edit state."""
+
+    bounds: Bounds
+
+
+class PreviewProbabilityRegionRequest(BaseModel):
+    """Payload for previewing which probability-grid cells a rectangle will affect."""
+
+    rect_bounds: Bounds
+
+
+class ApplyProbabilityRegionRequest(BaseModel):
+    """Payload for applying a region label to the probability grid."""
+
+    label: Literal[
+        "very_unlikely",
+        "unlikely",
+        "normal",
+        "likely",
+        "very_likely",
+        "excluded",
+    ]
+    rect_bounds: Bounds
 
 @dataclass
 class Mission:
@@ -70,9 +108,16 @@ class Mission:
     drones: List[Dict]
     hikers: List[Dict]
     targets: List[Dict]
-    grid: np.ndarray or None
+    grid: np.ndarray | None
+    grid_shape: Tuple[int, int] | None
+    probability_grid: np.ndarray | None
+    probability_grid_config: Dict[str, object]
+    operator_label_grid: np.ndarray | None
+    searchable_mask: np.ndarray | None
+    search_area_confirmed: bool
+    probability_grid_confirmed: bool
 
-    _dense_coverage_grid: np.ndarray or None
+    _dense_coverage_grid: np.ndarray | None
     _dense_grid_size: int
     _dense_covered_count: int
     _found_target_ids: Set[str]
@@ -93,10 +138,20 @@ class Mission:
         self.completion_elapsed_seconds = 0
         self.algorithm = getattr(mission_data, "algorithm", "voronoi")
         self.bounds = mission_data.bounds.model_dump()
-        self.drones = [d.model_dump() for d in mission_data.drones]
+        self.drones = [d.model_dump() for d in mission_data.drones] if mission_data.drones else []
         self.hikers = [m.model_dump() for m in mission_data.hikers] if mission_data.hikers else []
         self.targets = []
         self.grid = None
+        self.grid_shape = None
+        self.probability_grid = None
+        self.probability_grid_config = {
+            "smoothing_passes": 1,
+            "regions": [],
+        }
+        self.operator_label_grid = None
+        self.searchable_mask = None
+        self.search_area_confirmed = False
+        self.probability_grid_confirmed = False
 
         self._dense_coverage_grid = None
         self._dense_grid_size = 0
@@ -124,10 +179,25 @@ class Mission:
             "hikers": self.hikers,
             "targets": self.targets,
             "grid": self.grid,
+            "grid_shape": self.grid_shape,
+            "probability_grid": self.probability_grid,
+            "probability_grid_config": self.probability_grid_config,
+            "operator_label_grid": self.operator_label_grid,
+            "searchable_mask": self.searchable_mask,
+            "search_area_confirmed": self.search_area_confirmed,
+            "probability_grid_confirmed": self.probability_grid_confirmed,
         }
 
         if self.grid is not None and type(self.grid) is np.ndarray:
             data["grid"] = self.grid.tolist()
+        if self.grid_shape is not None and type(self.grid_shape) is tuple:
+            data["grid_shape"] = list(self.grid_shape)
+        if self.probability_grid is not None and type(self.probability_grid) is np.ndarray:
+            data["probability_grid"] = self.probability_grid.tolist()
+        if self.operator_label_grid is not None and type(self.operator_label_grid) is np.ndarray:
+            data["operator_label_grid"] = self.operator_label_grid.tolist()
+        if self.searchable_mask is not None and type(self.searchable_mask) is np.ndarray:
+            data["searchable_mask"] = self.searchable_mask.tolist()
 
         return data
 
