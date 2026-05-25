@@ -30,10 +30,13 @@ DIFFUSE_INTERVAL_S = 10
 DIFFUSE_SIGMA_DEG = DETECTION_RADIUS
 # At large bounds the fixed sigma is too small relative to how far a moving
 # hiker travels per diffusion step, so PMV's posterior cannot keep up. Scale
-# sigma with the bounds diagonal for moving profiles, with a stronger factor
-# for the long-extent corridor_route layout.
+# sigma with the bounds diagonal for moving profiles. corridor_route ramps into
+# the stronger factor only as bounds grow; using it at 6 km over-diffuses the
+# corridor prior and can erase the small-map full-success advantage.
 DIFFUSE_SIGMA_FRACTION = 0.04
 DIFFUSE_SIGMA_FRACTION_CORRIDOR = 0.08
+CORRIDOR_SIGMA_RAMP_START_SPAN_DEG = 0.06
+CORRIDOR_SIGMA_RAMP_FULL_SPAN_DEG = 0.108
 LAMBDA_DEG = 5 * DETECTION_RADIUS
 TRAVEL_WEIGHT_FLOOR = 0.18
 GLOBAL_HOTSPOT_RATIO = 1.15
@@ -360,11 +363,19 @@ def _moving_profile_sigma(profile: str, bounds: dict[str, float]) -> float:
     lat_span = float(bounds.get("max_lat", 0.0) - bounds.get("min_lat", 0.0))
     lon_span = float(bounds.get("max_lon", 0.0) - bounds.get("min_lon", 0.0))
     diag = math.hypot(lat_span, lon_span)
-    fraction = (
-        DIFFUSE_SIGMA_FRACTION_CORRIDOR
-        if profile == "corridor_route"
-        else DIFFUSE_SIGMA_FRACTION
+    if profile != "corridor_route":
+        return max(DIFFUSE_SIGMA_DEG, diag * DIFFUSE_SIGMA_FRACTION)
+
+    max_span = max(lat_span, lon_span)
+    if max_span <= CORRIDOR_SIGMA_RAMP_START_SPAN_DEG:
+        return DIFFUSE_SIGMA_DEG
+
+    ramp_width = CORRIDOR_SIGMA_RAMP_FULL_SPAN_DEG - CORRIDOR_SIGMA_RAMP_START_SPAN_DEG
+    ramp = min(
+        1.0,
+        max(0.0, (max_span - CORRIDOR_SIGMA_RAMP_START_SPAN_DEG) / ramp_width),
     )
+    fraction = DIFFUSE_SIGMA_FRACTION_CORRIDOR * ramp
     return max(DIFFUSE_SIGMA_DEG, diag * fraction)
 
 
