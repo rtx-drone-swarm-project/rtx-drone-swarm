@@ -6,14 +6,13 @@ import MapPanel from "./components/map/MapPanel";
 import DroneModal from "./components/modals/DroneModal";
 import HikerModal from "./components/modals/HikerModal";
 import SearchSummaryModal from "./components/modals/SearchSummaryModal";
-import AlertsPanel from "./components/panels/AlertsPanel";
 import ActionsPanel from "./components/panels/ActionsPanel";
 import BenchmarkPanel from "./components/panels/BenchmarkPanel";
 import FoundHikersPanel from "./components/panels/FoundHikersPanel";
 import HikerSetupPanel from "./components/panels/HikerSetupPanel";
 import LegendPanel from "./components/panels/LegendPanel";
 import NavigationPanel from "./components/panels/NavigationPanel";
-import SwarmStatusPanel from "./components/panels/SwarmStatusPanel";
+import OperatorStatusPanel from "./components/panels/OperatorStatusPanel";
 import useMissionActions from "./hooks/useMissionActions";
 import useMissionSocket from "./hooks/useMissionSocket";
 import { DEFAULT_ALGORITHM_OPTIONS } from "./types/mission";
@@ -611,8 +610,6 @@ export default function App() {
 
   const searchAreaEditingDisabled = setupStage === "active_mission";
 
-  const lostHikerCount = targets.filter((target) => target.status !== "found").length;
-
   const onResetMission = useCallback(() => {
     runningMissionIdRef.current = null;
     completedMetricsMissionIdRef.current = null;
@@ -731,22 +728,16 @@ export default function App() {
         />
 
         <aside className="left-rail">
-          <AlertsPanel
+          <OperatorStatusPanel
+            elapsedSeconds={elapsedSeconds}
+            droneCount={validDroneCount}
             missionComplete={missionComplete}
             missionStatus={missionStatus}
+            placedHikerCount={placedHikers.length}
+            progress={progress}
             selectedBounds={selectedBounds}
-            wsConnected={wsConnected}
-          />
-          <SwarmStatusPanel
-            elapsedSeconds={elapsedSeconds}
-            telemetryCount={telemetry.length}
-            validDroneCount={validDroneCount}
-            missionActive={missionActive}
-            missionStatus={missionStatus}
-            lostHikerCount={lostHikerCount}
+            targets={targets}
             telemetryMode={telemetryMode}
-            selectedAlgorithm={selectedAlgorithm}
-            algorithmOptions={algorithmOptions}
           />
           <BenchmarkPanel
             apiBase={apiBase}
