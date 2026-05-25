@@ -133,6 +133,8 @@ class PSOSearchAlgorithm(BaseSearchAlgorithm):
         pso_seeds: Dict[str, np.ndarray] = {}
         pso_velocities: Dict[str, np.ndarray] = {}
         pso_pbest: Dict[str, np.ndarray] = {}
+        pso_cell_indices: Dict[str, np.ndarray] = {}
+        pso_visited_cells: Dict[str, set] = {}
 
         for drone, seed_idx in zip(drones, drone_to_seed_list):
             did = str(drone["id"])
@@ -143,6 +145,9 @@ class PSOSearchAlgorithm(BaseSearchAlgorithm):
             pso_pbest[did] = np.array(
                 [float(drone.get("lat", 0.0)), float(drone.get("lon", 0.0))]
             )
+            # Store indices into dense_grid belonging to this drone's Voronoi cell.
+            pso_cell_indices[did] = np.where(labels == seed_idx)[0]
+            pso_visited_cells[did] = set()
             logger.info(
                 "pso | %s: cell %d (%d dense pts), seed (%.5f, %.5f)",
                 did, seed_idx, len(cell_pts), seed_pos[0], seed_pos[1],
@@ -152,6 +157,9 @@ class PSOSearchAlgorithm(BaseSearchAlgorithm):
         mission.pso_seeds = pso_seeds
         mission.pso_velocities = pso_velocities
         mission.pso_pbest = pso_pbest
+        mission.pso_cell_indices = pso_cell_indices
+        mission.pso_visited_cells = pso_visited_cells
+        mission.pso_dense_grid = dense_grid
         mission.pso_gbest = np.array([
             (float(bounds.get("min_lat", 0)) + float(bounds.get("max_lat", 0))) / 2,
             (float(bounds.get("min_lon", 0)) + float(bounds.get("max_lon", 0))) / 2,
@@ -232,17 +240,68 @@ class PSOSearchAlgorithm(BaseSearchAlgorithm):
                 # Phase 1: PSO dispersion toward assigned region seed.
                 # Niching repulsion keeps drones evenly spread — no rows,
                 # no gaps, naturally uniform coverage of the search area.
+                #
+                # Coverage-driven exploration: once the drone reaches its
+                # seed (within 3*DETECTION_RADIUS), the cognitive target
+                # shifts to the centroid of UNVISITED cells in its Voronoi
+                # partition, so the drone naturally drifts toward unscanned
+                # areas instead of oscillating around the seed.
                 # ----------------------------------------------------------
                 seed_target = pso_seeds.get(did)
                 if seed_target is None:
                     continue
                 seed_target = np.asarray(seed_target)
+
+                dense_grid: np.ndarray | None = _getm(mission, "pso_dense_grid")
+                cell_indices: Dict[str, np.ndarray] = _getm(mission, "pso_cell_indices", {})
+                visited_cells: Dict[str, set] = _getm(mission, "pso_visited_cells", {})
+
+                # --- Mark cells within DETECTION_RADIUS of current pos as visited ---
+                if dense_grid is not None and did in cell_indices:
+                    my_indices = cell_indices[did]
+                    my_grid_pts = dense_grid[my_indices]
+                    dists_to_pos = np.linalg.norm(my_grid_pts - pos, axis=1)
+                    newly_visited = set(my_indices[dists_to_pos <= DETECTION_RADIUS].tolist())
+                    if did not in visited_cells:
+                        visited_cells[did] = set()
+                    visited_cells[did].update(newly_visited)
+
+                # --- Compute cognitive target ---
+                cognitive_target = seed_target  # default: original seed
+                dist_to_seed = float(np.linalg.norm(pos - seed_target))
+
+                if dist_to_seed < 3 * DETECTION_RADIUS and dense_grid is not None and did in cell_indices:
+                    my_indices = cell_indices[did]
+                    visited = visited_cells.get(did, set())
+                    unvisited_mask = np.array(
+                        [idx not in visited for idx in my_indices], dtype=bool
+                    )
+                    unvisited_indices = my_indices[unvisited_mask]
+
+                    if len(unvisited_indices) > 0:
+                        # Centroid of unvisited cells → pulls drone toward unscanned area.
+                        unvisited_pts = dense_grid[unvisited_indices]
+                        cognitive_target = unvisited_pts.mean(axis=0)
+                    else:
+                        # Partition fully covered — assist another partition.
+                        all_visited: set = set()
+                        for v_set in visited_cells.values():
+                            all_visited.update(v_set)
+                        all_grid_indices = np.arange(len(dense_grid))
+                        global_unvisited = np.array(
+                            [idx for idx in all_grid_indices if idx not in all_visited]
+                        )
+                        if len(global_unvisited) > 0:
+                            pick = int(rng.integers(len(global_unvisited)))
+                            cognitive_target = dense_grid[global_unvisited[pick]]
+                        # else: everything visited, keep seed as target (hover).
+
                 v = velocities.get(did, np.zeros(2)).copy()
                 r1 = float(rng.random())
                 niching = self._niching_repulsion(drone, free_drones)
                 v = (
                     INERTIA * v
-                    + COGNITIVE * r1 * (seed_target - pos)
+                    + COGNITIVE * r1 * (cognitive_target - pos)
                     + niching
                 )
                 speed = float(np.linalg.norm(v))
@@ -253,14 +312,15 @@ class PSOSearchAlgorithm(BaseSearchAlgorithm):
                 if speed > 1e-9:
                     waypoint_pos = pos + (v / speed) * _LOOKAHEAD_DEG
                 else:
-                    waypoint_pos = seed_target.copy()
+                    waypoint_pos = cognitive_target.copy()
 
                 velocities[did] = v
                 pbest[did] = pos.copy()
                 waypoints[did] = (float(waypoint_pos[0]), float(waypoint_pos[1]))
                 logger.debug(
-                    "pso | %s [Phase1] pos=(%.5f,%.5f) seed=(%.5f,%.5f) wp=(%.5f,%.5f) |v|=%.5f",
+                    "pso | %s [Phase1] pos=(%.5f,%.5f) seed=(%.5f,%.5f) cog=(%.5f,%.5f) wp=(%.5f,%.5f) |v|=%.5f",
                     did, pos[0], pos[1], seed_target[0], seed_target[1],
+                    cognitive_target[0], cognitive_target[1],
                     waypoint_pos[0], waypoint_pos[1], speed,
                 )
 
