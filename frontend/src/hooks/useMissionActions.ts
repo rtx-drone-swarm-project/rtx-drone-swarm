@@ -66,6 +66,15 @@ function toMissionHikerInput(hiker: PlacedHiker): MissionHikerInput {
   return payload;
 }
 
+function boundsEqual(left: Bounds | undefined, right: Bounds): boolean {
+  return (
+    left?.min_lat === right.min_lat &&
+    left?.max_lat === right.max_lat &&
+    left?.min_lon === right.min_lon &&
+    left?.max_lon === right.max_lon
+  );
+}
+
 function buildMissionDrones(
   validDrones: ValidDrone[],
   validDroneCount: number,
@@ -116,7 +125,7 @@ export default function useMissionActions({
     missionDrones?: MissionDroneInput[],
     missionHikers?: MissionHikerInput[]
   ): Promise<MissionRecord> => {
-    if (mission?.id) {
+    if (mission?.id && boundsEqual(mission.bounds, bounds)) {
       return mission;
     }
 

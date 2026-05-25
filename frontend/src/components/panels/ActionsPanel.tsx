@@ -40,7 +40,7 @@ export default function ActionsPanel({
   onResetMission
 }: ActionsPanelProps) {
   const selectorDisabled = missionActive || missionLocked;
-  const missionRunning = missionStatus === "searching" || missionStatus == "recalling";
+  const missionRunning = missionStatus === "searching" || missionStatus === "recalling";
   const probabilityGridConfirmed = mission?.probability_grid_confirmed === true;
 
   return (

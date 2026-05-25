@@ -71,7 +71,7 @@ export function useSearchAreaSetup({
     const [topLeftLon, setTopLeftLon] = useState("");
     const [bottomRightLat, setBottomRightLat] = useState("");
     const [bottomRightLon, setBottomRightLon] = useState("");
-    const [isValidBounds, setIsValidBounds] = useState(true);
+    const [isValidBounds, setIsValidBounds] = useState(false);
     const [selectedBounds, setSelectedBounds] = useState<Bounds | null>(null);
 
     const isPointInsideBounds = useCallback((lat: number, lon: number, bounds: Bounds) => {

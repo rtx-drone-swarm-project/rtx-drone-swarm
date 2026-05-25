@@ -169,7 +169,12 @@ def test_build_search_grid_uses_rectangular_shape_and_cell_centers_for_wide_boun
     )
 
     adjacent_lat_spacing_m = (search_grid[cols, 0] - search_grid[0, 0]) * METERS_PER_DEGREE_LAT
-    adjacent_lon_spacing_m = (search_grid[1, 1] - search_grid[0, 1]) * METERS_PER_DEGREE_LAT
+    mid_lat = (bounds["min_lat"] + bounds["max_lat"]) / 2.0
+    adjacent_lon_spacing_m = (
+        (search_grid[1, 1] - search_grid[0, 1])
+        * METERS_PER_DEGREE_LAT
+        * np.cos(np.radians(mid_lat))
+    )
 
     assert np.isclose(adjacent_lat_spacing_m, 100.0, atol=1.0)
     assert np.isclose(adjacent_lon_spacing_m, 100.0, atol=1.0)

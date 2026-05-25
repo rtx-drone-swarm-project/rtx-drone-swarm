@@ -62,14 +62,11 @@ def create_test_mission(
     return mission
 
 
-def confirm_test_mission_setup(mission_id: str, bounds: dict, grid_side: int | None = None) -> None:
+def confirm_test_mission_setup(mission_id: str, bounds: dict) -> None:
     payload = {"bounds": bounds}
-    if grid_side is not None:
-        payload["grid_side"] = grid_side
 
     response = client.post(f"/missions/{mission_id}/confirm-search-area", json=payload)
     assert response.status_code == 200
-    mission_db[mission_id].probability_grid_confirmed = True
 
 def test_read_main():
     response = client.get("/health")
@@ -330,11 +327,12 @@ def test_start_mission_works_after_both_confirmations():
 
     confirm_response = client.post(
         f"/missions/{mission_id}/confirm-search-area",
-        json={"bounds": mission_data["bounds"], "grid_side": 6},
+        json={"bounds": mission_data["bounds"]},
     )
     assert confirm_response.status_code == 200
 
-    mission_db[mission_id].probability_grid_confirmed = True
+    probability_confirm_response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
+    assert probability_confirm_response.status_code == 200
 
     start_response = client.post(f"/missions/{mission_id}/start")
     assert start_response.status_code == 200
@@ -406,7 +404,9 @@ def test_start_mission_prefers_manual_hikers_over_confirmed_probability_map():
     create_response = client.post("/missions", json=mission_data)
     assert create_response.status_code == 200
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=4)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+    probability_confirm_response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
+    assert probability_confirm_response.status_code == 200
 
     manual_hikers = [
         {"id": "manual-1", "lat": 34.01, "lon": -118.01, "found": False, "movement": "stationary"},
@@ -451,13 +451,15 @@ def test_start_mission_samples_stationary_targets_from_confirmed_probability_gri
     create_response = client.post("/missions", json=mission_data)
     assert create_response.status_code == 200
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=2)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
+
+    probability_confirm_response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
+    assert probability_confirm_response.status_code == 200
 
     mission = mission_db[mission_id]
     target_flat_index = mission.grid_shape[1] + 2
     mission.probability_grid = np.zeros(len(mission.grid), dtype=float)
     mission.probability_grid[target_flat_index] = 1.0
-    mission.probability_grid_confirmed = True
 
     monkeypatch.setattr(missions_routes.random, "randint", lambda _a, _b: 2)
     expected_cell_bounds = missions_routes._flat_grid_index_to_cell_bounds(
@@ -507,7 +509,7 @@ def test_start_mission_ignores_unconfirmed_probability_grid_and_falls_back_to_un
     create_response = client.post("/missions", json=mission_data)
     assert create_response.status_code == 200
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=2)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
 
     mission = mission_db[mission_id]
     mission.probability_grid = np.array([0.0, 0.0, 1.0, 0.0], dtype=float)
@@ -576,10 +578,7 @@ def test_confirm_search_area_initializes_grid_and_probability_state():
 
     confirm_response = client.post(
         f"/missions/{mission_id}/confirm-search-area",
-        json={
-            "bounds": mission_data["bounds"],
-            "grid_side": 7,
-        },
+        json={"bounds": mission_data["bounds"]},
     )
 
     assert confirm_response.status_code == 200
@@ -598,9 +597,9 @@ def test_confirm_search_area_initializes_grid_and_probability_state():
     assert len(payload["searchable_mask"][0]) == expected_cols
 
 
-def test_confirm_search_area_uses_target_cell_size_when_grid_side_is_omitted():
+def test_confirm_search_area_uses_target_cell_size():
     mission_data = {
-        "name": "Default Grid Side Mission",
+        "name": "Default Grid Mission",
         "bounds": {
             "min_lat": 34.0,
             "max_lat": 34.1,
@@ -625,35 +624,6 @@ def test_confirm_search_area_uses_target_cell_size_when_grid_side_is_omitted():
     expected_rows, expected_cols = choose_grid_shape(mission_data["bounds"], target_cell_size_m=100.0)
     assert payload["grid_shape"] == [expected_rows, expected_cols]
 
-
-def test_confirm_search_area_rejects_non_positive_grid_side():
-    mission_data = {
-        "name": "Invalid Grid Side Mission",
-        "bounds": {
-            "min_lat": 34.0,
-            "max_lat": 34.1,
-            "min_lon": -118.1,
-            "max_lon": -118.0,
-        },
-        "drones": [
-            {"id": "drone1", "lat": 34.05, "lon": -118.05}
-        ],
-    }
-    create_response = client.post("/missions", json=mission_data)
-    assert create_response.status_code == 200
-    mission_id = create_response.json()["id"]
-
-    confirm_response = client.post(
-        f"/missions/{mission_id}/confirm-search-area",
-        json={
-            "bounds": mission_data["bounds"],
-            "grid_side": 0,
-        },
-    )
-
-    assert confirm_response.status_code == 422
-
-
 def test_preview_probability_region_returns_cells_for_valid_rectangle():
     mission_data = {
         "name": "Preview Region Mission",
@@ -673,7 +643,7 @@ def test_preview_probability_region_returns_cells_for_valid_rectangle():
 
     confirm_response = client.post(
         f"/missions/{mission_id}/confirm-search-area",
-        json={"bounds": mission_data["bounds"], "grid_side": 5},
+        json={"bounds": mission_data["bounds"]},
     )
     assert confirm_response.status_code == 200
 
@@ -715,7 +685,7 @@ def test_preview_probability_region_does_not_modify_operator_label_grid():
 
     confirm_response = client.post(
         f"/missions/{mission_id}/confirm-search-area",
-        json={"bounds": mission_data["bounds"], "grid_side": 4},
+        json={"bounds": mission_data["bounds"]},
     )
     assert confirm_response.status_code == 200
 
@@ -786,7 +756,7 @@ def test_apply_probability_region_changes_selected_cells_to_likely_code():
     }
     create_response = client.post("/missions", json=mission_data)
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=5)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
 
     response = client.post(
         f"/missions/{mission_id}/probability-grid/apply-region",
@@ -821,7 +791,7 @@ def test_apply_probability_region_normal_over_existing_likely_resets_cells():
     }
     create_response = client.post("/missions", json=mission_data)
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=5)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
 
     rect_bounds = {
         "min_lat": 34.07,
@@ -858,7 +828,7 @@ def test_apply_probability_region_excluded_makes_selected_cells_probability_zero
     }
     create_response = client.post("/missions", json=mission_data)
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=5)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
 
     response = client.post(
         f"/missions/{mission_id}/probability-grid/apply-region",
@@ -893,7 +863,7 @@ def test_apply_probability_region_overlapping_apply_overwrites_old_labels():
     }
     create_response = client.post("/missions", json=mission_data)
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=5)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
 
     client.post(
         f"/missions/{mission_id}/probability-grid/apply-region",
@@ -938,7 +908,7 @@ def test_apply_probability_region_keeps_probability_grid_normalized_unless_all_e
     }
     create_response = client.post("/missions", json=mission_data)
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=5)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
 
     response = client.post(
         f"/missions/{mission_id}/probability-grid/apply-region",
@@ -984,7 +954,7 @@ def test_confirm_probability_grid_works_after_search_area_confirmation():
 
     confirm_response = client.post(
         f"/missions/{mission_id}/confirm-search-area",
-        json={"bounds": mission_data["bounds"], "grid_side": 5},
+        json={"bounds": mission_data["bounds"]},
     )
     assert confirm_response.status_code == 200
 
@@ -1008,7 +978,7 @@ def test_confirm_probability_grid_sets_probability_grid_confirmed_true():
     }
     create_response = client.post("/missions", json=mission_data)
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=5)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
     mission_db[mission_id].probability_grid_confirmed = False
 
     response = client.post(f"/missions/{mission_id}/probability-grid/confirm")
@@ -1029,7 +999,7 @@ def test_reopen_probability_grid_sets_probability_grid_confirmed_false_and_keeps
     }
     create_response = client.post("/missions", json=mission_data)
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=5)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
 
     apply_response = client.post(
         f"/missions/{mission_id}/probability-grid/apply-region",
@@ -1092,7 +1062,7 @@ def test_reset_probability_grid_clears_labels_and_keeps_search_area():
     }
     create_response = client.post("/missions", json=mission_data)
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=5)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
 
     apply_response = client.post(
         f"/missions/{mission_id}/probability-grid/apply-region",
@@ -1128,7 +1098,7 @@ def test_confirm_probability_grid_rejects_if_all_cells_are_excluded():
     }
     create_response = client.post("/missions", json=mission_data)
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=5)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
 
     apply_response = client.post(
         f"/missions/{mission_id}/probability-grid/apply-region",
@@ -1159,7 +1129,7 @@ def test_confirmed_probability_grid_sums_to_one():
     }
     create_response = client.post("/missions", json=mission_data)
     mission_id = create_response.json()["id"]
-    confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=5)
+    confirm_test_mission_setup(mission_id, mission_data["bounds"])
 
     apply_response = client.post(
         f"/missions/{mission_id}/probability-grid/apply-region",

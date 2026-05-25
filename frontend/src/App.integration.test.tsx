@@ -31,6 +31,19 @@ vi.mock("./components/map/MapPanel", () => ({
         <button
           type="button"
           onClick={() =>
+            props.onSelectArea({
+              min_lat: 33.6,
+              max_lat: 33.7,
+              min_lon: -117.4,
+              max_lon: -117.3
+            })
+          }
+        >
+          Select Alternate Area
+        </button>
+        <button
+          type="button"
+          onClick={() =>
             props.onSelectTemporaryRegion({
               min_lat: 33.47,
               max_lat: 33.53,
@@ -381,6 +394,88 @@ describe("App integration", () => {
       expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m1/confirm-search-area"))).toBe(true);
       expect(screen.getByText("Hold Shift and drag on the map to select a region.")).toBeTruthy();
       expect(screen.getByRole("button", { name: "Confirm Labelled Regions" })).toBeTruthy();
+    });
+  });
+
+  it("creates a new mission when the selected bounds change before confirming again", async () => {
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+
+    let missionCreateCount = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/algorithms")) {
+        return Promise.resolve({ ok: true, json: async () => ({ algorithms: [] }) });
+      }
+      if (url.endsWith("/missions") && init?.method === "POST") {
+        missionCreateCount += 1;
+        const id = missionCreateCount === 1 ? "m1" : "m2";
+        return Promise.resolve({ ok: true, json: async () => ({ id, status: "idle" }) });
+      }
+      if (url.endsWith("/missions/m1/confirm-search-area")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m1",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            grid_shape: [2, 2],
+            probability_grid: [0.25, 0.25, 0.25, 0.25],
+            search_area_confirmed: true,
+            probability_grid_confirmed: false
+          })
+        });
+      }
+      if (url.endsWith("/missions/m1/probability-grid/reset")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m1",
+            status: "idle",
+            bounds: { min_lat: 33.45, max_lat: 33.55, min_lon: -117.25, max_lon: -117.15 },
+            search_area_confirmed: true,
+            probability_grid_confirmed: false
+          })
+        });
+      }
+      if (url.endsWith("/missions/m2/confirm-search-area")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            id: "m2",
+            status: "idle",
+            bounds: { min_lat: 33.6, max_lat: 33.7, min_lon: -117.4, max_lon: -117.3 },
+            grid_shape: [2, 2],
+            probability_grid: [0.25, 0.25, 0.25, 0.25],
+            search_area_confirmed: true,
+            probability_grid_confirmed: false
+          })
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ runs: [] }) });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure Probability Map" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m1/confirm-search-area"))).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Configure Probability Map" })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Select Alternate Area" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configure Probability Map" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/missions") && init?.method === "POST")).toHaveLength(2);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/missions/m2/confirm-search-area"))).toBe(true);
     });
   });
 

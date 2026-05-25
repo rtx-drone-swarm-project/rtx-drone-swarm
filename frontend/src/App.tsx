@@ -565,12 +565,6 @@ export default function App() {
     setShowLabelledRegions(false);
   }, [clearTemporaryRegionSelection, mission?.probability_grid_confirmed, setupStage, startMission]);
 
-  const hasCustomProbabilityLabels = useMemo(() => {
-    const labelGrid = mission?.operator_label_grid;
-    if (!Array.isArray(labelGrid)) return false;
-    return labelGrid.some((row) => Array.isArray(row) && row.some((labelCode) => Number(labelCode) !== 2));
-  }, [mission?.operator_label_grid]);
-
   const probabilityMapAvailable = mission?.probability_grid_confirmed === true;
 
   const probabilityMapConfigured = setupStage !== "search_area" || mission?.probability_grid_confirmed === true;
@@ -749,7 +743,6 @@ export default function App() {
             temporaryRegionLabel={temporaryRegionLabel}
             showLabelledRegions={showLabelledRegions}
             showProbabilityHeatmap={showProbabilityHeatmap}
-            hasCustomProbabilityLabels={hasCustomProbabilityLabels}
             probabilityMapAvailable={probabilityMapAvailable}
             searchAreaEditingDisabled={searchAreaEditingDisabled}
             onTopLeftLatChange={onTopLeftLatChange}
