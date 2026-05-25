@@ -340,8 +340,9 @@ def test_start_mission_works_after_both_confirmations():
     assert start_response.status_code == 200
     payload = start_response.json()
     assert payload["status"] == "searching"
-    assert payload["grid_shape"] == [6, 6]
-    assert len(payload["grid"]) == 36
+    expected_rows, expected_cols = choose_grid_shape(mission_data["bounds"], target_cell_size_m=100.0)
+    assert payload["grid_shape"] == [expected_rows, expected_cols]
+    assert len(payload["grid"]) == expected_rows * expected_cols
 
 
 def test_start_mission_uses_supplied_hikers():
@@ -453,11 +454,23 @@ def test_start_mission_samples_stationary_targets_from_confirmed_probability_gri
     confirm_test_mission_setup(mission_id, mission_data["bounds"], grid_side=2)
 
     mission = mission_db[mission_id]
-    mission.probability_grid = np.array([0.0, 0.0, 1.0, 0.0], dtype=float)
+    target_flat_index = mission.grid_shape[1] + 2
+    mission.probability_grid = np.zeros(len(mission.grid), dtype=float)
+    mission.probability_grid[target_flat_index] = 1.0
     mission.probability_grid_confirmed = True
 
     monkeypatch.setattr(missions_routes.random, "randint", lambda _a, _b: 2)
-    sampled_values = iter([34.052, -118.076, 34.089, -118.061])
+    expected_cell_bounds = missions_routes._flat_grid_index_to_cell_bounds(
+        target_flat_index,
+        mission.bounds,
+        mission.grid_shape,
+    )
+    assert expected_cell_bounds is not None
+    lat_1 = expected_cell_bounds["min_lat"] + (expected_cell_bounds["max_lat"] - expected_cell_bounds["min_lat"]) * 0.25
+    lon_1 = expected_cell_bounds["min_lon"] + (expected_cell_bounds["max_lon"] - expected_cell_bounds["min_lon"]) * 0.25
+    lat_2 = expected_cell_bounds["min_lat"] + (expected_cell_bounds["max_lat"] - expected_cell_bounds["min_lat"]) * 0.75
+    lon_2 = expected_cell_bounds["min_lon"] + (expected_cell_bounds["max_lon"] - expected_cell_bounds["min_lon"]) * 0.75
+    sampled_values = iter([lat_1, lon_1, lat_2, lon_2])
     monkeypatch.setattr(missions_routes.random, "uniform", lambda _a, _b: next(sampled_values))
 
     start_response = client.post(f"/missions/{mission_id}/start")
@@ -465,12 +478,10 @@ def test_start_mission_samples_stationary_targets_from_confirmed_probability_gri
     targets = start_response.json()["targets"]
 
     assert len(targets) == 2
-    expected_cell_bounds = missions_routes._flat_grid_index_to_cell_bounds(2, mission.bounds, mission.grid_shape)
-    assert expected_cell_bounds is not None
-    assert targets[0]["lat"] == 34.052
-    assert targets[0]["lon"] == -118.076
-    assert targets[1]["lat"] == 34.089
-    assert targets[1]["lon"] == -118.061
+    assert targets[0]["lat"] == lat_1
+    assert targets[0]["lon"] == lon_1
+    assert targets[1]["lat"] == lat_2
+    assert targets[1]["lon"] == lon_2
     assert targets[0]["lat"] != targets[1]["lat"]
     assert targets[0]["lon"] != targets[1]["lon"]
     for target in targets:
@@ -1098,8 +1109,9 @@ def test_reset_probability_grid_clears_labels_and_keeps_search_area():
 
     assert payload["search_area_confirmed"] is True
     assert payload["probability_grid_confirmed"] is False
-    assert payload["grid_shape"] == [5, 5]
-    assert payload["operator_label_grid"] == [[2, 2, 2, 2, 2]] * 5
+    expected_rows, expected_cols = choose_grid_shape(mission_data["bounds"], target_cell_size_m=100.0)
+    assert payload["grid_shape"] == [expected_rows, expected_cols]
+    assert payload["operator_label_grid"] == [[2] * expected_cols for _ in range(expected_rows)]
     assert payload["probability_grid"] is not None
 
 
