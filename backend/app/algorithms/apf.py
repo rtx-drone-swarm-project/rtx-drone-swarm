@@ -152,7 +152,8 @@ class PotentialFieldsCoverage(BaseSearchAlgorithm):
                 # attraction target — this smooths jitter vs. chasing a single
                 # cell and naturally directs the drone toward clusters.
                 k_nearest = min(10, len(unvisited_points))
-                nearest_idx = np.argpartition(dists_to_unvisited, k_nearest)[:k_nearest]
+                kth = k_nearest - 1
+                nearest_idx = np.argpartition(dists_to_unvisited, kth)[:k_nearest]
                 cluster_center = unvisited_points[nearest_idx].mean(axis=0)
 
                 # Direction toward the cluster center

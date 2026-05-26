@@ -370,8 +370,9 @@ class VoronoiBoustrophedon(BaseSearchAlgorithm):
                 )
                 if path:
                     sweep_paths[drone_id] = path
-                    sweep_phase[drone_id] = "assisting"
-                    drone["sweep_phase"] = "assisting"
+                    phase = "assisting"
+                    sweep_phase[drone_id] = phase
+                    drone["sweep_phase"] = phase
                     logger.info(
                         "sweep | %s: assisting — took %d waypoints from busiest drone",
                         drone_id, len(path),
