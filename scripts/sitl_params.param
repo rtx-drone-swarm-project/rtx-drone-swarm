@@ -1,3 +1,34 @@
 DISARM_DELAY 0
 LOG_BACKEND_TYPE 0
 LOG_DISARMED 0
+
+BATT_MONITOR = 0
+
+# Navigation speed/accel — prevents WPNAV_SPEED defaulting to 0
+WPNAV_SPEED 1000
+WPNAV_SPEED_UP 500
+WPNAV_SPEED_DN 150
+WPNAV_ACCEL 250
+WPNAV_ACCEL_Z 100
+
+# GUIDED mode — ensure position controller accepts SET_POSITION_TARGET commands
+GUID_OPTIONS 0
+GUID_TIMEOUT 0
+
+# Loiter (used internally by GUIDED position controller)
+LOIT_SPEED 1000
+LOIT_ACC_MAX 250
+LOIT_ANG_MAX 0
+
+# Attitude controller — prevent angle limits blocking horizontal movement
+ANGLE_MAX 3000
+
+# Prevent ArduPilot from flipping out of GUIDED on large position errors
+FS_EKF_ACTION 0
+FS_GCS_ENABLE 0
+
+# Fence off — large search areas will breach a default fence and halt the drone
+FENCE_ENABLE 0
+
+# RC failsafe off — no RC in SITL, default failsafe can freeze navigation
+FS_THR_ENABLE 0
