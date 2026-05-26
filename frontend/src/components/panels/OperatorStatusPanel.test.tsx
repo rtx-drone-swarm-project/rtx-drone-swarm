@@ -62,7 +62,7 @@ describe("OperatorStatusPanel", () => {
     });
 
     expect(container.textContent).toContain("Search in progress. Monitor found hiker updates.");
-    expect(screen.getByText("02:05")).toBeTruthy();
+    expect(screen.getByText("00:02:05")).toBeTruthy();
     expect(screen.getByText("42%")).toBeTruthy();
     expect(screen.getByText("1/3 found, 2 remaining")).toBeTruthy();
     expect(screen.getByText("Drones Assigned")).toBeTruthy();

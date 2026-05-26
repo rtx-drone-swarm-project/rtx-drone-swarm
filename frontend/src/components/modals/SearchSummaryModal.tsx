@@ -1,4 +1,5 @@
 import type { MissionMetrics, Target } from "../../types/mission";
+import { formatSeconds } from "../../utils/format";
 
 type SearchSummaryModalProps = {
   isOpen: boolean;
@@ -48,7 +49,7 @@ export default function SearchSummaryModal({
                 {durationSeconds != null && durationSeconds > 0 && (
                   <>
                     <span>Mission Duration</span>
-                    <strong>{durationSeconds}s</strong>
+                    <strong>{formatSeconds(durationSeconds)}</strong>
                   </>
                 )}
                 <span>Hikers Found</span>
@@ -62,13 +63,13 @@ export default function SearchSummaryModal({
                 {metrics?.first_find_seconds != null && (
                   <>
                     <span>First Find</span>
-                    <strong>{metrics.first_find_seconds}s</strong>
+                    <strong>{formatSeconds(metrics.first_find_seconds)}</strong>
                   </>
                 )}
                 {metrics?.last_find_seconds != null && (
                   <>
                     <span>Last Find</span>
-                    <strong>{metrics.last_find_seconds}s</strong>
+                    <strong>{formatSeconds(metrics.last_find_seconds)}</strong>
                   </>
                 )}
               </div>

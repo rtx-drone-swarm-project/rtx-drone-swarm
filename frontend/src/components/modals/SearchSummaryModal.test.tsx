@@ -41,13 +41,13 @@ describe("SearchSummaryModal", () => {
     expect(screen.getByText("Hikers Found")).toBeTruthy();
     expect(screen.getByText("2/2")).toBeTruthy();
     expect(screen.getByText("Mission Duration")).toBeTruthy();
-    expect(screen.getByText("88s")).toBeTruthy();
+    expect(screen.getByText("00:01:28")).toBeTruthy();
     expect(screen.getByText("Coverage")).toBeTruthy();
     expect(screen.getByText("76.5%")).toBeTruthy();
     expect(screen.getByText("First Find")).toBeTruthy();
-    expect(screen.getByText("12s")).toBeTruthy();
+    expect(screen.getByText("00:00:12")).toBeTruthy();
     expect(screen.getByText("Last Find")).toBeTruthy();
-    expect(screen.getByText("80s")).toBeTruthy();
+    expect(screen.getByText("00:01:20")).toBeTruthy();
     expect(screen.queryByText("Avg Find")).toBeNull();
     expect(screen.queryByText("Algorithm")).toBeNull();
   });

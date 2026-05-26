@@ -337,9 +337,9 @@ describe("App integration", () => {
       expect(within(summaryDialog).getByText("Coverage")).toBeTruthy();
       expect(within(summaryDialog).getByText("84.2%")).toBeTruthy();
       expect(within(summaryDialog).getByText("First Find")).toBeTruthy();
-      expect(within(summaryDialog).getByText("30s")).toBeTruthy();
+      expect(within(summaryDialog).getByText("00:00:30")).toBeTruthy();
       expect(within(summaryDialog).getByText("Last Find")).toBeTruthy();
-      expect(within(summaryDialog).getByText("75s")).toBeTruthy();
+      expect(within(summaryDialog).getByText("00:01:15")).toBeTruthy();
     });
 
     fireEvent.click(within(summaryDialog).getByRole("button", { name: "Recall Drones" }));
