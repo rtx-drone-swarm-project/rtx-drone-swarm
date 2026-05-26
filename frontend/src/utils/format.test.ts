@@ -3,14 +3,15 @@ import { formatElapsed, formatSeconds, statusLabel } from "./format";
 
 describe("format utilities", () => {
   it("formats elapsed seconds", () => {
-    expect(formatElapsed(0)).toBe("00:00");
-    expect(formatElapsed(65)).toBe("01:05");
+    expect(formatElapsed(0)).toBe("00:00:00");
+    expect(formatElapsed(65)).toBe("00:01:05");
+    expect(formatElapsed(3661)).toBe("01:01:01");
   });
 
   it("formats optional seconds", () => {
-    expect(formatSeconds(undefined)).toBe("--:--");
-    expect(formatSeconds(-1)).toBe("--:--");
-    expect(formatSeconds(7)).toBe("00:07");
+    expect(formatSeconds(undefined)).toBe("--:--:--");
+    expect(formatSeconds(-1)).toBe("--:--:--");
+    expect(formatSeconds(7)).toBe("00:00:07");
   });
 
   it("returns operator label for mission status", () => {

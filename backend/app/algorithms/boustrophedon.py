@@ -361,6 +361,24 @@ class VoronoiBoustrophedon(BaseSearchAlgorithm):
                     sweep_phase[drone_id] = "complete"
                     drone["sweep_phase"] = "complete"
                     logger.info("sweep | %s: partition fully swept, drone idle", drone_id)
+
+                # Post-completion assistance: steal half the remaining path
+                # from the drone with the most work left so idle drones
+                # contribute to overall coverage instead of parking.
+                path = self._steal_remaining_work(
+                    drone_id, sweep_paths, sweep_phase,
+                )
+                if path:
+                    sweep_paths[drone_id] = path
+                    phase = "assisting"
+                    sweep_phase[drone_id] = phase
+                    drone["sweep_phase"] = phase
+                    logger.info(
+                        "sweep | %s: assisting — took %d waypoints from busiest drone",
+                        drone_id, len(path),
+                    )
+
+            if not path:
                 continue
 
             waypoint_map[drone_id] = (float(path[0][0]), float(path[0][1]))
@@ -370,3 +388,46 @@ class VoronoiBoustrophedon(BaseSearchAlgorithm):
             )
 
         return waypoint_map
+
+    @staticmethod
+    def _steal_remaining_work(
+        idle_drone_id: str,
+        sweep_paths: Dict[str, List[Tuple[float, float]]],
+        sweep_phase: Dict[str, str],
+    ) -> List[Tuple[float, float]]:
+        """Find the drone with the most remaining waypoints and take half its path.
+
+        This ensures idle drones don't sit around while other drones are
+        still sweeping large partitions.  The stolen segment is always the
+        *second* half so the donor keeps its immediate next waypoints and
+        the idle drone flies to a new area.
+        """
+        busiest_id: str | None = None
+        busiest_len = 0
+        for did, path in sweep_paths.items():
+            if did == idle_drone_id:
+                continue
+            phase = sweep_phase.get(did, "")
+            if phase in ("complete", "assisting") and not path:
+                continue
+            if len(path) > busiest_len:
+                busiest_len = len(path)
+                busiest_id = did
+
+        # Only steal if the donor has enough work to share (at least 6
+        # waypoints = 3 row sweeps).
+        if busiest_id is None or busiest_len < 6:
+            return []
+
+        donor_path = sweep_paths[busiest_id]
+        split_point = busiest_len // 2
+        stolen = donor_path[split_point:]
+        sweep_paths[busiest_id] = donor_path[:split_point]
+
+        logger.info(
+            "sweep | %s: donated %d waypoints to %s (%d remaining)",
+            busiest_id, len(stolen), idle_drone_id,
+            len(sweep_paths[busiest_id]),
+        )
+        return stolen
+

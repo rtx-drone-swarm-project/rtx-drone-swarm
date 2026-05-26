@@ -178,6 +178,7 @@ describe("BenchmarkPanel", () => {
       summary: {
         vaco: {
           count: 1,
+          first_find_seconds: { mean: 82, min: 82, max: 82, stddev: 0 },
           coverage_pct: { mean: 88.2, min: 88.2, max: 88.2, stddev: 0 }
         }
       }
@@ -192,6 +193,7 @@ describe("BenchmarkPanel", () => {
       expect(clientMocks.getBenchmarkRun).toHaveBeenCalledWith("bench-new");
     });
     expect(await screen.findByText("vaco")).toBeTruthy();
+    expect(screen.getByText("00:01:22 +/- 00:00:00")).toBeTruthy();
     expect(screen.getByText("88.2 +/- 0.0%")).toBeTruthy();
   });
 

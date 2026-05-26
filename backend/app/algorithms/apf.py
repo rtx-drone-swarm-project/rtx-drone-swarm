@@ -1,8 +1,27 @@
 import math
 import random
 from typing import List, Dict, Tuple
-from app.algorithms.base import BaseSearchAlgorithm
+
+import numpy as np
+
+from app.algorithms.base import BaseSearchAlgorithm, DETECTION_RADIUS, build_dense_coverage_grid
 from app.models import Mission
+
+
+def _getm(mission, key: str, default=None):
+    """Uniform attribute access for both Mission dataclass and benchmark AttrDict."""
+    if isinstance(mission, dict):
+        return mission.get(key, default)
+    return getattr(mission, key, default)
+
+
+def _setm(mission, key: str, value) -> None:
+    """Uniform attribute setter for both Mission dataclass and benchmark AttrDict."""
+    if isinstance(mission, dict):
+        mission[key] = value
+    else:
+        setattr(mission, key, value)
+
 
 class PotentialFieldsCoverage(BaseSearchAlgorithm):
     algorithm_key = "apf"
@@ -11,7 +30,23 @@ class PotentialFieldsCoverage(BaseSearchAlgorithm):
     display_order = 30
 
     def initialize(self, mission: Mission) -> None:
-        pass
+        bounds = _getm(mission, "bounds", {})
+        if not bounds:
+            return
+
+        # Build the dense coverage grid for exploration tracking.
+        dense_grid = build_dense_coverage_grid(bounds)
+        _setm(mission, "apf_dense_grid", dense_grid)
+
+        # Track which cells have been visited — namespaced to avoid conflicts
+        # with simulation.py's own coverage tracking.
+        _setm(mission, "apf_covered_cells", set())
+
+        # Per-drone last-known positions for wanderlust / stagnation detection.
+        _setm(mission, "apf_last_positions", {})
+
+        # Per-drone wanderlust multiplier — starts at 1.0, grows when stagnant.
+        _setm(mission, "apf_wanderlust", {})
 
     def get_target_waypoints(self, mission: Mission, free_drones: List[dict]) -> Dict[str, Tuple[float, float]]:
         waypoint_map = {}
@@ -20,14 +55,63 @@ class PotentialFieldsCoverage(BaseSearchAlgorithm):
 
         bounds = mission.bounds
         rng = getattr(mission, "_rng", random)
-        
+
         REPULSION_DRONE = 0.0002  # How strongly drones push each other away
         REPULSION_WALL = 0.0005   # How strongly the boundaries push drones back in
         STEP_SIZE = 0.001         # How far to place the next waypoint
+        ATTRACTION_COVERAGE = 0.0003  # Exploration pull toward unvisited cells
+        STAGNATION_RADIUS = 0.001     # If drone hasn't moved this far, increase wanderlust
+
+        # --- Lazy-init if initialize() was never called ---
+        dense_grid = _getm(mission, "apf_dense_grid")
+        if dense_grid is None:
+            self.initialize(mission)
+            dense_grid = _getm(mission, "apf_dense_grid")
+        dense_grid = np.asarray(dense_grid, dtype=float)
+
+        covered_cells = _getm(mission, "apf_covered_cells")
+        if covered_cells is None:
+            covered_cells = set()
+            _setm(mission, "apf_covered_cells", covered_cells)
+
+        last_positions = _getm(mission, "apf_last_positions")
+        if last_positions is None:
+            last_positions = {}
+            _setm(mission, "apf_last_positions", last_positions)
+
+        wanderlust = _getm(mission, "apf_wanderlust")
+        if wanderlust is None:
+            wanderlust = {}
+            _setm(mission, "apf_wanderlust", wanderlust)
+
+        # --- Coverage tracking: mark cells near each drone as visited ---
+        for drone in free_drones:
+            dlat = drone.get("lat", 0.0)
+            dlon = drone.get("lon", 0.0)
+            lat_mask = np.abs(dense_grid[:, 0] - dlat) <= DETECTION_RADIUS
+            lon_mask = np.abs(dense_grid[:, 1] - dlon) <= DETECTION_RADIUS
+            candidates = np.where(lat_mask & lon_mask)[0]
+            if len(candidates) > 0:
+                sub = dense_grid[candidates]
+                within = candidates[
+                    np.hypot(sub[:, 0] - dlat, sub[:, 1] - dlon) <= DETECTION_RADIUS
+                ]
+                covered_cells.update(int(i) for i in within)
+
+        # --- Pre-compute unvisited cell indices and positions ---
+        all_indices = np.arange(len(dense_grid))
+        covered_mask = np.zeros(len(dense_grid), dtype=bool)
+        if covered_cells:
+            covered_arr = np.array(list(covered_cells), dtype=int)
+            covered_mask[covered_arr] = True
+        unvisited_mask = ~covered_mask
+        unvisited_indices = all_indices[unvisited_mask]
+        unvisited_points = dense_grid[unvisited_mask] if len(unvisited_indices) > 0 else np.empty((0, 2))
 
         for i, drone in enumerate(free_drones):
             dlat = drone.get("lat", 0.0)
             dlon = drone.get("lon", 0.0)
+            drone_id = drone["id"]
 
             force_lat = 0.0
             force_lon = 0.0
@@ -57,11 +141,52 @@ class PotentialFieldsCoverage(BaseSearchAlgorithm):
             force_lon -= REPULSION_WALL / (dist_east**2)   # Push west from east wall
             force_lon += REPULSION_WALL / (dist_west**2)   # Push east from west wall
 
-            # 3. Add a tiny bit of random jitter so they don't get stuck in a perfect tie
+            # 3. Exploration attraction: pull toward nearest unvisited cluster
+            if len(unvisited_points) > 0:
+                # Find the nearest unvisited cell to this drone
+                dists_to_unvisited = np.hypot(
+                    unvisited_points[:, 0] - dlat,
+                    unvisited_points[:, 1] - dlon,
+                )
+                # Use the centroid of the K nearest unvisited cells as the
+                # attraction target — this smooths jitter vs. chasing a single
+                # cell and naturally directs the drone toward clusters.
+                k_nearest = min(10, len(unvisited_points))
+                kth = k_nearest - 1
+                nearest_idx = np.argpartition(dists_to_unvisited, kth)[:k_nearest]
+                cluster_center = unvisited_points[nearest_idx].mean(axis=0)
+
+                # Direction toward the cluster center
+                attract_dlat = cluster_center[0] - dlat
+                attract_dlon = cluster_center[1] - dlon
+                attract_dist = math.hypot(attract_dlat, attract_dlon)
+
+                if attract_dist > 1e-9:
+                    # Wanderlust multiplier: grows when the drone is stagnant
+                    wl = wanderlust.get(drone_id, 1.0)
+                    attract_mag = ATTRACTION_COVERAGE * wl
+                    force_lat += attract_mag * (attract_dlat / attract_dist)
+                    force_lon += attract_mag * (attract_dlon / attract_dist)
+
+            # 4. Update wanderlust: if drone hasn't moved far, ramp up exploration
+            last_pos = last_positions.get(drone_id)
+            if last_pos is not None:
+                moved = math.hypot(dlat - last_pos[0], dlon - last_pos[1])
+                if moved < STAGNATION_RADIUS:
+                    # Drone is stagnant — increase wanderlust (capped at 5x)
+                    wanderlust[drone_id] = min(5.0, wanderlust.get(drone_id, 1.0) + 0.1)
+                else:
+                    # Drone is moving — decay wanderlust back toward 1.0
+                    wanderlust[drone_id] = max(1.0, wanderlust.get(drone_id, 1.0) - 0.05)
+            else:
+                wanderlust[drone_id] = 1.0
+            last_positions[drone_id] = (dlat, dlon)
+
+            # 5. Add a tiny bit of random jitter so they don't get stuck in a perfect tie
             force_lat += rng.uniform(-0.0001, 0.0001)
             force_lon += rng.uniform(-0.0001, 0.0001)
 
-            # 4. Calculate the final waypoint coordinate
+            # 6. Calculate the final waypoint coordinate
             force_mag = math.hypot(force_lat, force_lon)
             if force_mag > 0:
                 step_lat = (force_lat / force_mag) * STEP_SIZE

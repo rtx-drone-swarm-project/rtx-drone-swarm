@@ -136,7 +136,10 @@ def test_pmv_posterior_decays_after_scan():
 
 def test_moving_profile_sigma_scales_with_bounds():
     small = {"min_lat": 0.0, "max_lat": 0.02, "min_lon": 0.0, "max_lon": 0.02}
+    six_km = {"min_lat": 0.0, "max_lat": 0.054, "min_lon": 0.0, "max_lon": 0.054}
+    ten_km = {"min_lat": 0.0, "max_lat": 0.09, "min_lon": 0.0, "max_lon": 0.09}
     large = {"min_lat": 0.0, "max_lat": 0.10, "min_lon": 0.0, "max_lon": 0.10}
+    twelve_km = {"min_lat": 0.0, "max_lat": 0.108, "min_lon": 0.0, "max_lon": 0.108}
 
     # Tiny bounds may fall to the floor; the floor itself must be respected.
     assert _moving_profile_sigma("wandering_hikers", small) >= DIFFUSE_SIGMA_DEG
@@ -148,6 +151,17 @@ def test_moving_profile_sigma_scales_with_bounds():
     # along the full diagonal of the bounds.
     assert _moving_profile_sigma("corridor_route", large) > _moving_profile_sigma(
         "wandering_hikers", large
+    )
+    # But on 6 km-equivalent bounds the old detection-radius floor was already
+    # sufficient; applying the large-map corridor sigma there over-diffuses the
+    # diagonal prior and hurts full-success rate.
+    assert math.isclose(
+        _moving_profile_sigma("corridor_route", six_km),
+        DIFFUSE_SIGMA_DEG,
+    )
+    assert _moving_profile_sigma("corridor_route", ten_km) > DIFFUSE_SIGMA_DEG
+    assert _moving_profile_sigma("corridor_route", twelve_km) > _moving_profile_sigma(
+        "corridor_route", ten_km
     )
 
 

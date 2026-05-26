@@ -9,11 +9,12 @@ import type {
   Bounds
 } from "../../types/mission";
 import type { BenchmarkProgressMessage } from "../../types/ws";
+import { formatSeconds } from "../../utils/format";
 import CollapsibleSection from "../common/CollapsibleSection";
 
-const METRICS: { key: string; label: string; suffix?: string }[] = [
-  { key: "first_find_seconds", label: "First Find", suffix: "s" },
-  { key: "avg_find_seconds", label: "Avg Find", suffix: "s" },
+const METRICS: { key: string; label: string; suffix?: string; format?: (value: number) => string }[] = [
+  { key: "first_find_seconds", label: "First Find", format: formatSeconds },
+  { key: "avg_find_seconds", label: "Avg Find", format: formatSeconds },
   { key: "coverage_pct", label: "Coverage", suffix: "%" },
   { key: "redundant_coverage_pct", label: "Overlap", suffix: "%" },
   { key: "coverage_per_drone_second", label: "Cov/Drone/s" }
@@ -47,10 +48,13 @@ function metricStats(value: unknown): BenchmarkMetricStats | null {
   };
 }
 
-function formatMetric(stats: BenchmarkMetricStats | null, suffix = "") {
+function formatMetric(stats: BenchmarkMetricStats | null, suffix = "", format?: (value: number) => string) {
   if (!stats || stats.mean == null) return "--";
-  const spread = stats.stddev != null ? ` +/- ${stats.stddev.toFixed(1)}` : "";
-  return `${stats.mean.toFixed(stats.mean < 1 ? 3 : 1)}${spread}${suffix}`;
+  const mean = format ? format(stats.mean) : stats.mean.toFixed(stats.mean < 1 ? 3 : 1);
+  const spread = stats.stddev != null
+    ? ` +/- ${format ? format(stats.stddev) : stats.stddev.toFixed(1)}`
+    : "";
+  return `${mean}${spread}${suffix}`;
 }
 
 function scenarioLabel(profileKey: string | undefined, profiles: BenchmarkScenarioProfile[]) {
@@ -355,7 +359,7 @@ export default function BenchmarkPanel({
                     <th>{algorithm}</th>
                     {METRICS.map((metric) => (
                       <td key={metric.key}>
-                        {formatMetric(metricStats(metrics[metric.key]), metric.suffix)}
+                        {formatMetric(metricStats(metrics[metric.key]), metric.suffix, metric.format)}
                       </td>
                     ))}
                   </tr>
