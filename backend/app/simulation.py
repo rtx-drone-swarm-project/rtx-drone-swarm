@@ -169,6 +169,11 @@ def _send_live_drone_gotos(mission: Mission, live_drone_ids: set[str], waypoint_
             skipped_not_dispatchable += 1
             continue
         state = airborne_states.get(sysid, {})
+
+        if state.get("mode") not in ("GUIDED", 4, "4"):
+            logger.warning(f"Drone {sysid} dropped into {state.get('mode')} mode!")
+            sitl_bridge.swarm.set_mode_all("GUIDED")
+        
         # Some paths keep altitude on the mission drone record rather than the
         # latest SITL state, so use the higher of the two when deciding whether
         # the drone is safely airborne.
