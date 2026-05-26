@@ -335,7 +335,34 @@ class InfotaxisSearch(BaseSearchAlgorithm):
             overlap_weight = self._overlap_weights(candidate_points, planned_points)
             info_gain      = _infotaxis_weights(posterior, candidate_indices, grid)
 
-            scores = info_gain * overlap_weight * travel_weight
+            # ---------------------------------------------------------
+            # NEW: HEADING ALIGNMENT (FORWARD BIAS)
+            # ---------------------------------------------------------
+            # 1. Get the drone's current heading in degrees (0 = North, 90 = East)
+            # Check what key your telemetry uses ('hdg' or 'heading')
+            hdg_deg = float(drone.get("hdg", drone.get("heading", 0.0)))
+            hdg_rad = math.radians(hdg_deg)
+            
+            # 2. Convert heading to a 2D directional vector [dLat, dLon]
+            # North is +Lat (cos), East is +Lon (sin)
+            drone_vec = np.array([math.cos(hdg_rad), math.sin(hdg_rad)])
+            
+            # 3. Calculate vectors from the drone to all candidate points
+            cand_vecs = candidate_points - pos
+            cand_dists = np.linalg.norm(cand_vecs, axis=1, keepdims=True)
+            
+            # Avoid divide-by-zero for points exactly where the drone is
+            safe_dists = np.where(cand_dists == 0, EPS, cand_dists)
+            cand_vecs_normalized = cand_vecs / safe_dists
+            
+            # 4. Dot product gives alignment: 1.0 (ahead), 0.0 (90 deg turn), -1.0 (behind)
+            alignment = np.dot(cand_vecs_normalized, drone_vec)
+            
+            # 5. Scale from [-1, 1] to a weight multiplier [0.1, 1.0]
+            # This makes forward points worth 100%, and backward points worth only 10%
+            heading_weight = np.clip((alignment + 1.0) / 2.0, 0.1, 1.0)
+
+            scores = info_gain * overlap_weight * travel_weight * heading_weight
 
             # If overlap avoidance zeroes everything out, relax it.
             if float(scores.max(initial=0.0)) <= EPS:
@@ -348,6 +375,7 @@ class InfotaxisSearch(BaseSearchAlgorithm):
             planned_points.append(waypoint)
 
         _setm(mission, "itx_P", posterior)
+        
         return waypoints
 
 
