@@ -5,30 +5,6 @@ Infotaxis scores by expected information gain
 
 Built off current PMV implementation.
 
-Changes from PMV
-----------------
-1. Scoring function — info_gain replaces probability_weight.
-   H(p_detect) where p_detect uses the FULL grid posterior (not just
-   partition candidates) so the signal is meaningful even on a flat prior.
-
-2. Normalised info_gain — divided by its own max each tick so entropy signal
-   spans [0, 1] and is not drowned by travel_weight on flat priors.
-
-3. Soft overlap avoidance — exponential decay penalty (floor 0.3) instead of
-   hard zero, so frontier cells adjacent to another drone's waypoint are
-   discouraged but not blocked. Prevents zig-zagging.
-
-4. No partitioning hard walls — depleted drones search the full live grid.
-
-5. No frozen drones — info_gain never collapses to zero while unsearched
-   cells remain.
-
-6. Global hotspot logic removed — infotaxis drives to the frontier organically.
-
-No heading term — heading bias contradicts infotaxis logic. Infotaxis ignores
-current direction and goes wherever reduces uncertainty most. The small
-direction changes infotaxis makes tick-to-tick are correct behaviour, not
-noise — they reflect the frontier shifting as the posterior updates.
 """
 
 from __future__ import annotations
