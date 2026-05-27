@@ -2923,6 +2923,50 @@ def test_benchmark_report_markdown_route_includes_pmv_comparison(tmp_path, monke
     assert "PMV benchmark priors are profile-based" in response.text
 
 
+def test_benchmark_report_json_and_csv_routes_return_chart_ready_summary(tmp_path, monkeypatch):
+    import app.benchmark_db as benchmark_db
+
+    monkeypatch.setattr(benchmark_db, "DB_PATH", tmp_path / "benchmarks.db")
+    request = {
+        "algorithms": ["sweep", "pmv"],
+        "iterations": 1,
+        "bounds": {"min_lat": 0.0, "max_lat": 0.01, "min_lon": 0.0, "max_lon": 0.01},
+        "drone_count": 1,
+        "target_count": 1,
+        "timeout_seconds": 5,
+        "scenario_profile": "edge_targets",
+    }
+    benchmark_db.create_run("bench-report-json-test", request, total_trials=2)
+    benchmark_db.insert_trial(_benchmark_trial_row("bench-report-json-test", "sweep"))
+    pmv_row = _benchmark_trial_row("bench-report-json-test", "pmv")
+    pmv_row["targets_found"] = 0
+    pmv_row["status"] = "timeout"
+    pmv_row["first_find_seconds"] = None
+    benchmark_db.insert_trial(pmv_row)
+    benchmark_db.finish_run("bench-report-json-test", "complete")
+
+    response = client.get("/benchmark/bench-report-json-test/report")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == "bench-report-json-test"
+    assert payload["metadata"]["scenario_profiles"] == ["uniform_random"]
+    assert payload["metadata"]["notes"]
+    assert payload["summary"][0]["algorithm"] == "sweep"
+    assert payload["summary"][0]["success_rate_pct"] == 100.0
+    assert payload["summary"][1]["algorithm"] == "pmv"
+    assert payload["summary"][1]["timeout_rate_pct"] == 100.0
+    assert payload["series"]["success_rate_pct"][0]["algorithm"] == "sweep"
+    assert payload["outliers"][0]["algorithm"] == "pmv"
+
+    csv_response = client.get("/benchmark/bench-report-json-test/report.csv")
+
+    assert csv_response.status_code == 200
+    assert "text/csv" in csv_response.headers["content-type"]
+    assert "success_rate_pct" in csv_response.text
+    assert "pmv" in csv_response.text
+
+
 def test_benchmark_report_markdown_route_404s_for_missing_run(tmp_path, monkeypatch):
     import app.benchmark_db as benchmark_db
 

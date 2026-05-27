@@ -138,6 +138,7 @@ describe("missionClient", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ run_id: "b1", status: "running" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ run_id: "b1", status: "complete" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ run_id: "b1", status: "complete", metadata: {}, summary: [] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ runs: [{ run_id: "b1" }] }) })
       .mockResolvedValueOnce({
         ok: true,
@@ -158,6 +159,7 @@ describe("missionClient", () => {
       scenario_profile: "uniform_random"
     });
     await client.getBenchmarkRun("b1");
+    await client.getBenchmarkReport("b1");
     await client.listBenchmarkRuns();
     const scenarios = await client.listBenchmarkScenarios();
 
@@ -178,8 +180,9 @@ describe("missionClient", () => {
       })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(2, "http://localhost:8000/benchmark/b1", undefined);
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "http://localhost:8000/benchmark/runs", undefined);
-    expect(fetchMock).toHaveBeenNthCalledWith(4, "http://localhost:8000/benchmark/scenarios", undefined);
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "http://localhost:8000/benchmark/b1/report", undefined);
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "http://localhost:8000/benchmark/runs", undefined);
+    expect(fetchMock).toHaveBeenNthCalledWith(5, "http://localhost:8000/benchmark/scenarios", undefined);
     expect(scenarios.scenarios[0].key).toBe("uniform_random");
   });
 

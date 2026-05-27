@@ -7,7 +7,6 @@ import DroneModal from "./components/modals/DroneModal";
 import HikerModal from "./components/modals/HikerModal";
 import SearchSummaryModal from "./components/modals/SearchSummaryModal";
 import ActionsPanel from "./components/panels/ActionsPanel";
-import BenchmarkPanel from "./components/panels/BenchmarkPanel";
 import FoundHikersPanel from "./components/panels/FoundHikersPanel";
 import HikerSetupPanel from "./components/panels/HikerSetupPanel";
 import LegendPanel from "./components/panels/LegendPanel";
@@ -32,7 +31,6 @@ import type {
   ValidDrone
 } from "./types/mission";
 import type {
-  BenchmarkProgressMessage,
   MissionProgressMessage,
   MissionStatus,
   MissionStatusMessage,
@@ -77,7 +75,6 @@ export default function App() {
   const [algorithmOptions, setAlgorithmOptions] = useState<AlgorithmMetadata[]>(DEFAULT_ALGORITHM_OPTIONS);
   const [completionElapsedSeconds, setCompletionElapsedSeconds] = useState<number>(0);
   const [completedMetrics, setCompletedMetrics] = useState<MissionMetrics | null>(null);
-  const [benchmarkProgress, setBenchmarkProgress] = useState<BenchmarkProgressMessage | null>(null);
   const [pmvHeatmap, setPmvHeatmap] = useState<PmvHeatmapMessage | null>(null);
   const [placedHikers, setPlacedHikers] = useState<PlacedHiker[]>([]);
   const [selectedHikerId, setSelectedHikerId] = useState<string | null>(null);
@@ -441,8 +438,7 @@ export default function App() {
     onMissionStatus,
     onMissionProgress,
     onTargetFound,
-    onPmvHeatmap,
-    onBenchmarkProgress: setBenchmarkProgress
+    onPmvHeatmap
   });
 
   const missionActive = missionStatus !== "idle" && missionStatus !== "mission_complete";
@@ -738,13 +734,6 @@ export default function App() {
             selectedBounds={selectedBounds}
             targets={targets}
             telemetryMode={telemetryMode}
-          />
-          <BenchmarkPanel
-            apiBase={apiBase}
-            selectedBounds={selectedBounds}
-            validDroneCount={validDroneCount}
-            progressMessage={benchmarkProgress}
-            algorithmOptions={algorithmOptions}
           />
           <LegendPanel />
         </aside>

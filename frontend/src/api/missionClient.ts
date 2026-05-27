@@ -3,6 +3,7 @@ import type {
   AlgorithmMetadata,
   ApplyProbabilityRegionResponse,
   BenchmarkRequestPayload,
+  BenchmarkReport,
   BenchmarkRun,
   BenchmarkScenarioProfile,
   MissionCreateRequest,
@@ -49,6 +50,7 @@ export type MissionApiClient = {
   startBenchmark: (payload: BenchmarkRequestPayload) => Promise<BenchmarkRun>;
   stopBenchmark: (runId: string) => Promise<BenchmarkRun | { run_id: string; stopping: boolean }>;
   getBenchmarkRun: (runId: string) => Promise<BenchmarkRun>;
+  getBenchmarkReport: (runId: string) => Promise<BenchmarkReport>;
   listBenchmarkRuns: () => Promise<{ runs: BenchmarkRun[] }>;
   listBenchmarkScenarios: () => Promise<{ scenarios: BenchmarkScenarioProfile[] }>;
   recallMission: (missionId: string | number) => Promise<MissionRecord>;
@@ -146,6 +148,9 @@ export function createMissionClient(apiBase: string): MissionApiClient {
 
     getBenchmarkRun: (runId) =>
       requestJson<BenchmarkRun>(`${apiBase}/benchmark/${runId}`),
+
+    getBenchmarkReport: (runId) =>
+      requestJson<BenchmarkReport>(`${apiBase}/benchmark/${runId}/report`),
 
     listBenchmarkRuns: () => requestJson<{ runs: BenchmarkRun[] }>(`${apiBase}/benchmark/runs`),
 

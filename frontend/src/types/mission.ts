@@ -87,6 +87,55 @@ export type BenchmarkRun = {
   error?: string | null;
 };
 
+export type BenchmarkReportSummaryRow = {
+  algorithm: string;
+  trials: number;
+  success_rate_pct?: number | null;
+  partial_success_rate_pct?: number | null;
+  timeout_rate_pct?: number | null;
+  total_missed_hikers?: number | null;
+  mean_targets_found?: number | null;
+  median_first_find_seconds?: number | null;
+  p90_first_find_seconds?: number | null;
+  mean_first_find_seconds?: number | null;
+  mean_last_find_seconds?: number | null;
+  mean_coverage_pct?: number | null;
+  mean_redundant_coverage_pct?: number | null;
+  mean_coverage_per_drone_second?: number | null;
+  mean_drone_seconds_total?: number | null;
+  mean_search_effort_per_find?: number | null;
+  mean_distance_per_find_m?: number | null;
+  t50_coverage_reach_pct?: number | null;
+  mean_t50_coverage_seconds?: number | null;
+  t80_coverage_reach_pct?: number | null;
+  mean_t80_coverage_seconds?: number | null;
+  t95_coverage_reach_pct?: number | null;
+  mean_t95_coverage_seconds?: number | null;
+};
+
+export type BenchmarkReport = {
+  run_id?: string;
+  status: string;
+  created_at?: string | null;
+  completed_at?: string | null;
+  completed_trials: number;
+  total_trials: number;
+  request?: BenchmarkRun["request"];
+  metadata: {
+    scenario_profiles: string[];
+    movement_mix?: { moving_profiles: number; stationary_profiles: number };
+    bounds?: Bounds | null;
+    bounds_area_km2?: number | null;
+    drone_count?: number | null;
+    target_count?: number | null;
+    timeout_seconds?: number | null;
+    notes?: string[];
+  };
+  summary: BenchmarkReportSummaryRow[];
+  series?: Record<string, unknown>;
+  outliers?: Array<Record<string, unknown>>;
+};
+
 export type BenchmarkRequestPayload = {
   algorithms: string[];
   iterations: number;

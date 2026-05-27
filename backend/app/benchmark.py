@@ -149,7 +149,7 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
                     static_targets=not bool(scenario["targets_move"]),
                     timeout_seconds=request.timeout_seconds,
                 )
-                insert_trial(trial)
+                await asyncio.to_thread(insert_trial, trial)
                 trials.append(trial)
                 completed += 1
                 await manager.broadcast(
@@ -162,8 +162,8 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
                     }
                 )
 
-        summary = aggregate_trials(trials)
-        finish_run(run_id, "complete", summary=summary)
+        summary = await asyncio.to_thread(aggregate_trials, trials)
+        await asyncio.to_thread(finish_run, run_id, "complete", summary)
         await manager.broadcast(
             {
                 "type": "benchmark_progress",
@@ -175,8 +175,8 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
         )
         return summary
     except asyncio.CancelledError:
-        summary = aggregate_trials(trials)
-        finish_run(run_id, "cancelled", summary=summary, error="Stopped by user")
+        summary = await asyncio.to_thread(aggregate_trials, trials)
+        await asyncio.to_thread(finish_run, run_id, "cancelled", summary, "Stopped by user")
         await manager.broadcast(
             {
                 "type": "benchmark_progress",
@@ -188,7 +188,8 @@ async def run_benchmark_job(run_id: str, request: BenchmarkRequest) -> dict[str,
         )
         return summary
     except Exception as exc:
-        finish_run(run_id, "failed", summary=aggregate_trials(trials), error=str(exc))
+        summary = await asyncio.to_thread(aggregate_trials, trials)
+        await asyncio.to_thread(finish_run, run_id, "failed", summary, str(exc))
         await manager.broadcast(
             {
                 "type": "benchmark_progress",
@@ -279,6 +280,8 @@ async def run_headless_trial(
         if all_targets_found:
             mission["status"] = "complete"
             break
+        if mission["elapsed_seconds"] % 5 == 0:
+            await asyncio.sleep(0)
 
     elapsed = int(mission.get("elapsed_seconds", 0))
     grid_size = int(mission.get("_dense_grid_size") or len(dense_grid))

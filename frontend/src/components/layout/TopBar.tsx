@@ -1,13 +1,15 @@
 type TopBarProps = {
-  progress: number;
+  progress?: number;
+  title?: string;
+  showProgress?: boolean;
 };
 
-export default function TopBar({ progress }: TopBarProps) {
+export default function TopBar({ progress = 0, title = "Swarm Control", showProgress = true }: TopBarProps) {
   const clampedProgress = Math.min(100, progress);
 
   return (
     <header className="topbar">
-      <div className="title-group">
+      <a className="title-group title-link" href="/" aria-label="Go to Swarm Control home">
         <svg 
           className="title-icon" 
           viewBox="0 0 24 24" 
@@ -36,16 +38,22 @@ export default function TopBar({ progress }: TopBarProps) {
           <path d="M14 14l4 4" />
           <path d="M15 18h6" />
         </svg>
-        <h1>Swarm Control</h1>
-      </div>
+        <h1>{title}</h1>
+      </a>
       
-      {/* Right side: Progress Group */}
-      <div className="progress-group">
-        <div className="progress-label">{clampedProgress.toFixed(1)}%</div>
-        <div className="progress-bar">
-          <div className="progress-fill" style={{ width: `${clampedProgress}%` }} />
+      {showProgress ? (
+        <div className="progress-group">
+          <a className="topbar-pill-link" href="/metrics">Metrics</a>
+          <div className="progress-label">{clampedProgress.toFixed(1)}%</div>
+          <div className="progress-bar">
+            <div className="progress-fill" style={{ width: `${clampedProgress}%` }} />
+          </div>
         </div>
-      </div>
+      ) : (
+        <nav className="topbar-links" aria-label="Primary">
+          <a href="/">Home</a>
+        </nav>
+      )}
     </header>
   );
 }
