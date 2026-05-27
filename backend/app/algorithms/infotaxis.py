@@ -27,7 +27,7 @@ from app.algorithms.priors import build_prior, normalize_probability
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
-# Constants — identical to pmv.py
+# Constants
 # --------------------------------------------------------------------------
 DETECTION_PROB                  = 0.9
 DIFFUSE_INTERVAL_S              = 10
@@ -63,9 +63,6 @@ def _setm(mission, key: str, value) -> None:
         setattr(mission, key, value)
 
 
-# --------------------------------------------------------------------------
-# Posterior helpers — copied from pmv.py
-# --------------------------------------------------------------------------
 
 def _scanned_indices(grid: np.ndarray, drones: list[dict]) -> np.ndarray:
     scanned: set[int] = set()

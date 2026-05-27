@@ -171,7 +171,7 @@ def _send_live_drone_gotos(mission: Mission, live_drone_ids: set[str], waypoint_
         state = airborne_states.get(sysid, {})
 
         if state.get("mode") not in ("GUIDED", 4, "4"):
-            logger.warning(f"Drone {sysid} dropped into {state.get('mode')} mode!")
+            logger.info(f"Drone {sysid} dropped into {state.get('mode')} mode!")
             sitl_bridge.swarm.set_mode_all("GUIDED")
         
         # Some paths keep altitude on the mission drone record rather than the
