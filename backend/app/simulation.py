@@ -40,6 +40,8 @@ SPEED = 0.0001
 HIKER_SPEED = 0.000015
 # Distance threshold for considering a drone close enough to stop moving toward a point.
 TARGET_STOP_RADIUS = 0.00015
+GUIDED_MODE_VALUES = {"GUIDED", 4, "4"}
+GUIDED_RECOVERY_INTERVAL_SECONDS = 5.0
 
 
 async def _emit_target_found(mission: Mission, target: dict, drone_id: Optional[str] = None):
@@ -161,6 +163,12 @@ def _send_live_drone_gotos(mission: Mission, live_drone_ids: set[str], waypoint_
     skipped_not_dispatchable = 0
     skipped_not_airborne = 0
     skipped_no_destination = 0
+    now = time.monotonic()
+    last_guided_recoveries = getattr(mission, "_last_guided_mode_recoveries", None)
+    if last_guided_recoveries is None:
+        last_guided_recoveries = {}
+        setattr(mission, "_last_guided_mode_recoveries", last_guided_recoveries)
+
     for drone in mission.drones:
         if str(drone.get("id")) not in live_drone_ids:
             continue
@@ -169,11 +177,14 @@ def _send_live_drone_gotos(mission: Mission, live_drone_ids: set[str], waypoint_
             skipped_not_dispatchable += 1
             continue
         state = airborne_states.get(sysid, {})
+        mode = state.get("mode")
+        if mode is not None and mode not in GUIDED_MODE_VALUES:
+            last_recovery = float(last_guided_recoveries.get(sysid, 0.0))
+            if now - last_recovery >= GUIDED_RECOVERY_INTERVAL_SECONDS:
+                logger.info("Drone %s dropped into %s mode; requesting GUIDED", sysid, mode)
+                sitl_bridge.send_mode(sysid, "GUIDED")
+                last_guided_recoveries[sysid] = now
 
-        if state.get("mode") not in ("GUIDED", 4, "4"):
-            logger.info(f"Drone {sysid} dropped into {state.get('mode')} mode!")
-            sitl_bridge.swarm.set_mode_all("GUIDED")
-        
         # Some paths keep altitude on the mission drone record rather than the
         # latest SITL state, so use the higher of the two when deciding whether
         # the drone is safely airborne.

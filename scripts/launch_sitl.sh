@@ -11,8 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PARAM_FILE="${2:-$SCRIPT_DIR/sitl_params.param}"
 SITL_LOCATION="${SITL_LOCATION:-CMAC}"
-SITL_ENABLE_MAP="${SITL_ENABLE_MAP:-1}"
-SITL_ENABLE_MAVPROXY="${SITL_ENABLE_MAVPROXY:-1}"
+SITL_WIPE="${SITL_WIPE:-1}"
+SITL_ENABLE_MAP="${SITL_ENABLE_MAP:-0}"
+SITL_ENABLE_MAVPROXY="${SITL_ENABLE_MAVPROXY:-0}"
 SITL_MAVPROXY_CMD="${SITL_MAVPROXY_CMD:-}"
 
 
@@ -41,20 +42,22 @@ SIM_VEHICLE_ARGS=(
   --location "$SITL_LOCATION"
   --auto-offset-line 90,10
   --speedup 2
-  --wipe
-  --no-mavproxy
   --add-param-file "$PARAM_FILE"
 )
 
-#if [[ "$SITL_ENABLE_MAP" == "1" ]]; then
-  #SIM_VEHICLE_ARGS+=(--map)
-#fi
+if [[ "$SITL_WIPE" == "1" ]]; then
+  SIM_VEHICLE_ARGS+=(--wipe)
+fi
 
-#if [[ "$SITL_ENABLE_MAVPROXY" != "1" ]]; then
-  #SIM_VEHICLE_ARGS+=(--no-mavproxy)
-#elif [[ -n "$SITL_MAVPROXY_CMD" ]]; then
-  #SIM_VEHICLE_ARGS+=(--mavproxy-args="--cmd=\"$SITL_MAVPROXY_CMD\"")
-#fi
+if [[ "$SITL_ENABLE_MAP" == "1" ]]; then
+  SIM_VEHICLE_ARGS+=(--map)
+fi
+
+if [[ "$SITL_ENABLE_MAVPROXY" != "1" ]]; then
+  SIM_VEHICLE_ARGS+=(--no-mavproxy)
+elif [[ -n "$SITL_MAVPROXY_CMD" ]]; then
+  SIM_VEHICLE_ARGS+=(--mavproxy-args="--cmd=\"$SITL_MAVPROXY_CMD\"")
+fi
 
 # Start SITL with separate TCP outputs for each drone.
 # exec replaces this shell so Docker signals (SIGTERM/SIGINT) go directly to sim_vehicle.py.

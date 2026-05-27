@@ -158,6 +158,70 @@ def _diffuse_probability(
     return normalize_probability(flat)
 
 
+def _grid_matrix_indices(grid: np.ndarray, values: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    unique_lats = np.unique(np.round(grid[:, 0], 12))
+    unique_lons = np.unique(np.round(grid[:, 1], 12))
+    if len(unique_lats) * len(unique_lons) != len(values):
+        return None
+
+    lat_index = {value: idx for idx, value in enumerate(unique_lats.tolist())}
+    lon_index = {value: idx for idx, value in enumerate(unique_lons.tolist())}
+    lat_ids = np.array([lat_index[round(float(lat), 12)] for lat in grid[:, 0]], dtype=int)
+    lon_ids = np.array([lon_index[round(float(lon), 12)] for lon in grid[:, 1]], dtype=int)
+    return unique_lats, unique_lons, lat_ids, lon_ids
+
+
+def _disk_local_mass_grid(posterior: np.ndarray, grid: np.ndarray) -> np.ndarray | None:
+    grid_parts = _grid_matrix_indices(grid, posterior)
+    if grid_parts is None:
+        return None
+
+    unique_lats, unique_lons, lat_ids, lon_ids = grid_parts
+    matrix = np.zeros((len(unique_lats), len(unique_lons)), dtype=float)
+    matrix[lat_ids, lon_ids] = posterior
+
+    lat_step = _axis_step(unique_lats, DETECTION_RADIUS)
+    lon_step = _axis_step(unique_lons, DETECTION_RADIUS)
+    lat_radius = max(1, int(math.ceil(DETECTION_RADIUS / max(lat_step, EPS))))
+    lon_radius = max(1, int(math.ceil(DETECTION_RADIUS / max(lon_step, EPS))))
+
+    padded = np.pad(
+        matrix,
+        ((lat_radius, lat_radius), (lon_radius, lon_radius)),
+        mode="constant",
+        constant_values=0.0,
+    )
+    local_mass = np.zeros_like(matrix)
+    for d_lat in range(-lat_radius, lat_radius + 1):
+        for d_lon in range(-lon_radius, lon_radius + 1):
+            if math.hypot(d_lat * lat_step, d_lon * lon_step) > DETECTION_RADIUS:
+                continue
+            row_start = lat_radius + d_lat
+            col_start = lon_radius + d_lon
+            local_mass += padded[
+                row_start: row_start + matrix.shape[0],
+                col_start: col_start + matrix.shape[1],
+            ]
+
+    return local_mass[lat_ids, lon_ids]
+
+
+def _chunked_local_mass(
+    posterior: np.ndarray,
+    candidate_indices: np.ndarray,
+    grid: np.ndarray,
+    chunk_size: int = 512,
+) -> np.ndarray:
+    local_mass = np.zeros(len(candidate_indices), dtype=float)
+    for start in range(0, len(candidate_indices), chunk_size):
+        stop = min(start + chunk_size, len(candidate_indices))
+        candidate_pts = grid[candidate_indices[start:stop]]
+        diff = candidate_pts[:, np.newaxis, :] - grid[np.newaxis, :, :]
+        dists = np.hypot(diff[:, :, 0], diff[:, :, 1])
+        local_mass[start:stop] = (posterior[np.newaxis, :] * (dists <= DETECTION_RADIUS)).sum(axis=1)
+    return local_mass
+
+
 # --------------------------------------------------------------------------
 # Infotaxis scoring
 # --------------------------------------------------------------------------
@@ -166,30 +230,20 @@ def _infotaxis_weights(
     posterior: np.ndarray,
     candidate_indices: np.ndarray,
     grid: np.ndarray,
+    local_mass_grid: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Normalised expected information gain for each candidate cell.
-
-    Fix 1: local_mass computed against the FULL grid posterior, not just
-    candidate_indices. Gives meaningful entropy variance even on a flat prior.
-
-    Fix 2: normalised to [0, 1] so the signal competes fairly with
-    travel_weight regardless of posterior scale.
-    """
-    candidate_pts = grid[candidate_indices]  # (n, 2)
-
-    # Distances from each candidate to every point on the FULL grid: (n, N)
-    diff  = candidate_pts[:, np.newaxis, :] - grid[np.newaxis, :, :]
-    dists = np.hypot(diff[:, :, 0], diff[:, :, 1])
-
-    # local_mass[i] = total posterior mass in detection footprint of candidate i
-    in_window  = dists <= DETECTION_RADIUS
-    local_mass = (posterior[np.newaxis, :] * in_window).sum(axis=1)  # (n,)
+    """Normalised expected information gain for each candidate cell."""
+    if local_mass_grid is None:
+        local_mass_grid = _disk_local_mass_grid(posterior, grid)
+    if local_mass_grid is None:
+        local_mass = _chunked_local_mass(posterior, candidate_indices, grid)
+    else:
+        local_mass = local_mass_grid[candidate_indices]
 
     # Binary entropy H(p)
     p         = np.clip(local_mass, EPS, 1.0 - EPS)
     info_gain = -p * np.log(p) - (1.0 - p) * np.log(1.0 - p)
 
-    # Normalise to [0, 1]
     max_gain = float(info_gain.max())
     if max_gain > EPS:
         info_gain = info_gain / max_gain
@@ -289,6 +343,7 @@ class InfotaxisSearch(BaseSearchAlgorithm):
         grid      = np.asarray(grid,      dtype=float)
         posterior = np.asarray(posterior, dtype=float)
         posterior = self._update_posterior(mission, grid, posterior)
+        local_mass_grid = _disk_local_mass_grid(posterior, grid)
 
         # Full live grid — candidate set for depleted drones
         live_indices = np.where(posterior > EPS * 100)[0]
@@ -315,7 +370,7 @@ class InfotaxisSearch(BaseSearchAlgorithm):
                 dtype=float,
             )
 
-            info_gain      = _infotaxis_weights(posterior, candidate_indices, grid)
+            info_gain      = _infotaxis_weights(posterior, candidate_indices, grid, local_mass_grid)
             travel_weight  = self._travel_weights(candidate_points, pos, _getm(mission, "bounds", {}))
             overlap_weight = self._overlap_weights(candidate_points, planned_points)
 

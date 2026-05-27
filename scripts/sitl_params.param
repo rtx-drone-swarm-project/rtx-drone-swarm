@@ -2,7 +2,7 @@ DISARM_DELAY 0
 LOG_BACKEND_TYPE 0
 LOG_DISARMED 0
 
-BATT_MONITOR = 0
+BATT_MONITOR 0
 
 # Navigation speed/accel — prevents WPNAV_SPEED defaulting to 0
 WPNAV_SPEED 1000
