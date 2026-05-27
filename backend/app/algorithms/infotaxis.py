@@ -3,7 +3,33 @@
 Infotaxis scores by expected information gain
 (binary entropy of local detection probability).
 
-Built off current PMV implementation"""
+Built off current PMV implementation.
+
+Changes from PMV
+----------------
+1. Scoring function — info_gain replaces probability_weight.
+   H(p_detect) where p_detect uses the FULL grid posterior (not just
+   partition candidates) so the signal is meaningful even on a flat prior.
+
+2. Normalised info_gain — divided by its own max each tick so entropy signal
+   spans [0, 1] and is not drowned by travel_weight on flat priors.
+
+3. Soft overlap avoidance — exponential decay penalty (floor 0.3) instead of
+   hard zero, so frontier cells adjacent to another drone's waypoint are
+   discouraged but not blocked. Prevents zig-zagging.
+
+4. No partitioning hard walls — depleted drones search the full live grid.
+
+5. No frozen drones — info_gain never collapses to zero while unsearched
+   cells remain.
+
+6. Global hotspot logic removed — infotaxis drives to the frontier organically.
+
+No heading term — heading bias contradicts infotaxis logic. Infotaxis ignores
+current direction and goes wherever reduces uncertainty most. The small
+direction changes infotaxis makes tick-to-tick are correct behaviour, not
+noise — they reflect the frontier shifting as the posterior updates.
+"""
 
 from __future__ import annotations
 
@@ -25,7 +51,7 @@ from app.algorithms.priors import build_prior, normalize_probability
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
-# Constants — identical to pmv.py so results are directly comparable
+# Constants — identical to pmv.py
 # --------------------------------------------------------------------------
 DETECTION_PROB                  = 0.9
 DIFFUSE_INTERVAL_S              = 10
@@ -44,6 +70,10 @@ _MOVING_PROFILES = {
 }
 
 
+# --------------------------------------------------------------------------
+# Mission dict helpers
+# --------------------------------------------------------------------------
+
 def _getm(mission, key: str, default=None):
     if isinstance(mission, dict):
         return mission.get(key, default)
@@ -56,6 +86,10 @@ def _setm(mission, key: str, value) -> None:
     else:
         setattr(mission, key, value)
 
+
+# --------------------------------------------------------------------------
+# Posterior helpers — copied from pmv.py
+# --------------------------------------------------------------------------
 
 def _scanned_indices(grid: np.ndarray, drones: list[dict]) -> np.ndarray:
     scanned: set[int] = set()
@@ -78,7 +112,6 @@ def _scanned_indices(grid: np.ndarray, drones: list[dict]) -> np.ndarray:
 
 
 def _moving_profile_sigma(profile: str, bounds: dict) -> float:
-    """Bounds-aware diffusion sigma — identical to pmv.py."""
     lat_span = float(bounds.get("max_lat", 0.0) - bounds.get("min_lat", 0.0))
     lon_span = float(bounds.get("max_lon", 0.0) - bounds.get("min_lon", 0.0))
     diag = math.hypot(lat_span, lon_span)
@@ -113,7 +146,9 @@ def _convolve_axis(matrix: np.ndarray, kernel: np.ndarray, axis: int) -> np.ndar
         [(pad, pad), (0, 0)] if axis == 0 else [(0, 0), (pad, pad)],
         mode="edge",
     )
-    return np.apply_along_axis(lambda row: np.convolve(row, kernel, mode="valid"), axis, padded)
+    return np.apply_along_axis(
+        lambda row: np.convolve(row, kernel, mode="valid"), axis, padded
+    )
 
 
 def _diffuse_probability(
@@ -159,41 +194,34 @@ def _infotaxis_weights(
     candidate_indices: np.ndarray,
     grid: np.ndarray,
 ) -> np.ndarray:
-    """Expected information gain for each candidate cell — fully vectorised.
+    """Normalised expected information gain for each candidate cell.
 
-    For each candidate point c, p_detect is the total posterior mass inside
-    the detection footprint centred on c.  The expected entropy reduction from
-    visiting c is approximated by the binary entropy H(p_detect):
+    Fix 1: local_mass computed against the FULL grid posterior, not just
+    candidate_indices. Gives meaningful entropy variance even on a flat prior.
 
-        H(p) = -p·log(p) - (1-p)·log(1-p)
-
-    This peaks at p=0.5 (maximum uncertainty — most to learn) and falls
-    toward zero at p≈0 (already ruled out) and p≈1 (already obvious).
-
-    The result drives drones toward the *exploration frontier*: the boundary
-    between well-swept and unsearched regions, rather than straight to the
-    posterior peak as PMV does.
-
-    Complexity: O(n²) memory for the pairwise distance matrix, but no Python
-    loop — the entire computation is in numpy, which is typically 50-100x
-    faster than the equivalent loop for partition sizes seen in practice.
+    Fix 2: normalised to [0, 1] so the signal competes fairly with
+    travel_weight regardless of posterior scale.
     """
-    pts = grid[candidate_indices]           # (n, 2)
-    p_local = posterior[candidate_indices]  # (n,)
+    candidate_pts = grid[candidate_indices]  # (n, 2)
 
-    # Pairwise distances between all candidate points: (n, n)
-    diff  = pts[:, np.newaxis, :] - pts[np.newaxis, :, :]  # (n, n, 2)
-    dists = np.hypot(diff[:, :, 0], diff[:, :, 1])         # (n, n)
+    # Distances from each candidate to every point on the FULL grid: (n, N)
+    diff  = candidate_pts[:, np.newaxis, :] - grid[np.newaxis, :, :]
+    dists = np.hypot(diff[:, :, 0], diff[:, :, 1])
 
-    # in_window[i, j] = True if candidate j is within detection radius of i
-    in_window = dists <= DETECTION_RADIUS                   # (n, n) bool
+    # local_mass[i] = total posterior mass in detection footprint of candidate i
+    in_window  = dists <= DETECTION_RADIUS
+    local_mass = (posterior[np.newaxis, :] * in_window).sum(axis=1)  # (n,)
 
-    # local_mass[i] = sum of posterior over all candidates in footprint of i
-    local_mass = (p_local[np.newaxis, :] * in_window).sum(axis=1)  # (n,)
+    # Binary entropy H(p)
+    p         = np.clip(local_mass, EPS, 1.0 - EPS)
+    info_gain = -p * np.log(p) - (1.0 - p) * np.log(1.0 - p)
 
-    # Binary entropy H(p) — vectorised, safe at boundaries
-    p = np.clip(local_mass, EPS, 1.0 - EPS)
-    return -p * np.log(p) - (1.0 - p) * np.log(1.0 - p)
+    # Normalise to [0, 1]
+    max_gain = float(info_gain.max())
+    if max_gain > EPS:
+        info_gain = info_gain / max_gain
+
+    return info_gain
 
 
 # --------------------------------------------------------------------------
@@ -203,29 +231,25 @@ def _infotaxis_weights(
 class InfotaxisSearch(BaseSearchAlgorithm):
     """Infotaxis UAV swarm search.
 
-    Identical to PMVSearchAlgorithm except waypoint scoring uses expected
-    information gain (binary entropy of local detection probability) instead
-    of raw posterior probability mass.
+    Scoring:
+        score = info_gain * overlap_weight * travel_weight
 
-    Scoring comparison
-    ------------------
-    PMV:       score = probability_weight * overlap_weight * travel_weight
-    Infotaxis: score = info_gain          * overlap_weight * travel_weight
-
-    Where info_gain = H(p_detect) = binary entropy of the posterior mass
-    inside the detection radius at each candidate cell.
+    info_gain is the normalised binary entropy of local detection probability,
+    computed against the full grid so the signal is strong even on a flat prior.
+    No heading term — direction changes are driven purely by the information
+    frontier, which is the correct infotaxis behaviour.
     """
 
-    algorithm_key  = "infotaxis"
-    display_name   = "Infotaxis"
-    description    = (
+    algorithm_key = "infotaxis"
+    display_name  = "Infotaxis"
+    description   = (
         "Expected information gain waypoint selection over a Bayesian posterior. "
         "Drives drones toward the uncertainty frontier rather than the probability peak."
     )
-    display_order  = 60
+    display_order = 60
 
     # ------------------------------------------------------------------
-    # initialize — identical to PMVSearchAlgorithm
+    # initialize
     # ------------------------------------------------------------------
 
     def initialize(self, mission) -> None:
@@ -240,14 +264,10 @@ class InfotaxisSearch(BaseSearchAlgorithm):
         else:
             dense_grid = np.asarray(dense_grid, dtype=float)
 
-        k = len(drones)
-        seeds = _partition_seeds(
-            bounds,
-            k,
-            lloyd_iters=_SEED_LLOYD_ITERS,
-            dense_grid=dense_grid,
-        )
+        k      = len(drones)
+        seeds  = _partition_seeds(bounds, k, lloyd_iters=_SEED_LLOYD_ITERS, dense_grid=dense_grid)
         labels = _voronoi_assign(dense_grid, seeds)
+
         drone_positions = np.array(
             [[float(d.get("lat", 0.0)), float(d.get("lon", 0.0))] for d in drones],
             dtype=float,
@@ -256,13 +276,12 @@ class InfotaxisSearch(BaseSearchAlgorithm):
 
         drone_cells: dict[str, np.ndarray] = {}
         for drone, seed_idx in zip(drones, drone_to_seed):
-            drone_id = str(drone["id"])
-            cell_indices = np.where(labels == seed_idx)[0]
-            drone_cells[drone_id] = cell_indices
+            drone_id              = str(drone["id"])
+            drone_cells[drone_id] = np.where(labels == seed_idx)[0]
 
-        profile = str(_getm(mission, "scenario_profile", "uniform_random") or "uniform_random")
+        profile         = str(_getm(mission, "scenario_profile", "uniform_random") or "uniform_random")
         scenario_params = _getm(mission, "scenario_params", None)
-        posterior = build_prior(bounds, dense_grid, profile, scenario_params)
+        posterior       = build_prior(bounds, dense_grid, profile, scenario_params)
 
         _setm(mission, "itx_grid",           dense_grid)
         _setm(mission, "itx_P",              posterior)
@@ -298,8 +317,7 @@ class InfotaxisSearch(BaseSearchAlgorithm):
         posterior = np.asarray(posterior, dtype=float)
         posterior = self._update_posterior(mission, grid, posterior)
 
-        # All cells with any remaining posterior mass — used as the
-        # cross-partition candidate set for depleted drones.
+        # Full live grid — candidate set for depleted drones
         live_indices = np.where(posterior > EPS * 100)[0]
 
         waypoints: Dict[str, Tuple[float, float]] = {}
@@ -311,14 +329,9 @@ class InfotaxisSearch(BaseSearchAlgorithm):
             if len(cell_indices) == 0:
                 continue
 
-            # If the drone's partition is depleted, roam the full live grid.
-            # This prevents freezing and lets the drone contribute to wherever
-            # the information frontier currently is — across partition boundaries.
-            cell_mass = float(posterior[cell_indices].sum())
-            if cell_mass <= EPS:
-                candidate_indices = live_indices
-            else:
-                candidate_indices = cell_indices
+            # Depleted partition → roam full live grid (no freezing)
+            cell_mass         = float(posterior[cell_indices].sum())
+            candidate_indices = live_indices if cell_mass <= EPS else cell_indices
 
             if len(candidate_indices) == 0:
                 continue
@@ -329,42 +342,13 @@ class InfotaxisSearch(BaseSearchAlgorithm):
                 dtype=float,
             )
 
-            travel_weight  = self._travel_weights(
-                candidate_points, pos, _getm(mission, "bounds", {})
-            )
-            overlap_weight = self._overlap_weights(candidate_points, planned_points)
             info_gain      = _infotaxis_weights(posterior, candidate_indices, grid)
+            travel_weight  = self._travel_weights(candidate_points, pos, _getm(mission, "bounds", {}))
+            overlap_weight = self._overlap_weights(candidate_points, planned_points)
 
-            # ---------------------------------------------------------
-            # NEW: HEADING ALIGNMENT (FORWARD BIAS)
-            # ---------------------------------------------------------
-            # 1. Get the drone's current heading in degrees (0 = North, 90 = East)
-            # Check what key your telemetry uses ('hdg' or 'heading')
-            hdg_deg = float(drone.get("hdg", drone.get("heading", 0.0)))
-            hdg_rad = math.radians(hdg_deg)
-            
-            # 2. Convert heading to a 2D directional vector [dLat, dLon]
-            # North is +Lat (cos), East is +Lon (sin)
-            drone_vec = np.array([math.cos(hdg_rad), math.sin(hdg_rad)])
-            
-            # 3. Calculate vectors from the drone to all candidate points
-            cand_vecs = candidate_points - pos
-            cand_dists = np.linalg.norm(cand_vecs, axis=1, keepdims=True)
-            
-            # Avoid divide-by-zero for points exactly where the drone is
-            safe_dists = np.where(cand_dists == 0, EPS, cand_dists)
-            cand_vecs_normalized = cand_vecs / safe_dists
-            
-            # 4. Dot product gives alignment: 1.0 (ahead), 0.0 (90 deg turn), -1.0 (behind)
-            alignment = np.dot(cand_vecs_normalized, drone_vec)
-            
-            # 5. Scale from [-1, 1] to a weight multiplier [0.1, 1.0]
-            # This makes forward points worth 100%, and backward points worth only 10%
-            heading_weight = np.clip((alignment + 1.0) / 2.0, 0.1, 1.0)
+            scores = info_gain * overlap_weight * travel_weight
 
-            scores = info_gain * overlap_weight * travel_weight * heading_weight
-
-            # If overlap avoidance zeroes everything out, relax it.
+            # Fallback: relax overlap if it suppressed everything
             if float(scores.max(initial=0.0)) <= EPS:
                 scores = info_gain * travel_weight
 
@@ -375,9 +359,11 @@ class InfotaxisSearch(BaseSearchAlgorithm):
             planned_points.append(waypoint)
 
         _setm(mission, "itx_P", posterior)
-        
         return waypoints
 
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def _needs_initialize(self, mission, free_drones: list[dict]) -> bool:
         if _getm(mission, "itx_P") is None or _getm(mission, "itx_grid") is None:
@@ -397,17 +383,15 @@ class InfotaxisSearch(BaseSearchAlgorithm):
             updated[scanned] *= (1.0 - DETECTION_PROB)
             updated = normalize_probability(updated)
 
-        profile = str(
-            _getm(mission, "itx_profile",
-                  _getm(mission, "scenario_profile", "uniform_random"))
-        )
+        profile      = str(_getm(mission, "itx_profile",
+                                 _getm(mission, "scenario_profile", "uniform_random")))
         elapsed      = int(_getm(mission, "elapsed_seconds", 0) or 0)
         last_diffuse = int(_getm(mission, "itx_last_diffuse_t", elapsed) or 0)
 
         if profile in _MOVING_PROFILES and elapsed - last_diffuse >= DIFFUSE_INTERVAL_S:
-            bounds  = _getm(mission, "bounds", {})
-            sigma   = _moving_profile_sigma(profile, bounds)
-            updated = _diffuse_probability(updated, grid, bounds, sigma)
+            bounds   = _getm(mission, "bounds", {})
+            sigma    = _moving_profile_sigma(profile, bounds)
+            updated  = _diffuse_probability(updated, grid, bounds, sigma)
             _setm(mission, "itx_last_diffuse_t", elapsed)
 
         return normalize_probability(updated)
@@ -417,12 +401,20 @@ class InfotaxisSearch(BaseSearchAlgorithm):
         candidate_points: np.ndarray,
         planned_points: list[tuple[float, float]],
     ) -> np.ndarray:
+        """Soft exponential overlap penalty — floor at 0.3, not hard zero.
+
+        Hard zeroing blocked frontier cells adjacent to another drone's planned
+        waypoint, pushing drones back toward explored territory. Exponential
+        decay discourages clustering without blocking the frontier.
+        """
         if not planned_points:
             return np.ones(len(candidate_points), dtype=float)
-        planned  = np.asarray(planned_points, dtype=float)
-        distances = np.linalg.norm(candidate_points[:, np.newaxis] - planned, axis=2)
-        sensor_overlap = (distances <= DETECTION_RADIUS).any(axis=1).astype(float)
-        return 1.0 - sensor_overlap
+        planned   = np.asarray(planned_points, dtype=float)
+        distances = np.linalg.norm(
+            candidate_points[:, np.newaxis] - planned, axis=2
+        ).min(axis=1)
+        penalty = np.exp(-distances / (DETECTION_RADIUS * 2.0))
+        return 1.0 - 0.7 * penalty
 
     def _travel_weights(
         self,
@@ -430,9 +422,9 @@ class InfotaxisSearch(BaseSearchAlgorithm):
         drone_position: np.ndarray,
         bounds: dict,
     ) -> np.ndarray:
-        travel_cost = np.linalg.norm(candidate_points - drone_position, axis=1)
-        lat_span = float(bounds.get("max_lat", 0.0) - bounds.get("min_lat", 0.0))
-        lon_span = float(bounds.get("max_lon", 0.0) - bounds.get("min_lon", 0.0))
+        travel_cost     = np.linalg.norm(candidate_points - drone_position, axis=1)
+        lat_span        = float(bounds.get("max_lat", 0.0) - bounds.get("min_lat", 0.0))
+        lon_span        = float(bounds.get("max_lon", 0.0) - bounds.get("min_lon", 0.0))
         adaptive_lambda = max(LAMBDA_DEG, math.hypot(lat_span, lon_span) * 0.35)
         return TRAVEL_WEIGHT_FLOOR + (1.0 - TRAVEL_WEIGHT_FLOOR) * np.exp(
             -travel_cost / max(adaptive_lambda, EPS)
