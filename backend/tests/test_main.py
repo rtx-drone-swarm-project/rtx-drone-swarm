@@ -1752,6 +1752,126 @@ def test_dispatch_drone_fails_when_arm_never_reflects_in_state():
     assert fake_drone.goto_called is False
 
 
+def test_dispatch_drone_airborne_restart_skips_takeoff_and_sends_goto():
+    class FakeDrone:
+        def __init__(self):
+            self.sysid = 7
+            self.state = {"mode": "GUIDED", "armed": True, "rel_alt": 27.5}
+            self.takeoff_called = False
+            self.speed = None
+            self.goto_args = None
+            self.mode_map = {
+                "GUIDED": 4,
+                "LOITER": 5,
+                "LAND": 9,
+                "RTL": 6,
+            }
+
+        def takeoff(self, _alt):
+            self.takeoff_called = True
+
+        def set_speed(self, speed):
+            self.speed = speed
+
+        def goto(self, lat, lon, alt):
+            self.goto_args = (lat, lon, alt)
+
+        def get_state(self):
+            return self.state
+
+        def set_mode(self, mode_name):
+            if mode_name not in self.mode_map:
+                raise ValueError(f"Mode {mode_name} not supported")
+
+            self.state["mode"] = self.mode_map[mode_name]
+
+        def is_mode(self, mode_name):
+            if mode_name not in self.mode_map:
+                raise ValueError(f"Mode {mode_name} not supported")
+
+            return self.get_state()["mode"] == self.mode_map[mode_name]
+
+    bridge = sitl_module.SITLTelemetryBridge()
+    fake_drone = FakeDrone()
+    fake_drone.set_mode("GUIDED")
+    bridge.swarm.drones = [fake_drone]
+
+    result = bridge.dispatch_drone(sysid=7, lat=34.5, lon=-117.5, alt=30.0, drone_id="drone-7")
+
+    assert result["success"] is True
+    assert fake_drone.takeoff_called is False
+    assert fake_drone.speed == sitl_module.SITL_DRONE_SPEED_MS
+    assert fake_drone.goto_args == (34.5, -117.5, 30.0)
+
+
+def test_dispatch_drone_new_takeoff_waits_for_cruise_altitude_before_goto():
+    class FakeDrone:
+        def __init__(self):
+            self.sysid = 7
+            self.state = {"mode": "GUIDED", "armed": False, "rel_alt": 0.0}
+            self.takeoff_called = False
+            self.goto_called = False
+            self.mode_map = {
+                "GUIDED": 4,
+                "LOITER": 5,
+                "LAND": 9,
+                "RTL": 6,
+            }
+
+        def arm(self):
+            self.state["armed"] = True
+
+        def takeoff(self, _alt):
+            self.takeoff_called = True
+            self.state["rel_alt"] = 27.0
+
+        def set_speed(self, _speed):
+            pass
+
+        def goto(self, _lat, _lon, _alt):
+            self.goto_called = True
+
+        def get_state(self):
+            return self.state
+
+        def set_mode(self, mode_name):
+            if mode_name not in self.mode_map:
+                raise ValueError(f"Mode {mode_name} not supported")
+
+            self.state["mode"] = self.mode_map[mode_name]
+
+        def is_mode(self, mode_name):
+            if mode_name not in self.mode_map:
+                raise ValueError(f"Mode {mode_name} not supported")
+
+            return self.get_state()["mode"] == self.mode_map[mode_name]
+
+    bridge = sitl_module.SITLTelemetryBridge()
+    fake_drone = FakeDrone()
+    fake_drone.set_mode("GUIDED")
+    bridge.swarm.drones = [fake_drone]
+    wait_calls = []
+
+    original_wait = sitl_module._wait_for_condition
+
+    def fake_wait(predicate, timeout, interval=0.25):
+        del interval
+        wait_calls.append(timeout)
+        return predicate()
+
+    sitl_module._wait_for_condition = fake_wait
+    try:
+        result = bridge.dispatch_drone(sysid=7, lat=34.5, lon=-117.5, alt=30.0, drone_id="drone-7")
+    finally:
+        sitl_module._wait_for_condition = original_wait
+
+    assert result["success"] is False
+    assert "cruise goto altitude" in result["message"]
+    assert fake_drone.takeoff_called is True
+    assert fake_drone.goto_called is False
+    assert wait_calls[-1] == 45.0
+
+
 def test_drone_eof_handler_marks_connection_disconnected():
     class FakePort:
         def __init__(self):
@@ -1851,6 +1971,32 @@ def test_sweep_live_goto_prefers_algorithm_waypoint_over_startup_target():
     mission = create_test_mission(
         drones=[Drone(id="drone-1", sysid=1, lat=34.0, lon=-117.0, alt=20.0, target_lat=34.9, target_lon=-117.9)],
         algorithm="sweep",
+    )
+    mission.elapsed_seconds = 1
+
+    try:
+        simulation_module._send_live_drone_gotos(mission, {"drone-1"}, {"drone-1": (34.2, -117.2)})
+    finally:
+        sitl_bridge.get_states_by_sysid = original_get_states
+        sitl_bridge.is_dispatching = original_is_dispatching
+        sitl_bridge.send_goto = original_send_goto
+
+    assert sent == [(1, 34.2, -117.2, simulation_module.DEFAULT_DISPATCH_ALT)]
+
+
+def test_live_goto_prefers_algorithm_waypoint_over_startup_target_for_pmv():
+    original_get_states = sitl_bridge.get_states_by_sysid
+    original_is_dispatching = sitl_bridge.is_dispatching
+    original_send_goto = sitl_bridge.send_goto
+    sent = []
+
+    sitl_bridge.get_states_by_sysid = lambda: {1: {"armed": True, "alt": 20.0}}
+    sitl_bridge.is_dispatching = lambda _sysid: False
+    sitl_bridge.send_goto = lambda sysid, lat, lon, alt: sent.append((sysid, lat, lon, alt))
+
+    mission = create_test_mission(
+        drones=[Drone(id="drone-1", sysid=1, lat=34.0, lon=-117.0, alt=20.0, target_lat=34.9, target_lon=-117.9)],
+        algorithm="pmv",
     )
     mission.elapsed_seconds = 1
 

@@ -226,7 +226,10 @@ class SITLTelemetryBridge:
                         "message": "Failed to enter GUIDED mode before arming",
                     }
             
-            # Check if it needs to arm and takeoff
+            # Check if it needs to arm and takeoff. On mission restarts an
+            # already-airborne drone may be slightly below the requested
+            # cruise altitude; in that case a NAV_TAKEOFF is rejected by
+            # ArduPilot, so let the position-target goto command climb it.
             if not drone.get_state()["armed"]:
                 drone.arm()
                 if not _wait_for_condition(
@@ -240,17 +243,18 @@ class SITLTelemetryBridge:
                         "message": "Arm command ACKed but drone never reported armed state",
                     }
                 
-            if drone.get_state()["rel_alt"] < alt - 2:
+            rel_alt = float(drone.get_state().get("rel_alt") or 0.0)
+            if rel_alt < min(alt - 2.0, 3.0):
                 drone.takeoff(alt)
                 if not _wait_for_condition(
-                    lambda: float(drone.get_state()["rel_alt"]) >= min(alt - 2.0, 3.0),
-                    timeout=20.0,
+                    lambda: float(drone.get_state()["rel_alt"]) >= alt - 2.0,
+                    timeout=45.0,
                 ):
                     return {
                         "drone_id": drone_id,
                         "sysid": sysid,
                         "success": False,
-                        "message": "Takeoff ACKed but drone never reached safe goto altitude",
+                        "message": "Takeoff ACKed but drone never reached cruise goto altitude",
                     }
 
             drone.set_speed(SITL_DRONE_SPEED_MS)

@@ -150,9 +150,8 @@ def _send_live_drone_gotos(mission: Mission, live_drone_ids: set[str], waypoint_
 
     Priority order is:
     1. actively assigned mission target
-    2. sweep search waypoint, when using the sweep algorithm
-    3. previously queued `target_lat` / `target_lon`
-    4. the latest free-search centroid
+    2. latest algorithm waypoint for free-search behavior
+    3. previously queued startup `target_lat` / `target_lon`
     """
     if not live_drone_ids:
         return
@@ -185,7 +184,7 @@ def _send_live_drone_gotos(mission: Mission, live_drone_ids: set[str], waypoint_
                 goto_sent += 1
                 continue
         waypoint = waypoint_map.get(drone["id"])
-        if mission.algorithm == "sweep" and waypoint is not None:
+        if waypoint is not None:
             sitl_bridge.send_goto(sysid, float(waypoint[0]), float(waypoint[1]), DEFAULT_DISPATCH_ALT)
             goto_sent += 1
             continue
