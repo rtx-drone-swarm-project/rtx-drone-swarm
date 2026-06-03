@@ -1838,6 +1838,34 @@ def test_send_live_drone_gotos_logs_skip_reasons_for_not_airborne(caplog):
     assert "blocked airborne=1" in caplog.text
 
 
+def test_send_live_drone_gotos_recovers_guided_mode_once_per_interval():
+    original_get_states = sitl_bridge.get_states_by_sysid
+    original_is_dispatching = sitl_bridge.is_dispatching
+    original_send_mode = sitl_bridge.send_mode
+    original_send_goto = sitl_bridge.send_goto
+    mode_requests = []
+
+    sitl_bridge.get_states_by_sysid = lambda: {1: {"armed": True, "alt": 20.0, "mode": "LOITER"}}
+    sitl_bridge.is_dispatching = lambda _sysid: False
+    sitl_bridge.send_mode = lambda sysid, mode: mode_requests.append((sysid, mode))
+    sitl_bridge.send_goto = lambda *_args, **_kwargs: None
+
+    mission = create_test_mission(
+        drones=[Drone(id="drone-1", sysid=1, lat=34.0, lon=-117.0, alt=20.0)],
+    )
+
+    try:
+        simulation_module._send_live_drone_gotos(mission, {"drone-1"}, {"drone-1": (34.2, -117.2)})
+        simulation_module._send_live_drone_gotos(mission, {"drone-1"}, {"drone-1": (34.2, -117.2)})
+    finally:
+        sitl_bridge.get_states_by_sysid = original_get_states
+        sitl_bridge.is_dispatching = original_is_dispatching
+        sitl_bridge.send_mode = original_send_mode
+        sitl_bridge.send_goto = original_send_goto
+
+    assert mode_requests == [(1, "GUIDED")]
+
+
 def test_sweep_live_goto_prefers_algorithm_waypoint_over_startup_target():
     original_get_states = sitl_bridge.get_states_by_sysid
     original_is_dispatching = sitl_bridge.is_dispatching
@@ -2446,11 +2474,13 @@ def test_algorithms_endpoint_lists_discovered_registry_metadata():
     algorithms = response.json()["algorithms"]
     by_key = {item["key"]: item for item in algorithms}
 
-    assert {"voronoi", "voronoi_aco", "vaco", "apf", "sweep", "pmv"}.issubset(by_key.keys())
+    assert {"voronoi", "voronoi_aco", "vaco", "apf", "sweep", "pmv", "infotaxis"}.issubset(by_key.keys())
     assert by_key["voronoi"]["label"] == "Voronoi (Lloyd's)"
     assert by_key["voronoi_aco"]["label"] == "Voronoi (ACO)"
     assert by_key["pmv"]["label"] == "PMV (Probability Map Voronoi)"
     assert by_key["pmv"]["class_name"] == "PMVSearchAlgorithm"
+    assert by_key["infotaxis"]["label"] == "Infotaxis"
+    assert by_key["infotaxis"]["class_name"] == "InfotaxisSearch"
     assert by_key["vaco"]["label"] == "VACO Hybrid (Optimized)"
     assert by_key["vaco"]["class_name"] == "VoronoiACOHybridCoverage"
 

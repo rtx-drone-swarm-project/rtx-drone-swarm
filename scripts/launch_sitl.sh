@@ -11,8 +11,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PARAM_FILE="${2:-$SCRIPT_DIR/sitl_params.param}"
 SITL_LOCATION="${SITL_LOCATION:-CMAC}"
-SITL_ENABLE_MAP="${SITL_ENABLE_MAP:-1}"
-SITL_ENABLE_MAVPROXY="${SITL_ENABLE_MAVPROXY:-1}"
+SITL_WIPE="${SITL_WIPE:-1}"
+SITL_ENABLE_MAP="${SITL_ENABLE_MAP:-0}"
+SITL_ENABLE_MAVPROXY="${SITL_ENABLE_MAVPROXY:-0}"
 SITL_MAVPROXY_CMD="${SITL_MAVPROXY_CMD:-}"
 
 
@@ -43,6 +44,10 @@ SIM_VEHICLE_ARGS=(
   --speedup 2
   --add-param-file "$PARAM_FILE"
 )
+
+if [[ "$SITL_WIPE" == "1" ]]; then
+  SIM_VEHICLE_ARGS+=(--wipe)
+fi
 
 if [[ "$SITL_ENABLE_MAP" == "1" ]]; then
   SIM_VEHICLE_ARGS+=(--map)
