@@ -35,6 +35,7 @@ services:
       - "${FRONTEND_PORT:-5173}:5173"   # Change in .env if 5173 is in use
     environment:
       - VITE_API_PORT=${BACKEND_PORT:-8000}   # Match backend host port from .env
+      - VITE_ALLOWED_HOSTS=${VITE_ALLOWED_HOSTS:-}
     depends_on:
       - backend
     restart: unless-stopped

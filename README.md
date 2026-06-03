@@ -103,6 +103,7 @@ To run without Docker, use the host-only path in [docs/SITL_QUICKSTART.md](docs/
 ## What You Should See
 
 - Frontend: `http://localhost:5173`
+- Dedicated Metrics page: `http://localhost:5173/metrics`
 - Backend health: `http://localhost:8000/health`
 - SITL telemetry status: `http://localhost:8000/sitl/status`
 
@@ -114,6 +115,7 @@ When SITL is connected correctly, `/sitl/status` should report `connected_count 
 - **Host-native backend** — if `.env` sets `SITL_HOST=sitl` (for Compose), override with `SITL_HOST=127.0.0.1` when running `uvicorn` on the host; see [Host SITL + host backend](docs/SITL_QUICKSTART.md#host-sitl--host-backend).
 - `scripts/launch_sitl.sh` remains the underlying SITL launcher, but Docker Compose now starts it in a dedicated `sitl` service.
 - Algorithm metrics history is stored locally in `backend/data/benchmarks.db`; the database file is gitignored, and CSV plus Markdown report exports are available from the Metrics panel. The backend keeps `/benchmark` routes for compatibility.
+- The dedicated Metrics page (`/metrics`) can launch paired runs across multiple scenario profiles with shared parameters, load persisted run history, import raw Metrics CSVs, and export combined CSVs or SVG charts.
 - Run Metrics headless (CLI sweeps, scripted scenarios, multi-scale studies) using `python -m app.benchmark_cli`
 - `docker compose up --build` builds the backend, frontend, and SITL images.
 - Use `docker compose up -d --build` if you want the app stack to keep running in the background.
