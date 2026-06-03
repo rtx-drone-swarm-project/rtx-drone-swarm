@@ -51,7 +51,7 @@ export default function TopBar({ progress = 0, title = "Swarm Control", showProg
         </div>
       ) : (
         <nav className="topbar-links" aria-label="Primary">
-          <a href="/">Home</a>
+          <a className="topbar-pill-link" href="/">Home</a>
         </nav>
       )}
     </header>
