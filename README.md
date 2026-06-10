@@ -6,10 +6,25 @@ RTX is a capstone prototype for coordinating a simulated multi-drone swarm in se
 
 This prototype demonstrates how a coordinated drone swarm could help search teams cover large areas faster, monitor vehicle state in real time, and evaluate mission behavior safely in simulation before field deployment.
 
+## Target Users
+
+The primary users are search-and-rescue operators, project evaluators, and drone-swarm researchers who need to configure a SAR mission, observe swarm behavior, and compare search strategies without deploying physical drones.
+
 **Stack**
 - ArduPilot SITL for simulated drones
 - FastAPI backend for mission control, telemetry, and dispatch
 - React + Leaflet frontend for mission planning and visualization
+
+## Implemented Features
+
+- Operator map console for drawing or entering a search area.
+- Optional hiker placement and target movement setup.
+- Optional probability-map region labeling and heatmap review.
+- Algorithm selection through backend-discovered search strategies.
+- Live mission telemetry over WebSockets, including drone state, trails, progress, and target-found updates.
+- ArduPilot SITL bridge for simulated drone telemetry and GUIDED-mode dispatch/goto commands.
+- Dedicated Metrics page for paired benchmark runs, scenario profiles, run history, CSV import/export, and report exports.
+- Docker Compose workflow for local frontend, backend, and SITL services.
 
 **Sponsor**
 - RTX
@@ -109,6 +124,10 @@ To run without Docker, use the host-only path in [docs/SITL_QUICKSTART.md](docs/
 
 When SITL is connected correctly, `/sitl/status` should report `connected_count > 0` and include live drone entries. If SITL is still booting, the backend will stay up and `last_connect_error` will explain the current connection failure.
 
+## Deployment Status
+
+The project is local-only for the final submission. It is not hosted publicly. The recommended runtime is Docker Compose on a machine with Docker and a local ArduPilot checkout configured through `.env`.
+
 ## Operational Notes
 
 - **Docker and host-native SITL share your host ArduPilot checkout** — Compose bind-mounts `ARDUPILOT_PATH`. The `sitl` container runs `waf configure` + `waf copter` on that tree; switching back to `./scripts/launch_sitl.sh` on the host usually requires `rm -f .lock-waf_*` and a host `./waf configure --board sitl && ./waf copter` first. See [docs/SITL_QUICKSTART.md](docs/SITL_QUICKSTART.md#troubleshooting).
@@ -130,6 +149,14 @@ When SITL is connected correctly, `/sitl/status` should report `connected_count 
 - `backend/` FastAPI mission, telemetry, and dispatch service
 - `scripts/` SITL swarm launch and command helpers
 - `docker-compose.yml` local app stack for frontend + backend + SITL
+
+## Known Issues and Future Work
+
+- Active mission state is stored in backend memory; restarting the backend clears active missions.
+- Target detection is simplified as radius-based proximity detection rather than real computer vision or sensor fusion.
+- The simulation does not fully model weather, battery limits, terrain, communication loss, or physical hardware failures.
+- The app is not yet deployed with authentication, role-based access, or multi-operator collaboration.
+- Future work includes persistent mission storage, richer benchmark time-series data, cloud/VPS deployment, hardware-in-the-loop testing, and physical drone validation.
 
 ## More Detail
 
