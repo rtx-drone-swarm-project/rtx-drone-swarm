@@ -210,10 +210,10 @@ def _send_live_drone_gotos(mission: Mission, live_drone_ids: set[str], waypoint_
         dlat = drone.get("lat", 0)
         dlon = drone.get("lon", 0)
         still_enroute = tlat is not None and tlon is not None and math.hypot(dlat - tlat, dlon - tlon) > 0.005
-        if still_enroute:
-            sitl_bridge.send_goto(sysid, tlat, tlon, DEFAULT_DISPATCH_ALT)
-            goto_sent += 1
-            continue
+        # if still_enroute:
+        #     sitl_bridge.send_goto(sysid, tlat, tlon, DEFAULT_DISPATCH_ALT)
+        #     goto_sent += 1
+        #     continue
         if waypoint is not None:
             sitl_bridge.send_goto(sysid, float(waypoint[0]), float(waypoint[1]), DEFAULT_DISPATCH_ALT)
             goto_sent += 1
